@@ -45,7 +45,12 @@ jobs:
             fi
             
             # 写入或更新运行端口环境变量
-            echo "PORT=${{ secrets.APP_PORT }}" > .env
+            touch .env
+            if grep -q "^PORT=" .env; then
+              sed -i "s/^PORT=.*/PORT=${{ secrets.APP_PORT }}/" .env
+            else
+              echo "PORT=${{ secrets.APP_PORT }}" >> .env
+            fi
             
             # 安装依赖
             npm install
