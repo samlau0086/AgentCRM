@@ -61,6 +61,6 @@ jobs:
             fi
             
             # 重启服务 (附带 --update-env 读取最新的 .env)
-            pm2 reload ${{ secrets.APP_NAME }} --update-env || pm2 start dist/server.cjs --name ${{ secrets.APP_NAME }} --update-env
+            pm2 reload "${{ secrets.APP_NAME }}" --update-env || pm2 start dist/server.cjs --name "${{ secrets.APP_NAME }}" --update-env
             # 如果使用 systemd: sudo systemctl restart your-service
             # 如果是普通的 docker-compose: docker-compose up -d --build
