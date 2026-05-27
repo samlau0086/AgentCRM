@@ -1,11 +1,27 @@
 import { useState, useEffect } from 'react';
 import { useLanguage } from '../i18n';
 import { useTheme } from '../theme';
-import { Sliders, Cpu, GitMerge, Check, Plus, Trash2 } from 'lucide-react';
+import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { cn } from '../Layout';
 import { ReceiveProfile, SendProfile, EmailMapping, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings } from '../services/emailSync';
 
 type Tab = 'general' | 'agents' | 'integrations';
+
+type LeadPlatform = {
+  id: string;
+  name: string;
+  desc: string;
+  defaultBaseUrl: string;
+  helpText: string;
+};
+
+type LeadPlatformConfig = {
+  enabled: boolean;
+  apiKey: string;
+  baseUrl: string;
+  notes: string;
+  updatedAt?: string;
+};
 
 const providers = [
   { id: 'openai', name: 'OpenAI' },
@@ -24,6 +40,16 @@ const embeddingsByProvider: Record<string, string[]> = {
   openai: ['text-embedding-3-small', 'text-embedding-3-large'],
   google: ['text-embedding-004']
 };
+
+const leadGenerationPlatforms: LeadPlatform[] = [
+  { id: 'outscraper', name: 'Outscraper', desc: 'Google Maps scraping', defaultBaseUrl: 'https://api.app.outscraper.com', helpText: 'Use an OutScraper API key with Google Maps Search or Places endpoints.' },
+  { id: 'apify', name: 'Apify', desc: 'Web scraping & automation', defaultBaseUrl: 'https://api.apify.com/v2', helpText: 'Use an Apify token to run actors for prospect discovery and enrichment.' },
+  { id: 'phantombuster', name: 'PhantomBuster', desc: 'Social media automation', defaultBaseUrl: 'https://api.phantombuster.com/api/v2', helpText: 'Use a PhantomBuster API key for social and LinkedIn-style automation workflows.' },
+  { id: 'scrap_io', name: 'Scrap.io', desc: 'B2B leads from Maps', defaultBaseUrl: 'https://api.scrap.io', helpText: 'Use Scrap.io credentials for local business lead extraction.' },
+  { id: 'hasdata', name: 'HasData', desc: 'Web extraction APIs', defaultBaseUrl: 'https://api.hasdata.com', helpText: 'Use a HasData API key for search, SERP, and web extraction jobs.' },
+  { id: 'decodo', name: 'Decodo', desc: 'Contact data discovery', defaultBaseUrl: 'https://api.decodo.com', helpText: 'Use Decodo credentials for data discovery and enrichment pipelines.' },
+  { id: 'clay_com', name: 'Clay.com', desc: 'Data enrichment workflows', defaultBaseUrl: 'https://api.clay.com', helpText: 'Use Clay API details for enrichment tables and outbound research workflows.' },
+];
 
 export default function Settings() {
   const { t, language, setLanguage } = useLanguage();
@@ -46,6 +72,14 @@ export default function Settings() {
   const [vectorStatus, setVectorStatus] = useState({ configured: false, status: 'Checking...', details: '' });
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [pushAlerts, setPushAlerts] = useState(true);
+  const [leadPlatformConfigs, setLeadPlatformConfigs] = useState<Record<string, LeadPlatformConfig>>({});
+  const [editingLeadPlatform, setEditingLeadPlatform] = useState<LeadPlatform | null>(null);
+  const [leadPlatformDraft, setLeadPlatformDraft] = useState<LeadPlatformConfig>({
+    enabled: false,
+    apiKey: '',
+    baseUrl: '',
+    notes: ''
+  });
 
   useEffect(() => {
     const savedAgentConfigs = localStorage.getItem('agent_configs');
@@ -57,6 +91,11 @@ export default function Settings() {
     setTimezone(localStorage.getItem('crm_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
     setEmailAlerts(localStorage.getItem('crm_email_alerts') !== 'false');
     setPushAlerts(localStorage.getItem('crm_push_alerts') !== 'false');
+    try {
+      setLeadPlatformConfigs(JSON.parse(localStorage.getItem('lead_platform_configs') || '{}'));
+    } catch (e) {
+      setLeadPlatformConfigs({});
+    }
     setReceiveProfiles(getReceiveProfiles());
     setSendProfiles(getSendProfiles());
     setEmailMappings(getEmailMappings());
@@ -78,6 +117,43 @@ export default function Settings() {
   useEffect(() => {
     localStorage.setItem('crm_push_alerts', String(pushAlerts));
   }, [pushAlerts]);
+
+  const saveLeadPlatformConfigs = (configs: Record<string, LeadPlatformConfig>) => {
+    setLeadPlatformConfigs(configs);
+    localStorage.setItem('lead_platform_configs', JSON.stringify(configs));
+  };
+
+  const openLeadPlatformModal = (platform: LeadPlatform) => {
+    const existing = leadPlatformConfigs[platform.id];
+    setEditingLeadPlatform(platform);
+    setLeadPlatformDraft({
+      enabled: existing?.enabled || false,
+      apiKey: existing?.apiKey || '',
+      baseUrl: existing?.baseUrl || platform.defaultBaseUrl,
+      notes: existing?.notes || '',
+      updatedAt: existing?.updatedAt,
+    });
+  };
+
+  const handleSaveLeadPlatform = () => {
+    if (!editingLeadPlatform) return;
+    saveLeadPlatformConfigs({
+      ...leadPlatformConfigs,
+      [editingLeadPlatform.id]: {
+        ...leadPlatformDraft,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+    setEditingLeadPlatform(null);
+  };
+
+  const handleClearLeadPlatform = () => {
+    if (!editingLeadPlatform) return;
+    const next = { ...leadPlatformConfigs };
+    delete next[editingLeadPlatform.id];
+    saveLeadPlatformConfigs(next);
+    setEditingLeadPlatform(null);
+  };
 
   const handleInitVector = async () => {
     try {
@@ -659,39 +735,162 @@ export default function Settings() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[
-                  { id: 'outscraper', name: 'Outscraper', desc: 'Google Maps scraping' },
-                  { id: 'apify', name: 'Apify', desc: 'Web scraping & automation' },
-                  { id: 'phantombuster', name: 'PhantomBuster', desc: 'Social media automation' },
-                  { id: 'scrap_io', name: 'Scrap.io', desc: 'B2B leads from Maps' },
-                  { id: 'hasdata', name: 'HasData', desc: 'Web extraction APIs' },
-                  { id: 'decodo', name: 'Decodo', desc: 'Contact data discovery' },
-                  { id: 'clay_com', name: 'Clay.com', desc: 'Data enrichment workflows' },
-                ].map(platform => (
-                  <div key={platform.id} className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-black/20 flex flex-col justify-between gap-3">
+                {leadGenerationPlatforms.map(platform => {
+                  const config = leadPlatformConfigs[platform.id];
+                  const isConfigured = Boolean(config?.apiKey);
+                  const isEnabled = Boolean(config?.enabled);
+
+                  return (
+                  <div key={platform.id} className={cn(
+                    "p-4 rounded-xl border bg-slate-50 dark:bg-black/20 flex flex-col justify-between gap-4 transition-colors",
+                    isEnabled
+                      ? "border-emerald-200 dark:border-emerald-500/30"
+                      : "border-slate-200 dark:border-slate-700"
+                  )}>
                     <div>
-                      <div className="flex justify-between items-start mb-1">
+                      <div className="flex justify-between items-start mb-2">
                         <h4 className="font-semibold text-sm text-slate-800 dark:text-slate-200">{platform.name}</h4>
-                        <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600"></span>
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-full text-[10px] font-semibold",
+                          isEnabled
+                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+                            : isConfigured
+                              ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"
+                              : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                        )}>
+                          {isEnabled ? "Enabled" : isConfigured ? "Saved" : "Not set"}
+                        </span>
                       </div>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400">{platform.desc}</p>
+                      <div className="mt-3 space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+                          <Link2 className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{config?.baseUrl || platform.defaultBaseUrl}</span>
+                        </div>
+                        {config?.updatedAt && (
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                            Updated {new Date(config.updatedAt).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
                     </div>
                     <button 
-                      onClick={() => {
-                        const key = prompt(`Enter API Key for ${platform.name}`);
-                        if (key) alert(`${platform.name} configured successfully.`);
-                      }}
+                      onClick={() => openLeadPlatformModal(platform)}
                       className="w-full text-center py-1.5 text-xs font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-300"
                     >
-                      Configure API
+                      {isConfigured ? "Edit Connection" : "Configure API"}
                     </button>
                   </div>
-                ))}
+                )})}
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {editingLeadPlatform && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6 dark:border-white/10">
+              <div>
+                <div className="flex items-center gap-2">
+                  <KeyRound className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                    Configure {editingLeadPlatform.name}
+                  </h3>
+                </div>
+                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                  {editingLeadPlatform.helpText}
+                </p>
+              </div>
+              <button
+                onClick={() => setEditingLeadPlatform(null)}
+                className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-white/5 dark:hover:text-slate-300"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-5 p-6">
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-black/20">
+                <div>
+                  <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Enable connection</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Allow Lead Generation Agent to use this platform.</p>
+                </div>
+                <button
+                  onClick={() => setLeadPlatformDraft({ ...leadPlatformDraft, enabled: !leadPlatformDraft.enabled })}
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors",
+                    leadPlatformDraft.enabled
+                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                  )}
+                >
+                  {leadPlatformDraft.enabled ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                  {leadPlatformDraft.enabled ? "Enabled" : "Disabled"}
+                </button>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">API Key</label>
+                <input
+                  type="password"
+                  value={leadPlatformDraft.apiKey}
+                  onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, apiKey: e.target.value })}
+                  placeholder={`Enter ${editingLeadPlatform.name} API key`}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Base URL</label>
+                <input
+                  value={leadPlatformDraft.baseUrl}
+                  onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, baseUrl: e.target.value })}
+                  placeholder={editingLeadPlatform.defaultBaseUrl}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Notes</label>
+                <textarea
+                  rows={3}
+                  value={leadPlatformDraft.notes}
+                  onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, notes: e.target.value })}
+                  placeholder="Optional: usage limits, workspace ID, actor name, target market, or routing notes."
+                  className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-between gap-3 border-t border-slate-200 bg-slate-50 p-6 dark:border-white/10 dark:bg-black/20">
+              <button
+                onClick={handleClearLeadPlatform}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+              >
+                Clear
+              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setEditingLeadPlatform(null)}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveLeadPlatform}
+                  disabled={!leadPlatformDraft.apiKey.trim() || !leadPlatformDraft.baseUrl.trim()}
+                  className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  Save Connection
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
