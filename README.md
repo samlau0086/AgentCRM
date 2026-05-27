@@ -23,7 +23,6 @@ You need a VPS with the following installed and configured:
 2. npm
 3. PM2 (`npm install -g pm2`) for process management
 4. Git
-5. The project repository already cloned at your designated `PROJECT_PATH`
 
 ### Setup Instructions
 
@@ -42,7 +41,7 @@ You need a VPS with the following installed and configured:
 
 Once the secrets are configured, any code push to the `main` branch will trigger the workflow. The Action will:
 1. SSH into your VPS.
-2. Navigate to your `PROJECT_PATH`.
+2. Navigate to your `PROJECT_PATH` (creates it and clones the repo if it doesn't exist).
 3. Pull the latest code from `main`.
 4. Update the `.env` file with the `APP_PORT`.
 5. Install npm dependencies (`npm install`).

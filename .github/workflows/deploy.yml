@@ -21,11 +21,24 @@ jobs:
           key: ${{ secrets.VPS_PRIVATE_KEY }}
           port: ${{ secrets.VPS_PORT }}
           script: |
+            # 尝试加载环境变量，确保 npm 和 pm2 命令在非交互式 SSH 中可用
+            if [ -f ~/.bashrc ]; then source ~/.bashrc; fi
+            if [ -f ~/.bash_profile ]; then source ~/.bash_profile; fi
+            if [ -f ~/.nvm/nvm.sh ]; then source ~/.nvm/nvm.sh; fi
+            
             # 使用 GitHub Secrets 中配置的部署路径
+            mkdir -p ${{ secrets.PROJECT_PATH }}
             cd ${{ secrets.PROJECT_PATH }}
             
-            # 拉取最新代码
-            git pull origin main
+            # 判断是否已经是 git 仓库，如果不是则自动克隆
+            if [ ! -d ".git" ]; then
+              echo "仓库不存在，正在克隆..."
+              git clone https://github.com/${{ github.repository }} .
+            else
+              echo "拉取最新代码..."
+              git reset --hard HEAD
+              git pull origin main
+            fi
             
             # 写入或更新运行端口环境变量
             echo "PORT=${{ secrets.APP_PORT }}" > .env
@@ -35,6 +48,13 @@ jobs:
             
             # 编译项目
             npm run build
+            
+            # 检查 pm2 是否可用，如果没有则尝试全局安装
+            export PATH=$PATH:~/.npm-global/bin:/usr/local/bin:/opt/node/bin
+            if ! command -v pm2 &> /dev/null; then
+              echo "pm2 未找到，正在尝试安装..."
+              npm install -g pm2
+            fi
             
             # 重启服务 (附带 --update-env 读取最新的 .env)
             pm2 reload ${{ secrets.APP_NAME }} --update-env || pm2 start dist/server.cjs --name ${{ secrets.APP_NAME }} --update-env
