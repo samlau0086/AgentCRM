@@ -14,6 +14,7 @@ import {
   Sparkles,
   Clock,
   Calendar,
+  Trash2,
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
@@ -33,8 +34,10 @@ import {
   UniversalComment,
   getCurrentUser,
   addOutboundMessage,
+  deleteInboxMessage,
 } from "../services/db";
 import { CommentSection } from "../components/CommentSection";
+import ConfirmModal from "../components/ConfirmModal";
 
 export default function Inbox() {
   const { t, language } = useLanguage();
@@ -170,6 +173,9 @@ export default function Inbox() {
     { name: string; size: number }[]
   >([]);
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     fetchClients()
@@ -363,6 +369,27 @@ export default function Inbox() {
     setMessages(getInboxMessages());
   };
 
+  const handleConfirmDeleteMessage = () => {
+    if (!deletingMessageId) return;
+
+    deleteInboxMessage(deletingMessageId);
+    const nextMessages = getInboxMessages();
+    setMessages(nextMessages);
+    setDrafts((prev) => {
+      const next = { ...prev };
+      delete next[deletingMessageId];
+      return next;
+    });
+
+    if (activeMessageId === deletingMessageId) {
+      setActiveMessageId(nextMessages[0]?.id || "");
+      setIsCommentsOpen(false);
+      setReplyText("");
+    }
+
+    setDeletingMessageId(null);
+  };
+
   const activeMessageIdRef = useRef(activeMessageId);
   useEffect(() => {
     activeMessageIdRef.current = activeMessageId;
@@ -554,9 +581,23 @@ export default function Inbox() {
                     </span>
                   )}
                 </div>
-                <span className="text-[10px] font-mono text-slate-400">
-                  {msg.date}
-                </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {msg.date}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeletingMessageId(msg.id);
+                    }}
+                    className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                    title="Delete message"
+                    aria-label="Delete message"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -868,6 +909,15 @@ export default function Inbox() {
                 </div>
               </div>
               <div className="flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setDeletingMessageId(activeMessage.id)}
+                  className="px-3 py-2 border rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm transition-colors bg-white border-slate-200 text-slate-600 hover:text-red-600 hover:bg-red-50 dark:bg-white/5 dark:border-white/10 dark:text-slate-300 dark:hover:text-red-400 dark:hover:bg-red-500/10"
+                  title="Delete message"
+                  aria-label="Delete message"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
                 <button
                   onClick={() => setIsCommentsOpen(!isCommentsOpen)}
                   className={cn(
@@ -1224,6 +1274,15 @@ export default function Inbox() {
           </div>
         )}
       </div>
+      <ConfirmModal
+        isOpen={deletingMessageId !== null}
+        title="Delete Message"
+        message="Are you sure you want to delete this message or email thread? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={handleConfirmDeleteMessage}
+        onCancel={() => setDeletingMessageId(null)}
+      />
     </div>
   );
 }

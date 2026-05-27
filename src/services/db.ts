@@ -711,6 +711,10 @@ export function saveInboxMessages(msgs: MessagePreview[]) {
   localStorage.setItem("crm_inbox", JSON.stringify(msgs));
 }
 
+export function deleteInboxMessage(id: string) {
+  saveInboxMessages(getInboxMessages().filter((msg) => msg.id !== id));
+}
+
 export function addDraftToThread(messageId: string, reply: string) {
   const msgs = getInboxMessages();
   const m = msgs.find((x) => x.id === messageId);
