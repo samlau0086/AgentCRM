@@ -35,14 +35,16 @@ jobs:
               echo "仓库不存在，正在初始化..."
               git init
               git remote add origin https://github.com/${{ github.repository }}
-              git fetch origin main
-              git reset --hard origin/main
-              git branch -M main
             else
               echo "拉取最新代码..."
-              git fetch origin main
-              git reset --hard origin/main
             fi
+
+            # Always point this deployment directory at the repository that triggered this workflow.
+            git remote set-url origin https://github.com/${{ github.repository }}
+            echo "Deploying repository: $(git remote get-url origin)"
+            git fetch origin main
+            git reset --hard origin/main
+            git branch -M main
             
             # 写入或更新运行端口环境变量
             # Remove stale untracked files from previous deployments, but keep runtime env.
