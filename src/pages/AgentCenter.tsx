@@ -25,7 +25,7 @@ import { cn } from "../Layout";
 import { getAgents, addAgent, updateAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, saveAgentApprovals } from "../services/db";
 
 export default function AgentCenter() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
@@ -66,6 +66,7 @@ export default function AgentCenter() {
         body: JSON.stringify({
           agentId,
           context: `Workflow Name: ${wfName}. The user has just requested a test run simulation on a mock Lead with a High intent score.`,
+          systemLanguage: language,
         }),
       });
       const data = await res.json();
