@@ -27,8 +27,8 @@ jobs:
             if [ -f ~/.nvm/nvm.sh ]; then source ~/.nvm/nvm.sh; fi
             
             # 使用 GitHub Secrets 中配置的部署路径
-            mkdir -p ${{ secrets.PROJECT_PATH }}
-            cd ${{ secrets.PROJECT_PATH }}
+            mkdir -p "${{ secrets.PROJECT_PATH }}"
+            cd "${{ secrets.PROJECT_PATH }}"
             
             # 判断是否已经是 git 仓库，如果不是则初始化克隆
             if [ ! -d ".git" ]; then
@@ -45,6 +45,9 @@ jobs:
             fi
             
             # 写入或更新运行端口环境变量
+            # Remove stale untracked files from previous deployments, but keep runtime env.
+            git clean -fd -e .env
+
             touch .env
             sed -i '/^PORT=/d' .env
             echo "PORT=${{ secrets.APP_PORT }}" >> .env
@@ -64,6 +67,12 @@ jobs:
             
             # 编译项目
             npm run build
+
+            # Fail fast if old browser-prompt UI is still present in the built bundle.
+            if grep -R "Enter API Key for\|prompt(" dist >/dev/null 2>&1; then
+              echo "Legacy prompt UI found in built assets. Aborting deploy."
+              exit 1
+            fi
             
             # 检查 pm2 是否可用，如果没有则尝试全局安装
             export PATH=$PATH:~/.npm-global/bin:/usr/local/bin:/opt/node/bin
@@ -73,6 +82,9 @@ jobs:
             fi
             
             # 重启服务 (附带 --update-env 读取最新的 .env)
-            pm2 reload "${{ secrets.APP_NAME }}" --update-env || pm2 start dist/server.cjs --name "${{ secrets.APP_NAME }}" --update-env
+            # Restart from the current PROJECT_PATH so PM2 cannot keep an old script path.
+            pm2 delete "${{ secrets.APP_NAME }}" || true
+            pm2 start "$(pwd)/dist/server.cjs" --name "${{ secrets.APP_NAME }}" --update-env
+            pm2 save
             # 如果使用 systemd: sudo systemctl restart your-service
             # 如果是普通的 docker-compose: docker-compose up -d --build
