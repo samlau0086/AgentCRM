@@ -774,11 +774,12 @@ export default function Settings() {
                         )}
                       </div>
                     </div>
-                    <button 
+                    <button
+                      type="button"
                       onClick={() => openLeadPlatformModal(platform)}
                       className="w-full text-center py-1.5 text-xs font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-300"
                     >
-                      {isConfigured ? "Edit Connection" : "Configure API"}
+                      {isConfigured ? "Edit Connection" : "Set Up Connection"}
                     </button>
                   </div>
                 )})}
