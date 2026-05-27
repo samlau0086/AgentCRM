@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, UploadCloud, Image as ImageIcon, Video, File, Trash2, Check, Search } from 'lucide-react';
 import { cn } from '../Layout';
+import ConfirmModal from './ConfirmModal';
 import { MediaItem, getMedias, addMedia, deleteMedia } from '../services/media';
 
 interface MediaLibraryModalProps {
@@ -13,6 +14,7 @@ export default function MediaLibraryModal({ onClose, onSelect }: MediaLibraryMod
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadMedias = async () => {
@@ -73,10 +75,17 @@ export default function MediaLibraryModal({ onClose, onSelect }: MediaLibraryMod
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDeleteClick = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    await deleteMedia(id);
-    setMedias(prev => prev.filter(m => m.id !== id));
+    setDeletingId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (deletingId) {
+      await deleteMedia(deletingId);
+      setMedias(prev => prev.filter(m => m.id !== deletingId));
+      setDeletingId(null);
+    }
   };
 
   const formatSize = (bytes: number) => {
@@ -212,7 +221,7 @@ export default function MediaLibraryModal({ onClose, onSelect }: MediaLibraryMod
                       <div className="flex justify-between items-center mt-1">
                         <p className="text-[10px] text-slate-500">{formatSize(media.size)}</p>
                         <button 
-                          onClick={(e) => handleDelete(e, media.id)}
+                          onClick={(e) => handleDeleteClick(e, media.id)}
                           className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -227,6 +236,13 @@ export default function MediaLibraryModal({ onClose, onSelect }: MediaLibraryMod
         </div>
 
       </div>
+      <ConfirmModal
+        isOpen={deletingId !== null}
+        title="Delete Media"
+        message="Are you sure you want to delete this media? This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeletingId(null)}
+      />
     </div>
   );
 }

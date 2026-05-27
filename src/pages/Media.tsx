@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { UploadCloud, Image as ImageIcon, Video, File, Trash2, Search, Film, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '../Layout';
 import { useLanguage } from '../i18n';
+import ConfirmModal from '../components/ConfirmModal';
 import { MediaItem, getMedias, addMedia, deleteMedia } from '../services/media';
 
 interface UploadTask {
@@ -22,6 +23,7 @@ export default function Media() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [isUploadDragging, setIsUploadDragging] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const loadMedias = async () => {
@@ -141,10 +143,17 @@ export default function Media() {
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDeleteClick = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    await deleteMedia(id);
-    setMedias(prev => prev.filter(m => m.id !== id));
+    setDeletingId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (deletingId) {
+      await deleteMedia(deletingId);
+      setMedias(prev => prev.filter(m => m.id !== deletingId));
+      setDeletingId(null);
+    }
   };
 
   const formatSize = (bytes: number) => {
@@ -240,7 +249,7 @@ export default function Media() {
                      <p className="text-sm font-medium text-slate-900 dark:text-white truncate" title={media.name}>{media.name}</p>
                      <div className="flex justify-between items-center mt-2">
                        <p className="text-xs text-slate-500">{formatSize(media.size)}</p>
-                       <button onClick={(e) => handleDelete(e, media.id)} className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-slate-100 dark:bg-white/5 rounded">
+                       <button onClick={(e) => handleDeleteClick(e, media.id)} className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-slate-100 dark:bg-white/5 rounded">
                          <Trash2 className="w-3.5 h-3.5" />
                        </button>
                      </div>
@@ -335,6 +344,14 @@ export default function Media() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={deletingId !== null}
+        title="Delete Media"
+        message="Are you sure you want to delete this media? This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeletingId(null)}
+      />
     </div>
   );
 }

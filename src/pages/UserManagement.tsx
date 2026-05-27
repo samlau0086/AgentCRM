@@ -3,6 +3,7 @@ import { Plus, Edit2, Trash2, Search, Shield, Save, X } from 'lucide-react';
 import { getSystemUsers, saveSystemUsers, SystemUser, getCurrentUser } from '../services/db';
 import { useLanguage } from '../i18n';
 import { cn } from '../Layout';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function UserManagement() {
   const { t } = useLanguage();
@@ -11,6 +12,7 @@ export default function UserManagement() {
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   useEffect(() => {
     setUsers(getSystemUsers());
@@ -37,9 +39,16 @@ export default function UserManagement() {
   };
 
   const handleDelete = (id: string) => {
-    const newUsers = users.filter(u => u.id !== id);
-    setUsers(newUsers);
-    saveSystemUsers(newUsers);
+    setDeletingUserId(id);
+  };
+
+  const confirmDelete = () => {
+    if (deletingUserId) {
+      const newUsers = users.filter(u => u.id !== deletingUserId);
+      setUsers(newUsers);
+      saveSystemUsers(newUsers);
+      setDeletingUserId(null);
+    }
   };
 
   const handleSave = (e: React.FormEvent) => {
@@ -270,6 +279,14 @@ export default function UserManagement() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={deletingUserId !== null}
+        title="Delete User"
+        message="Are you sure you want to delete this user? Their access to the system will be revoked."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeletingUserId(null)}
+      />
     </div>
   );
 }

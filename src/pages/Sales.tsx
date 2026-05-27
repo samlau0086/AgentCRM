@@ -3,6 +3,7 @@ import { Plus, Tag, Receipt, Search, Edit2, Trash2, X, Save, Check, Image as Ima
 import { cn } from '../Layout';
 import { useLanguage } from '../i18n';
 import MediaLibraryModal from '../components/MediaLibraryModal';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   Product, getProducts, addProduct, updateProduct, deleteProduct,
   Quote, getQuotes, addQuote, updateQuote, deleteQuote,
@@ -24,6 +25,10 @@ export default function Sales() {
 
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
   const [editingQuote, setEditingQuote] = useState<Partial<Quote> | null>(null);
+
+  // Deletion modals
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [deletingQuoteId, setDeletingQuoteId] = useState<string | null>(null);
 
   // Media picker modal
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
@@ -56,8 +61,15 @@ export default function Sales() {
   };
 
   const handleDeleteProduct = (id: string) => {
-    deleteProduct(id);
-    setProducts(getProducts());
+    setDeletingProductId(id);
+  };
+
+  const confirmDeleteProduct = () => {
+    if (deletingProductId) {
+      deleteProduct(deletingProductId);
+      setProducts(getProducts());
+      setDeletingProductId(null);
+    }
   };
 
   const handleSaveQuote = (e: React.FormEvent) => {
@@ -87,8 +99,15 @@ export default function Sales() {
   };
 
   const handleDeleteQuote = (id: string) => {
-    deleteQuote(id);
-    setQuotes(getQuotes());
+    setDeletingQuoteId(id);
+  };
+
+  const confirmDeleteQuote = () => {
+    if (deletingQuoteId) {
+      deleteQuote(deletingQuoteId);
+      setQuotes(getQuotes());
+      setDeletingQuoteId(null);
+    }
   };
 
   return (
@@ -538,6 +557,23 @@ export default function Sales() {
           }} 
         />
       )}
+
+      {/* Delete Confirmation Modals */}
+      <ConfirmModal
+        isOpen={deletingProductId !== null}
+        title="Delete Product"
+        message="Are you sure you want to delete this product? This action cannot be undone."
+        onConfirm={confirmDeleteProduct}
+        onCancel={() => setDeletingProductId(null)}
+      />
+
+      <ConfirmModal
+        isOpen={deletingQuoteId !== null}
+        title="Delete Quote"
+        message="Are you sure you want to delete this quote? This action cannot be undone."
+        onConfirm={confirmDeleteQuote}
+        onCancel={() => setDeletingQuoteId(null)}
+      />
     </div>
   );
 }

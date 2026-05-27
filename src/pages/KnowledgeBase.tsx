@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Book, FileText, Upload, MoreVertical, RefreshCw, X, File, Plus } from 'lucide-react';
 import { useLanguage } from '../i18n';
+import ConfirmModal from '../components/ConfirmModal';
 import { getDocuments, saveDocuments, deleteDocument, addDocument, Document } from '../services/db';
 
 export default function KnowledgeBase() {
@@ -15,6 +16,7 @@ export default function KnowledgeBase() {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -63,8 +65,15 @@ export default function KnowledgeBase() {
   };
 
   const handleDelete = (id: string) => {
-    deleteDocument(id);
-    setDocuments(getDocuments());
+    setDeletingDocumentId(id);
+  };
+
+  const confirmDelete = () => {
+    if (deletingDocumentId) {
+      deleteDocument(deletingDocumentId);
+      setDocuments(getDocuments());
+      setDeletingDocumentId(null);
+    }
   };
 
   const totalPieces = documents.reduce((sum, doc) => sum + doc.pieces, 0);
@@ -236,6 +245,14 @@ export default function KnowledgeBase() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={deletingDocumentId !== null}
+        title="Delete Document"
+        message="Are you sure you want to delete this document? This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeletingDocumentId(null)}
+      />
     </div>
   );
 }

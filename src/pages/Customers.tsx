@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Search, Filter, MoreHorizontal, ShieldAlert, Zap, Edit2, Trash2, X, Plus } from 'lucide-react';
 import { cn } from '../Layout';
 import { useLanguage } from '../i18n';
+import ConfirmModal from '../components/ConfirmModal';
 import { getCustomers, saveCustomers, deleteCustomer, addCustomer, updateCustomer, Customer, getPublicLeads, PublicLead, claimLead } from '../services/db';
 
 const CONTACT_TYPES = ['Mobile', 'Phone', 'Email', 'WhatsApp', 'Messenger', 'WeChat', 'Other'];
@@ -278,6 +279,7 @@ export default function Customers() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [deletingCustomerId, setDeletingCustomerId] = useState<string | null>(null);
 
   useEffect(() => {
     setPublicLeads(getPublicLeads());
@@ -303,8 +305,15 @@ export default function Customers() {
   };
 
   const handleDelete = (id: string) => {
-    deleteCustomer(id);
-    setCustomers(getCustomers());
+    setDeletingCustomerId(id);
+  };
+
+  const confirmDelete = () => {
+    if (deletingCustomerId) {
+      deleteCustomer(deletingCustomerId);
+      setCustomers(getCustomers());
+      setDeletingCustomerId(null);
+    }
   };
 
   const handleSaveCustomer = (newCustomer: Customer) => {
@@ -535,6 +544,14 @@ export default function Customers() {
             onClose={() => setIsModalOpen(false)} 
           />
         )}
+
+        <ConfirmModal
+          isOpen={deletingCustomerId !== null}
+          title="Delete Customer"
+          message="Are you sure you want to delete this customer? All their associated data will be removed. This action cannot be undone."
+          onConfirm={confirmDelete}
+          onCancel={() => setDeletingCustomerId(null)}
+        />
       </div>
     </div>
   );
