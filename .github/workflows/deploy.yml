@@ -56,7 +56,9 @@ jobs:
             
             if [ -n "${{ secrets.DATABASE_URL }}" ]; then
               sed -i '/^DATABASE_URL=/d' .env
+              sed -i '/^PG_VECTOR_URL=/d' .env
               echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+              echo "PG_VECTOR_URL=${{ secrets.DATABASE_URL }}" >> .env
             fi
             
             if [ -n "${{ secrets.JWT_SECRET }}" ]; then
