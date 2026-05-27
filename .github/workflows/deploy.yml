@@ -46,10 +46,17 @@ jobs:
             
             # 写入或更新运行端口环境变量
             touch .env
-            if grep -q "^PORT=" .env; then
-              sed -i "s/^PORT=.*/PORT=${{ secrets.APP_PORT }}/" .env
-            else
-              echo "PORT=${{ secrets.APP_PORT }}" >> .env
+            sed -i '/^PORT=/d' .env
+            echo "PORT=${{ secrets.APP_PORT }}" >> .env
+            
+            if [ -n "${{ secrets.DATABASE_URL }}" ]; then
+              sed -i '/^DATABASE_URL=/d' .env
+              echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+            fi
+            
+            if [ -n "${{ secrets.JWT_SECRET }}" ]; then
+              sed -i '/^JWT_SECRET=/d' .env
+              echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
             fi
             
             # 安装依赖

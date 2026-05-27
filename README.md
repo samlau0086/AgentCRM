@@ -36,6 +36,8 @@ You need a VPS with the following installed and configured:
 * `PROJECT_PATH`: The absolute path to your cloned repository on the VPS (e.g., `/var/www/my-crm`)
 * `APP_NAME`: The name you want to use for the PM2 process (e.g., `crm-app`)
 * `APP_PORT`: The port your app should run on under the VPS (e.g., `3005`)
+* `DATABASE_URL`: (Optional) Your PostgreSQL database connection string. If not provided, it will fallback to simulated in-memory storage.
+* `JWT_SECRET`: (Optional) Secret key for JWT encryption.
 
 ### How it Works
 
@@ -43,10 +45,10 @@ Once the secrets are configured, any code push to the `main` branch will trigger
 1. SSH into your VPS.
 2. Navigate to your `PROJECT_PATH` (creates it and clones the repo if it doesn't exist).
 3. Pull the latest code from `main`.
-4. Update the `.env` file with the `APP_PORT`.
+4. Update the `.env` file with the `APP_PORT`, `DATABASE_URL`, and `JWT_SECRET` (if configured in GitHub Secrets).
 5. Install npm dependencies (`npm install`).
 6. Build the full-stack project (`npm run build`).
 7. Reload or start the PM2 process for your application.
 
 ### Important Note about Database
-Make sure you have your database environment variables (`DATABASE_URL` or `PG_VECTOR_URL`) configured in your VPS environment or within the `.env` file at the deployment location.
+The deployment script now automatically reads `DATABASE_URL` and `JWT_SECRET` from your GitHub Secrets and sets them in the `.env` file on your VPS. Just ensure they are correctly added into your GitHub Secrets settings as described above.

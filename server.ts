@@ -68,11 +68,13 @@ async function initDB() {
 }
 initDB();
 
+let simulatedPassword = "password";
+
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
   if (!process.env.DATABASE_URL && !process.env.PG_VECTOR_URL) {
     // Fallback mode
-    if (password === "password") {
+    if (password === simulatedPassword) {
       const token = jwt.sign(
         { id: "usr_simulation", email, role: "admin" },
         JWT_SECRET,
@@ -178,6 +180,9 @@ app.put("/api/users/profile", authMiddleware, async (req: any, res: any) => {
   const userId = req.user.id;
 
   if (!process.env.DATABASE_URL && !process.env.PG_VECTOR_URL) {
+    if (password) {
+      simulatedPassword = password;
+    }
     return res.json({
       success: true,
       user: { id: userId, name, email, role: req.user.role, status: "Active" },
