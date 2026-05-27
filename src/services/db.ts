@@ -47,40 +47,7 @@ export function getPublicLeads(): PublicLead[] {
     if (data) return JSON.parse(data);
   } catch (e) {}
 
-  const initial: PublicLead[] = [
-    {
-      id: "lead_1",
-      name: "TechFlow Solutions",
-      contact: "Alice Chen",
-      source: "Outscraper",
-      scrapedAt: new Date().toISOString(),
-      contacts: [
-        { id: "1", type: "Email", value: "alice@techflow.example.com" },
-      ],
-      location: "San Francisco, CA",
-      description: "Tech startup looking for CRM solutions.",
-    },
-    {
-      id: "lead_2",
-      name: "Global Retail Group",
-      contact: "Bob Martin",
-      source: "Apify",
-      scrapedAt: new Date().toISOString(),
-      contacts: [
-        { id: "2", type: "LinkedIn", value: "linkedin.com/in/bob-martin" },
-      ],
-      industry: "Retail",
-      location: "London, UK",
-    },
-    {
-      id: "lead_3",
-      name: "Innovate Health",
-      contact: "Dr. Sarah Lee",
-      source: "PhantomBuster",
-      scrapedAt: new Date().toISOString(),
-      contacts: [{ id: "3", type: "Mobile", value: "+1-555-0199" }],
-    },
-  ];
+  const initial: PublicLead[] = [];
   savePublicLeads(initial);
   return initial;
 }
@@ -170,29 +137,7 @@ export function getDocuments(): Document[] {
     }
   } catch (e) {}
 
-  const initial = [
-    {
-      id: "1",
-      title: "Product Catalog Q3 2026",
-      pieces: 145,
-      status: "Active (Vectorized)",
-      date: "3 days ago",
-    },
-    {
-      id: "2",
-      title: "Standard Operating Procedures - Pricing",
-      pieces: 42,
-      status: "Active (Vectorized)",
-      date: "1 week ago",
-    },
-    {
-      id: "3",
-      title: "FAQ - Logistics and Shipping",
-      pieces: 18,
-      status: "Active (Vectorized)",
-      date: "2 weeks ago",
-    },
-  ];
+  const initial: Document[] = [];
   saveDocuments(initial);
   return initial;
 }
@@ -280,88 +225,7 @@ export function getCustomers(): Customer[] {
     }
   } catch (e) {}
 
-  // Initial mock data
-  const initial = [
-    {
-      id: "1",
-      name: "Acme Corp",
-      contact: "John Doe",
-      stage: "Negotiation",
-      score: 95,
-      risk: "Low",
-      contacts: [{ id: "1", type: "Email", value: "john@acme.com" }],
-      intent: "High",
-    },
-    {
-      id: "2",
-      name: "Global Tech",
-      contact: "Jane Smith",
-      stage: "Qualified",
-      score: 78,
-      risk: "Medium",
-      contacts: [
-        { id: "2", type: "Email", value: "jane@globaltech.com" },
-        { id: "w1", type: "WhatsApp", value: "15550000001" },
-      ],
-      intent: "Medium",
-    },
-    {
-      id: "3",
-      name: "Synergy Ltd",
-      contact: "Alice Brown",
-      stage: "Lead",
-      score: 45,
-      risk: "Low",
-      contacts: [{ id: "3", type: "Email", value: "alice@synergy.com" }],
-      intent: "Low",
-    },
-  ].map((c) => ({
-    ...c,
-    logs: [
-      {
-        id: "1",
-        time: "Today, 10:30 AM",
-        event: "AI identified high read-rate on Quotation #1044",
-        type: "ai",
-      },
-      {
-        id: "2",
-        time: "Yesterday, 2:15 PM",
-        event: 'Customer opened email: "Updated Pricing for Bulk"',
-        type: "action",
-      },
-      {
-        id: "3",
-        time: "May 20, 11:00 AM",
-        event: "Sent Quotation #1044 ($42,000)",
-        type: "comm",
-      },
-      {
-        id: "h1",
-        time: "May 18, 9:00 AM",
-        event: "Initial inquiry received via Website Form",
-        type: "comm",
-      },
-      {
-        id: "h2",
-        time: "May 18, 9:15 AM",
-        event: "AI auto-replied with product catalog",
-        type: "ai",
-      },
-      {
-        id: "h3",
-        time: "May 19, 10:20 AM",
-        event: "Customer requested bulk pricing",
-        type: "action",
-      },
-      {
-        id: "h4",
-        time: "May 19, 11:00 AM",
-        event: "Agent generated quotation #1044",
-        type: "comm",
-      },
-    ] as CustomerLog[],
-  }));
+  const initial: Customer[] = [];
   saveCustomers(initial);
   return initial;
 }
@@ -391,35 +255,7 @@ export function getProducts(): Product[] {
     if (data) return JSON.parse(data);
   } catch (e) {}
 
-  const initial: Product[] = [
-    {
-      id: "prod_1",
-      name: "Enterprise CRM License",
-      description: "Annual license for CRM system.",
-      sku: "CRM-ENT-1Y",
-      price: 12000,
-      currency: "USD",
-      status: "Active",
-    },
-    {
-      id: "prod_2",
-      name: "AI Voice Agent Add-on",
-      description: "10,000 minutes of AI voice agent calls per month.",
-      sku: "AI-VOICE-10K",
-      price: 2500,
-      currency: "USD",
-      status: "Active",
-    },
-    {
-      id: "prod_3",
-      name: "Consulting Session",
-      description: "1 hour of technical consultation.",
-      sku: "CONSULT-1H",
-      price: 250,
-      currency: "USD",
-      status: "Active",
-    },
-  ];
+  const initial: Product[] = [];
   saveProducts(initial);
   return initial;
 }
@@ -596,16 +432,7 @@ export function getAgentRuns(): AgentRun[] {
     if (data) return JSON.parse(data);
   } catch (e) {}
 
-  const initialRuns: AgentRun[] = [
-    {
-      id: "run_1",
-      customerId: "1",
-      agentId: "3",
-      taskType: "Follow-up Email",
-      status: "Pending",
-      createdAt: new Date(Date.now() - 3600000).toISOString(),
-    },
-  ];
+  const initialRuns: AgentRun[] = [];
   saveAgentRuns(initialRuns);
   return initialRuns;
 }
@@ -631,24 +458,7 @@ export function getAgentSteps(): AgentStep[] {
     if (data) return JSON.parse(data);
   } catch (e) {}
 
-  const initialSteps: AgentStep[] = [
-    {
-      id: "s_1",
-      runId: "run_1",
-      stepType: "Tool",
-      toolName: "get_customer_profile",
-      status: "Success",
-      createdAt: new Date(Date.now() - 3600000).toISOString(),
-    },
-    {
-      id: "s_2",
-      runId: "run_1",
-      stepType: "Tool",
-      toolName: "draft_email",
-      status: "Success",
-      createdAt: new Date(Date.now() - 3590000).toISOString(),
-    },
-  ];
+  const initialSteps: AgentStep[] = [];
   saveAgentSteps(initialSteps);
   return initialSteps;
 }
@@ -674,20 +484,7 @@ export function getAgentApprovals(): AgentApproval[] {
     if (data) return JSON.parse(data);
   } catch (e) {}
 
-  const initialApprovals: AgentApproval[] = [
-    {
-      id: "app_1",
-      runId: "run_1",
-      actionType: "send_email",
-      proposedPayload: {
-        to: "john@acme.com",
-        subject: "Follow up on our discussion",
-        body: "Hi John,\n\nJust checking in on the volume discounts we discussed. Let me know if you need any adjustments to the quote.",
-      },
-      status: "Pending",
-      createdAt: new Date(Date.now() - 3590000).toISOString(),
-    },
-  ];
+  const initialApprovals: AgentApproval[] = [];
   saveAgentApprovals(initialApprovals);
   return initialApprovals;
 }
@@ -736,57 +533,7 @@ export function getAgents(): Agent[] {
     }
   } catch (e) {}
 
-  const initial: Agent[] = [
-    {
-      id: "1",
-      name: "Lead Qualification Agent",
-      role: "Qualifies inbound emails and determines lead score.",
-      status: "Active",
-      tasks: 145,
-      harness: "Auto",
-    },
-    {
-      id: "2",
-      name: "SDR Agent",
-      role: "Automates initial follow-ups and meeting scheduling.",
-      status: "Active",
-      tasks: 89,
-      harness: "Human-in-the-loop",
-    },
-    {
-      id: "3",
-      name: "Manager Agent",
-      role: "Routes tasks and flags high-risk conversations to humans.",
-      status: "Active",
-      tasks: 312,
-      harness: "Auto",
-    },
-    {
-      id: "4",
-      name: "Proposal Agent",
-      role: "Drafts quotes based on CRM price rules and inventory.",
-      status: "Idle",
-      tasks: 12,
-      harness: "Human-in-the-loop",
-    },
-    {
-      id: "5",
-      name: "Lead Generation Agent",
-      role: "Navigates and scrapes leads autonomously.",
-      status: "Active",
-      tasks: 0,
-      harness: "Human-in-the-loop",
-      integrations: [
-        "Outscraper",
-        "Apify",
-        "PhantomBuster",
-        "Scrap.io",
-        "HasData",
-        "Decodo",
-        "Clay.com",
-      ],
-    },
-  ];
+  const initial: Agent[] = [];
   saveAgents(initial);
   return initial;
 }
@@ -955,61 +702,7 @@ export function getInboxMessages(): MessagePreview[] {
     }
   } catch (e) {}
 
-  const initial: MessagePreview[] = [
-    {
-      id: "msg_local_1",
-      sender: "john@acme.com",
-      target: "agent@example.com",
-      customerId: "1",
-      userId: "1",
-      intent: "Inquiry",
-      subject: "Bulk Pricing Request",
-      summary:
-        "Customer asking for a 10k units volume discount and lead times.",
-      channel: "Email",
-      date: "10:30 AM",
-      read: false,
-      thread: [
-        {
-          id: "t1",
-          sender: "user",
-          content:
-            "Hello, I am interested in ordering 10,000 units of the premium widgets. What is the best volume discount you can offer for this quantity? Also, let me know the estimated lead time to North America.",
-          time: "10:30 AM",
-        },
-      ],
-    },
-    {
-      id: "msg_local_2",
-      sender: "15550000001",
-      target: "15551234567",
-      customerId: "2",
-      userId: "2",
-      intent: "Support",
-      subject: "MOQ clarification",
-      summary:
-        "Checking if they can order below MOQ for their first testing round.",
-      channel: "WhatsApp",
-      date: "Yesterday",
-      read: true,
-      thread: [
-        {
-          id: "t1",
-          sender: "user",
-          content:
-            "Hi, I saw your MOQ is 500 units. Since this is our first time working together, is it possible to order 100 units just for quality testing?",
-          time: "Yesterday 2:15 PM",
-        },
-        {
-          id: "t2",
-          sender: "agent",
-          content:
-            "Hi there! We strictly follow the MOQ of 500 units for standard pricing, but for a one-time paid sample order, we could do 100 units at a 20% premium. Would that work for you?",
-          time: "Yesterday 2:40 PM",
-        },
-      ],
-    },
-  ];
+  const initial: MessagePreview[] = [];
   saveInboxMessages(initial);
   return initial;
 }

@@ -75,7 +75,7 @@ export default function AgentCenter() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentId,
-          context: `Workflow Name: ${wfName}. The user has just requested a test run simulation on a mock Lead with a High intent score.`,
+          context: `Workflow Name: ${wfName}. The user requested an execution test using the currently configured CRM and integration data.`,
           systemLanguage: language,
         }),
       });

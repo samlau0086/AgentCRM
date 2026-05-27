@@ -119,26 +119,7 @@ export default function Inbox() {
       showComposeSchedule && composeScheduleDate && composeScheduleTime;
 
     if (isScheduled) {
-      addOutboundMessage({
-        sender: "agent@example.com",
-        target: composeTo.join(", "),
-        intent: "Scheduled",
-        subject: composeSubject,
-        summary: `Scheduled for ${composeScheduleDate} ${composeScheduleTime}`,
-        channel: "Email",
-        thread: [
-          {
-            id: `t_${Date.now()}`,
-            sender: "agent",
-            content: composeBody,
-            time: `${composeScheduleDate} ${composeScheduleTime}`,
-          },
-        ],
-        tags: ["scheduled"],
-      });
-      setMessages(getInboxMessages());
-      resetCompose();
-      setActiveTab("inbox");
+      alert("Scheduled sending requires a real backend scheduler. Send immediately or configure a scheduler endpoint first.");
       return;
     }
 
@@ -309,11 +290,7 @@ export default function Inbox() {
 
     try {
       if (isScheduled) {
-        await new Promise((r) => setTimeout(r, 800)); // simulate
-        alert(`Reply scheduled for ${replyScheduleDate} ${replyScheduleTime}`);
-        setIsSending(false);
-        setReplyText("");
-        setScheduleDefaults();
+        alert("Scheduled sending requires a real backend scheduler. Send immediately or configure a scheduler endpoint first.");
         return;
       }
 

@@ -1,12 +1,10 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Mail, Lock, Loader2, ArrowRight } from "lucide-react";
-import { getSystemUsers, setCurrentUser } from "../services/db";
-import { ThemeProvider } from "../theme";
+import { setCurrentUser } from "../services/db";
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [email, setEmail] = useState("admin@acmecorp.com");
-  const [password, setPassword] = useState("password");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -30,7 +28,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
       } else {
         setError(data.error || "Invalid email or password.");
       }
-    } catch (err) {
+    } catch {
       setError("Network error. Please try again.");
     } finally {
       setIsLoading(false);
@@ -83,7 +81,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Enter your password"
                   className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                   required
                 />
@@ -116,39 +114,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           </form>
 
           <div className="mt-8 text-center text-sm text-slate-500">
-            <p>Demo Accounts:</p>
-            <div className="flex justify-center gap-4 mt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail("admin@acmecorp.com");
-                  setPassword("password");
-                }}
-                className="text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail("alice@acmecorp.com");
-                  setPassword("password");
-                }}
-                className="text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                Sales
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail("charlie@acmecorp.com");
-                  setPassword("password");
-                }}
-                className="text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                Support
-              </button>
-            </div>
+            <p>Default seeded accounts are created in PostgreSQL on first run.</p>
           </div>
         </div>
       </div>

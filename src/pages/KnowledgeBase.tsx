@@ -39,6 +39,9 @@ export default function KnowledgeBase() {
         body: JSON.stringify({ filename: selectedFile.name, content })
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to vectorize document');
+      }
       setUploadProgress(70);
       
       setTimeout(() => {
@@ -46,7 +49,7 @@ export default function KnowledgeBase() {
         setTimeout(() => {
           addDocument({
             title: selectedFile.name,
-            pieces: data.pieces || Math.floor(Math.random() * 50) + 10,
+            pieces: data.pieces,
             status: 'Active (Vectorized)',
             date: 'Just now',
             content: content.slice(0, 5000),

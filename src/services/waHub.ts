@@ -15,7 +15,6 @@ export interface WaMessage {
   created_at: string;
 }
 
-// In a real app, this would be configured via Settings and stored in localStorage or a backend
 const getHubConfig = () => {
   return {
     url: localStorage.getItem('wa_hub_url') || '',
@@ -26,11 +25,7 @@ const getHubConfig = () => {
 export async function fetchClients(): Promise<WaClient[]> {
   const { url, token } = getHubConfig();
   if (!url || !token) {
-    // Return mock data if not configured
-    return [
-      { id: 'office-pc-01', name: 'Sales Main', phone: '15551234567', status: 'online' },
-      { id: 'backup-01', name: 'Support Fallback', phone: '15557654321', status: 'online' }
-    ];
+    return [];
   }
 
   const res = await fetch(`${url}/api/clients`, {
@@ -58,8 +53,7 @@ export async function fetchMessages(limit: number = 50): Promise<WaMessage[]> {
 export async function sendMessage(to: string, body: string, clientId?: string) {
   const { url, token } = getHubConfig();
   if (!url || !token) {
-    console.log('Mock send (No config):', { to, body, clientId });
-    return { ok: true, mocked: true };
+    throw new Error('WhatsApp Actor Hub is not configured.');
   }
 
   const payload: any = { to, body };

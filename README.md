@@ -26,13 +26,7 @@ http://localhost:3000
 
 ### Default Login
 
-If no PostgreSQL database is configured, the app runs in simulated local mode. You can log in with any email address and this password:
-
-```text
-password
-```
-
-When `DATABASE_URL` or `PG_VECTOR_URL` is configured, default seeded accounts use the same initial password:
+The app requires PostgreSQL for authentication. When `DATABASE_URL` or `PG_VECTOR_URL` is configured, default seeded accounts use this initial password:
 
 ```text
 admin@acmecorp.com / password
@@ -65,7 +59,7 @@ GEMINI_API_KEY=...
 JWT_SECRET=...
 ```
 
-If `GEMINI_API_KEY` is missing, AI endpoints return useful mock responses so the UI can still be tested end to end.
+If `GEMINI_API_KEY` is missing, AI endpoints return a configuration error instead of generated content.
 
 ---
 
@@ -89,13 +83,7 @@ http://localhost:3000
 
 ### 默认登录
 
-如果没有配置 PostgreSQL 数据库，系统会进入本地模拟模式。可以使用任意邮箱登录，默认密码为：
-
-```text
-password
-```
-
-如果配置了 `DATABASE_URL` 或 `PG_VECTOR_URL`，系统会自动初始化默认账号，初始密码同样是：
+系统需要 PostgreSQL 才能登录。如果配置了 `DATABASE_URL` 或 `PG_VECTOR_URL`，系统会自动初始化默认账号，初始密码是：
 
 ```text
 admin@acmecorp.com / password
@@ -128,7 +116,7 @@ GEMINI_API_KEY=...
 JWT_SECRET=...
 ```
 
-如果未配置 `GEMINI_API_KEY`，AI 接口会返回可用的模拟内容，方便在没有真实 AI Key 的情况下完整测试界面流程。
+如果未配置 `GEMINI_API_KEY`，AI 接口会返回配置错误，不会生成模拟内容。
 
 ## Production Deployment to VPS via GitHub Actions
 
@@ -154,7 +142,7 @@ You need a VPS with the following installed and configured:
 * `PROJECT_PATH`: The absolute path to your cloned repository on the VPS (e.g., `/var/www/my-crm`)
 * `APP_NAME`: The name you want to use for the PM2 process (e.g., `crm-app`)
 * `APP_PORT`: The port your app should run on under the VPS (e.g., `3005`)
-* `DATABASE_URL`: (Optional) Your PostgreSQL database connection string. If not provided, it will fallback to simulated in-memory storage.
+* `DATABASE_URL`: Required for authentication and persistent CRM data.
 * `JWT_SECRET`: (Optional) Secret key for JWT encryption.
 
 ### How it Works

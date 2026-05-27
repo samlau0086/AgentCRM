@@ -79,10 +79,7 @@ export async function fetchEmails(): Promise<EmailMessage[]> {
   const receiveProfiles = getReceiveProfiles();
   
   if (mappings.length === 0 || receiveProfiles.length === 0) {
-    return [
-      { id: 'msg_1', sender: 'buyer1@example.com', target: 'agent@example.com', intent: 'Inquiry', subject: 'Bulk Pricing Request', summary: 'Customer asking for a 10k units volume discount and lead times.', channel: 'Email', date: '10:30 AM', read: false },
-      { id: 'msg_3', sender: 'jane@globaltech.com', target: 'support@example.com', intent: 'Negotiation', subject: 'Re: Quotation #1044', summary: 'Requesting to split the payment terms to 50/50 instead of 100% upfront.', channel: 'Email', date: 'Yesterday', read: true }
-    ];
+    return [];
   }
 
   const allEmails: EmailMessage[] = [];
@@ -90,10 +87,8 @@ export async function fetchEmails(): Promise<EmailMessage[]> {
   for (const mapping of mappings) {
     const profile = receiveProfiles.find(p => p.id === mapping.receiveProfileId);
     if (profile && profile.imapHost && profile.imapUser) {
-      console.log(`Connecting to IMAP ${profile.imapHost} as ${profile.imapUser}...`);
-      allEmails.push(
-        { id: `msg_${mapping.id}_1`, sender: 'supplier@vendor.com', target: profile.imapUser, intent: 'Invoice', subject: `Invoice for ${profile.imapUser}`, summary: 'Attached is the invoice for the recent components order.', channel: 'Email', date: '10:00 AM', read: false },
-        { id: `msg_${mapping.id}_2`, sender: 'newlead@startup.io', target: profile.imapUser, intent: 'Inquiry', subject: 'Integration Question', summary: 'Can your platform integrate with our existing CRM via API?', channel: 'Email', date: 'Yesterday', read: true }
+      throw new Error(
+        `Real IMAP sync is not connected in this browser build for ${profile.name}. Configure a backend email sync worker before fetching mail.`,
       );
     }
   }
@@ -107,24 +102,38 @@ export async function sendEmail(targetMappingId: string, to: string, subject: st
   const mapping = mappings.find(m => m.id === targetMappingId) || mappings[0];
   
   if (!mapping) {
-    console.log('Simulating sending email without proper config');
-    return { ok: true, mocked: true };
+    throw new Error('Send account mapping is not configured.');
   }
   
   const profile = sendProfiles.find(p => p.id === mapping.sendProfileId);
 
   if (!profile) {
-    console.log('Send Profile not found');
-    return { ok: false, error: 'Send profile not configured' };
+    throw new Error('Send profile is not configured.');
   }
 
   if (profile.sendProvider === 'resend') {
-    console.log(`Sending email to ${to} via Resend API as ${profile.fromAddress}...`);
+    if (!profile.resendApiKey || !profile.fromAddress) {
+      throw new Error('Resend API key and from address are required.');
+    }
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${profile.resendApiKey}`,
+      },
+      body: JSON.stringify({
+        from: profile.fromAddress,
+        to: [to],
+        subject,
+        text: body,
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to send email through Resend.');
+    }
+    return { ok: true, provider: 'resend', result: await response.json() };
   } else {
-    console.log(`Sending email to ${to} via SMTP ${profile.smtpHost} as ${profile.smtpUser}...`);
+    throw new Error('SMTP sending requires a backend mail transport. Use Resend or add a server-side SMTP endpoint.');
   }
-  
-  await new Promise(resolve => setTimeout(resolve, 800));
-  
-  return { ok: true, messageId: `msg_${Math.random().toString(36).substr(2, 9)}` };
 }

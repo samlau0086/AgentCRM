@@ -497,7 +497,6 @@ export default function CustomerDetail() {
               </button>
             </div>
             <div className="overflow-y-auto p-6 space-y-6 relative before:absolute before:inset-0 before:ml-11 before:-translate-x-px before:h-full before:w-px before:bg-slate-200 dark:before:bg-white/10">
-              {/* Added older historical items to simulate full log */}
               {(customer?.logs || []).map((item, i) => (
                 <div
                   key={item.id}
