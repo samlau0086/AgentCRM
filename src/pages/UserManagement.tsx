@@ -37,11 +37,9 @@ export default function UserManagement() {
   };
 
   const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this user?')) {
-      const newUsers = users.filter(u => u.id !== id);
-      setUsers(newUsers);
-      saveSystemUsers(newUsers);
-    }
+    const newUsers = users.filter(u => u.id !== id);
+    setUsers(newUsers);
+    saveSystemUsers(newUsers);
   };
 
   const handleSave = (e: React.FormEvent) => {

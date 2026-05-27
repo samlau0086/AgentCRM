@@ -63,10 +63,8 @@ export default function KnowledgeBase() {
   };
 
   const handleDelete = (id: string) => {
-    if (confirm('Are you sure you want to delete this document?')) {
-      deleteDocument(id);
-      setDocuments(getDocuments());
-    }
+    deleteDocument(id);
+    setDocuments(getDocuments());
   };
 
   const totalPieces = documents.reduce((sum, doc) => sum + doc.pieces, 0);

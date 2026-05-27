@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Search, Filter, MoreHorizontal, ShieldAlert, Zap, Edit2, Trash2, X, Plus } from 'lucide-react';
 import { cn } from '../Layout';
 import { useLanguage } from '../i18n';
-import { getCustomers, saveCustomers, deleteCustomer, addCustomer, updateCustomer, Customer } from '../services/db';
+import { getCustomers, saveCustomers, deleteCustomer, addCustomer, updateCustomer, Customer, getPublicLeads, PublicLead, claimLead } from '../services/db';
 
 const CONTACT_TYPES = ['Mobile', 'Phone', 'Email', 'WhatsApp', 'Messenger', 'WeChat', 'Other'];
 
@@ -271,13 +271,16 @@ export default function Customers() {
   const { t } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const [activeTab, setActiveTab] = useState<'my-customers' | 'public-pool'>('my-customers');
   const [customers, setCustomers] = useState<Customer[]>(getCustomers());
+  const [publicLeads, setPublicLeads] = useState<PublicLead[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
 
   useEffect(() => {
+    setPublicLeads(getPublicLeads());
     const editId = searchParams.get('edit');
     if (editId) {
       const c = getCustomers().find(c => c.id === editId);
@@ -300,10 +303,8 @@ export default function Customers() {
   };
 
   const handleDelete = (id: string) => {
-    if (confirm('Are you sure you want to delete this customer?')) {
-      deleteCustomer(id);
-      setCustomers(getCustomers());
-    }
+    deleteCustomer(id);
+    setCustomers(getCustomers());
   };
 
   const handleSaveCustomer = (newCustomer: Customer) => {
@@ -323,17 +324,38 @@ export default function Customers() {
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col gap-6 w-full">
-      <div className="flex items-center justify-between shrink-0">
+      <div className="flex flex-col gap-6 md:flex-row md:items-center justify-between shrink-0">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">{t('cust.title')}</h1>
-          <p className="text-slate-400 dark:text-slate-500 dark:text-slate-400 mt-1 text-sm font-light">{t('cust.subtitle')}</p>
+          <p className="text-slate-400 dark:text-slate-500 mt-1 text-sm font-light">{t('cust.subtitle')}</p>
         </div>
-        {!isModalOpen && (
-          <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2">
-            <Plus className="w-4 h-4" />
-            {t('cust.add')}
-          </button>
-        )}
+        <div className="flex items-center gap-4">
+          <div className="bg-slate-100 dark:bg-white/5 p-1 rounded-lg flex items-center gap-1 border border-slate-200 dark:border-white/10 shadow-inner">
+            <button
+              onClick={() => setActiveTab('my-customers')}
+              className={cn("px-4 py-1.5 text-sm font-medium rounded-md transition-all", activeTab === 'my-customers' ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300")}
+            >
+              My Customers
+            </button>
+            <button
+              onClick={() => setActiveTab('public-pool')}
+              className={cn("px-4 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2", activeTab === 'public-pool' ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300")}
+            >
+              Public Pool
+              {publicLeads.length > 0 && (
+                <span className="bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 px-1.5 py-0.5 rounded text-[10px]">
+                  {publicLeads.length}
+                </span>
+              )}
+            </button>
+          </div>
+          {!isModalOpen && activeTab === 'my-customers' && (
+            <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2">
+              <Plus className="w-4 h-4" />
+              {t('cust.add')}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 flex flex-col lg:flex-row gap-6 min-h-0">
@@ -361,6 +383,7 @@ export default function Customers() {
           </div>
 
           <div className="overflow-auto flex-1">
+            {activeTab === 'my-customers' ? (
             <table className="w-full text-left text-sm whitespace-nowrap">
               <thead className="bg-white dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
                 <tr>
@@ -450,6 +473,57 @@ export default function Customers() {
                 ))}
               </tbody>
             </table>
+            ) : (
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="bg-white dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
+                <tr>
+                  <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500">Lead Info</th>
+                  <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500">Contact</th>
+                  <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500">Source</th>
+                  <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500">Location</th>
+                  <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {publicLeads.filter(l => l.name.toLowerCase().includes(searchQuery.toLowerCase()) || l.source.toLowerCase().includes(searchQuery.toLowerCase())).map((lead) => (
+                  <tr key={lead.id} className="hover:bg-white/[0.04] transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col gap-1">
+                        <span className="font-medium text-slate-900 dark:text-white">{lead.name}</span>
+                        {lead.industry && <span className="text-xs text-slate-500">{lead.industry}</span>}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-slate-400 dark:text-slate-500">{lead.contact}</td>
+                    <td className="px-6 py-4">
+                      <span className="px-2 py-1 rounded text-[10px] font-mono bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800">
+                        {lead.source}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-slate-400 dark:text-slate-500">{lead.location || '-'}</td>
+                    <td className="px-6 py-4 text-right">
+                      <button 
+                        onClick={() => {
+                          claimLead(lead.id, 'user');
+                          setPublicLeads(getPublicLeads());
+                          setCustomers(getCustomers());
+                        }} 
+                        className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors shadow-sm"
+                      >
+                        Claim Lead
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {publicLeads.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
+                      No leads currently available in the public pool. Let your Lead Generation agents gather more!
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            )}
           </div>
         </div>
 

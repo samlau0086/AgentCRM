@@ -5,6 +5,8 @@ const dictionaries = {
     // Layout
     'nav.dashboard': 'Command Center',
     'nav.customers': 'Customers',
+    'nav.sales': 'Sales & Quotes',
+    'nav.media': 'Media Library',
     'nav.inbox': 'Inbox',
     'nav.agentCenter': 'Agent Center',
     'nav.knowledge': 'Knowledge Base',
@@ -121,6 +123,8 @@ const dictionaries = {
     // Layout
     'nav.dashboard': '中枢控制台',
     'nav.customers': '客户管理',
+    'nav.sales': '产品与报价',
+    'nav.media': '媒体素材库',
     'nav.inbox': '统一收件箱',
     'nav.agentCenter': '智能体中心',
     'nav.knowledge': '知识库',

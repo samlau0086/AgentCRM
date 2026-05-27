@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, Inbox as InboxIcon, BookOpen, Bot, Settings, Bell, Search, Activity, Globe, Moon, Sun, X, Shield } from 'lucide-react';
+import { LayoutDashboard, Users, Inbox as InboxIcon, BookOpen, Bot, Settings, Bell, Search, Activity, Globe, Moon, Sun, X, Shield, Receipt, Film } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useLanguage } from './i18n';
@@ -22,6 +22,8 @@ export default function Layout() {
   const navigation = [
     { name: t('nav.dashboard'), href: '/', icon: LayoutDashboard },
     { name: t('nav.customers'), href: '/customers', icon: Users },
+    { name: t('nav.sales'), href: '/sales', icon: Receipt },
+    { name: t('nav.media'), href: '/media', icon: Film },
     { name: t('nav.inbox'), href: '/inbox', icon: InboxIcon, badge: '5' },
     { name: t('nav.agentCenter'), href: '/agent-center', icon: Bot, badge: '2' },
     { name: t('nav.knowledge'), href: '/knowledge', icon: BookOpen },

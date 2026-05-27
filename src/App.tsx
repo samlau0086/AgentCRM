@@ -9,6 +9,8 @@ import Dashboard from './pages/Dashboard';
 import Customers from './pages/Customers';
 import CustomerDetail from './pages/CustomerDetail';
 import EditCustomer from './pages/EditCustomer';
+import Sales from './pages/Sales';
+import Media from './pages/Media';
 import Inbox from './pages/Inbox';
 import KnowledgeBase from './pages/KnowledgeBase';
 import AgentCenter from './pages/AgentCenter';
@@ -28,6 +30,8 @@ export default function App() {
               <Route path="customers" element={<Customers />} />
               <Route path="customers/:id" element={<CustomerDetail />} />
               <Route path="customers/:id/edit" element={<EditCustomer />} />
+              <Route path="sales" element={<Sales />} />
+              <Route path="media" element={<Media />} />
               <Route path="inbox" element={<Inbox />} />
               <Route path="knowledge" element={<KnowledgeBase />} />
               <Route path="agent-center" element={<AgentCenter />} />

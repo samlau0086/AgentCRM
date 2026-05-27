@@ -29,6 +29,74 @@ export interface CustomerLog {
   type: 'ai' | 'action' | 'comm';
 }
 
+export interface PublicLead {
+  id: string;
+  name: string;
+  contact: string;
+  source: string;
+  scrapedAt: string;
+  contacts?: Contact[];
+  industry?: string;
+  location?: string;
+  description?: string;
+}
+
+export function getPublicLeads(): PublicLead[] {
+  try {
+    const data = localStorage.getItem('crm_public_leads');
+    if (data) return JSON.parse(data);
+  } catch (e) {}
+  
+  const initial: PublicLead[] = [
+    { id: 'lead_1', name: 'TechFlow Solutions', contact: 'Alice Chen', source: 'Outscraper', scrapedAt: new Date().toISOString(), contacts: [{ id: '1', type: 'Email', value: 'alice@techflow.example.com' }], location: 'San Francisco, CA', description: 'Tech startup looking for CRM solutions.' },
+    { id: 'lead_2', name: 'Global Retail Group', contact: 'Bob Martin', source: 'Apify', scrapedAt: new Date().toISOString(), contacts: [{ id: '2', type: 'LinkedIn', value: 'linkedin.com/in/bob-martin' }], industry: 'Retail', location: 'London, UK' },
+    { id: 'lead_3', name: 'Innovate Health', contact: 'Dr. Sarah Lee', source: 'PhantomBuster', scrapedAt: new Date().toISOString(), contacts: [{ id: '3', type: 'Mobile', value: '+1-555-0199' }] }
+  ];
+  savePublicLeads(initial);
+  return initial;
+}
+
+export function savePublicLeads(leads: PublicLead[]) {
+  localStorage.setItem('crm_public_leads', JSON.stringify(leads));
+}
+
+export function deletePublicLead(id: string) {
+  const leads = getPublicLeads();
+  savePublicLeads(leads.filter(l => l.id !== id));
+}
+
+export function claimLead(leadId: string, userId: string) {
+  const leads = getPublicLeads();
+  const leadIndex = leads.findIndex(l => l.id === leadId);
+  if (leadIndex === -1) return;
+  
+  const lead = leads[leadIndex];
+  leads.splice(leadIndex, 1);
+  savePublicLeads(leads);
+  
+  // Convert lead to customer
+  const newCustomer: Customer = {
+    id: `cus_${Math.random().toString(36).substr(2, 9)}`,
+    name: lead.name,
+    contact: lead.contact,
+    stage: 'New Lead',
+    score: 50,
+    risk: 1,
+    intent: 'Low',
+    contacts: lead.contacts || [],
+    description: lead.description || `Sourced from ${lead.source}`,
+    city: lead.location,
+    industry: lead.industry,
+    tags: [lead.source],
+    logs: [
+      { id: Math.random().toString(36).substring(7), event: 'Lead claimed from Public Pool', time: new Date().toISOString(), type: 'action' }
+    ],
+    // ownerId: userId // if we want to store specific owner, but right now current user is just the one logged in
+  };
+  
+  addCustomer(newCustomer);
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -140,6 +208,121 @@ export function getCustomers(): Customer[] {
 
 export function saveCustomers(customers: Customer[]) {
   localStorage.setItem('crm_customers', JSON.stringify(customers));
+}
+
+// ----------------------------------------------------------------------
+// PRODUCTS
+// ----------------------------------------------------------------------
+
+export interface Product {
+  id: string;
+  name: string;
+  description: string;
+  sku: string;
+  price: number;
+  currency: string;
+  status: 'Active' | 'Inactive';
+  image?: string;
+}
+
+export function getProducts(): Product[] {
+  try {
+    const data = localStorage.getItem('crm_products');
+    if (data) return JSON.parse(data);
+  } catch (e) {}
+
+  const initial: Product[] = [
+    { id: 'prod_1', name: 'Enterprise CRM License', description: 'Annual license for CRM system.', sku: 'CRM-ENT-1Y', price: 12000, currency: 'USD', status: 'Active' },
+    { id: 'prod_2', name: 'AI Voice Agent Add-on', description: '10,000 minutes of AI voice agent calls per month.', sku: 'AI-VOICE-10K', price: 2500, currency: 'USD', status: 'Active' },
+    { id: 'prod_3', name: 'Consulting Session', description: '1 hour of technical consultation.', sku: 'CONSULT-1H', price: 250, currency: 'USD', status: 'Active' }
+  ];
+  saveProducts(initial);
+  return initial;
+}
+
+export function saveProducts(products: Product[]) {
+  localStorage.setItem('crm_products', JSON.stringify(products));
+}
+
+export function addProduct(product: Omit<Product, 'id'>) {
+  const products = getProducts();
+  products.push({ ...product, id: `prod_${Math.random().toString(36).substr(2, 9)}` });
+  saveProducts(products);
+}
+
+export function updateProduct(id: string, updates: Partial<Product>) {
+  const products = getProducts();
+  const index = products.findIndex(p => p.id === id);
+  if (index !== -1) {
+    products[index] = { ...products[index], ...updates };
+    saveProducts(products);
+  }
+}
+
+export function deleteProduct(id: string) {
+  saveProducts(getProducts().filter(p => p.id !== id));
+}
+
+// ----------------------------------------------------------------------
+// QUOTES
+// ----------------------------------------------------------------------
+
+export interface QuoteItem {
+  productId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  total: number;
+}
+
+export interface Quote {
+  id: string;
+  customerId: string;
+  date: string;
+  validUntil: string;
+  items: QuoteItem[];
+  feeLines?: { name: string; amount: number }[];
+  paymentTerms?: string;
+  subtotal: number;
+  totalDiscount: number;
+  total: number;
+  status: 'Draft' | 'Sent' | 'Approved' | 'Rejected';
+  notes: string;
+}
+
+export function getQuotes(): Quote[] {
+  try {
+    const data = localStorage.getItem('crm_quotes');
+    if (data) return JSON.parse(data);
+  } catch (e) {}
+  
+  const initial: Quote[] = [];
+  saveQuotes(initial);
+  return initial;
+}
+
+export function saveQuotes(quotes: Quote[]) {
+  localStorage.setItem('crm_quotes', JSON.stringify(quotes));
+}
+
+export function addQuote(quote: Omit<Quote, 'id'>) {
+  const quotes = getQuotes();
+  quotes.push({ ...quote, id: `quote_${Math.random().toString(36).substr(2, 9)}` });
+  saveQuotes(quotes);
+}
+
+export function updateQuote(id: string, updates: Partial<Quote>) {
+  const quotes = getQuotes();
+  const index = quotes.findIndex(q => q.id === id);
+  if (index !== -1) {
+    quotes[index] = { ...quotes[index], ...updates };
+    saveQuotes(quotes);
+  }
+}
+
+export function deleteQuote(id: string) {
+  saveQuotes(getQuotes().filter(q => q.id !== id));
 }
 
 export function getCustomer(id: string): Customer | undefined {

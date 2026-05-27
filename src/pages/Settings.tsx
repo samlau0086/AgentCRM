@@ -630,6 +630,44 @@ export default function Settings() {
                 </div>
               </div>
             </div>
+
+            <div className="bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 rounded-2xl p-6 flex flex-col gap-6">
+              <div>
+                <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">Lead Generation Platforms</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Configure API connections for automated lead scraping and enrichment.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[
+                  { id: 'outscraper', name: 'Outscraper', desc: 'Google Maps scraping' },
+                  { id: 'apify', name: 'Apify', desc: 'Web scraping & automation' },
+                  { id: 'phantombuster', name: 'PhantomBuster', desc: 'Social media automation' },
+                  { id: 'scrap_io', name: 'Scrap.io', desc: 'B2B leads from Maps' },
+                  { id: 'hasdata', name: 'HasData', desc: 'Web extraction APIs' },
+                  { id: 'decodo', name: 'Decodo', desc: 'Contact data discovery' },
+                  { id: 'clay_com', name: 'Clay.com', desc: 'Data enrichment workflows' },
+                ].map(platform => (
+                  <div key={platform.id} className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-black/20 flex flex-col justify-between gap-3">
+                    <div>
+                      <div className="flex justify-between items-start mb-1">
+                        <h4 className="font-semibold text-sm text-slate-800 dark:text-slate-200">{platform.name}</h4>
+                        <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600"></span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">{platform.desc}</p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        const key = prompt(`Enter API Key for ${platform.name}`);
+                        if (key) alert(`${platform.name} configured successfully.`);
+                      }}
+                      className="w-full text-center py-1.5 text-xs font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-300"
+                    >
+                      Configure API
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
