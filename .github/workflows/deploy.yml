@@ -30,14 +30,18 @@ jobs:
             mkdir -p ${{ secrets.PROJECT_PATH }}
             cd ${{ secrets.PROJECT_PATH }}
             
-            # 判断是否已经是 git 仓库，如果不是则自动克隆
+            # 判断是否已经是 git 仓库，如果不是则初始化克隆
             if [ ! -d ".git" ]; then
-              echo "仓库不存在，正在克隆..."
-              git clone https://github.com/${{ github.repository }} .
+              echo "仓库不存在，正在初始化..."
+              git init
+              git remote add origin https://github.com/${{ github.repository }}
+              git fetch origin main
+              git reset --hard origin/main
+              git branch -M main
             else
               echo "拉取最新代码..."
-              git reset --hard HEAD
-              git pull origin main
+              git fetch origin main
+              git reset --hard origin/main
             fi
             
             # 写入或更新运行端口环境变量
