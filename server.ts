@@ -1,17 +1,236 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
+import cookieParser from "cookie-parser";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || "fallback_super_secret_key";
 
 app.use(express.json());
+app.use(cookieParser());
 
 import pg from "pg";
 import { registerType } from "pgvector/pg";
 
 const VectorPool = new pg.Pool({
   connectionString: process.env.PG_VECTOR_URL || undefined,
+});
+
+const DBPool = new pg.Pool({
+  connectionString:
+    process.env.DATABASE_URL || process.env.PG_VECTOR_URL || undefined,
+});
+
+async function initDB() {
+  if (!process.env.DATABASE_URL && !process.env.PG_VECTOR_URL) {
+    console.log("No PostgreSQL configured. Skipping DB initialization.");
+    return;
+  }
+  try {
+    const client = await DBPool.connect();
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS system_users (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(100),
+        email VARCHAR(150) UNIQUE,
+        password_hash VARCHAR(255),
+        role VARCHAR(50),
+        status VARCHAR(50)
+      );
+    `);
+
+    // Check if empty
+    const res = await client.query("SELECT COUNT(*) FROM system_users");
+    if (parseInt(res.rows[0].count) === 0) {
+      const defaultPassword = await bcrypt.hash("password", 10);
+      await client.query(
+        `
+        INSERT INTO system_users (id, name, email, password_hash, role, status)
+        VALUES 
+        ('usr_1', 'System Admin', 'admin@acmecorp.com', $1, 'superadmin', 'Active'),
+        ('usr_2', 'Alice Sales', 'alice@acmecorp.com', $1, 'sales', 'Active'),
+        ('usr_3', 'Charlie Support', 'charlie@acmecorp.com', $1, 'support', 'Active');
+      `,
+        [defaultPassword],
+      );
+      console.log("Seeded default users to DB.");
+    }
+    client.release();
+  } catch (err: any) {
+    console.error("Failed to initialize DB:", err);
+  }
+}
+initDB();
+
+app.post("/api/login", async (req, res) => {
+  const { email, password } = req.body;
+  if (!process.env.DATABASE_URL && !process.env.PG_VECTOR_URL) {
+    // Fallback mode
+    if (password === "password") {
+      const token = jwt.sign(
+        { id: "usr_simulation", email, role: "admin" },
+        JWT_SECRET,
+        { expiresIn: "1d" },
+      );
+      res.cookie("crm_token", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+      });
+      return res.json({
+        success: true,
+        user: {
+          id: "usr_simulation",
+          name: "Simulated Admin",
+          email,
+          role: "superadmin",
+          status: "Active",
+        },
+      });
+    }
+    return res
+      .status(401)
+      .json({ error: "Invalid email or password (Simulated DB)." });
+  }
+
+  try {
+    const client = await DBPool.connect();
+    const result = await client.query(
+      "SELECT * FROM system_users WHERE email = $1",
+      [email.toLowerCase()],
+    );
+    client.release();
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    const user = result.rows[0];
+    if (!password || !user.password_hash) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: "1d" },
+    );
+
+    res.cookie("crm_token", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: 86400000, // 1 day
+    });
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+      },
+    });
+  } catch (err: any) {
+    console.error("Login Auth Error:", err);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+app.post("/api/logout", (req, res) => {
+  res.clearCookie("crm_token", {
+    secure: true,
+    sameSite: "none",
+  });
+  res.json({ success: true });
+});
+
+const authMiddleware = (req: any, res: any, next: any) => {
+  const token = req.cookies?.crm_token;
+  if (!token) {
+    console.log("No token in cookies:", req.cookies);
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (e) {
+    console.log("Token verification failed:", e);
+    res.status(401).json({ error: "Unauthorized" });
+  }
+};
+
+app.put("/api/users/profile", authMiddleware, async (req: any, res: any) => {
+  const { name, email, password } = req.body;
+  const userId = req.user.id;
+
+  if (!process.env.DATABASE_URL && !process.env.PG_VECTOR_URL) {
+    return res.json({
+      success: true,
+      user: { id: userId, name, email, role: req.user.role, status: "Active" },
+    });
+  }
+
+  try {
+    const client = await DBPool.connect();
+
+    if (password) {
+      const hashed = await bcrypt.hash(password, 10);
+      await client.query(
+        "UPDATE system_users SET name = $1, email = $2, password_hash = $3 WHERE id = $4",
+        [name, email, hashed, userId],
+      );
+    } else {
+      await client.query(
+        "UPDATE system_users SET name = $1, email = $2 WHERE id = $3",
+        [name, email, userId],
+      );
+    }
+
+    const result = await client.query(
+      "SELECT * FROM system_users WHERE id = $1",
+      [userId],
+    );
+    client.release();
+    const updatedUser = result.rows[0];
+
+    // Reissue token in case email changed
+    const token = jwt.sign(
+      { id: updatedUser.id, email: updatedUser.email, role: updatedUser.role },
+      JWT_SECRET,
+      { expiresIn: "1d" },
+    );
+    res.cookie("crm_token", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: 86400000,
+    });
+
+    res.json({
+      success: true,
+      user: {
+        id: updatedUser.id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        status: updatedUser.status,
+      },
+    });
+  } catch (err: any) {
+    console.error("Profile update error:", err);
+    res.status(500).json({ error: "Failed to update profile." });
+  }
 });
 
 VectorPool.on("connect", async (client) => {
@@ -294,12 +513,10 @@ app.post("/api/ai/draft-reply", async (req, res) => {
     res.json({ reply: response.text });
   } catch (error: any) {
     console.error("AI Draft Reply Error:", error);
-    res
-      .status(500)
-      .json({
-        error: error.message,
-        reply: "Failed to generate reply using AI.",
-      });
+    res.status(500).json({
+      error: error.message,
+      reply: "Failed to generate reply using AI.",
+    });
   }
 });
 
@@ -372,12 +589,10 @@ app.post("/api/ai/draft-proposal", async (req, res) => {
     res.json({ reply: response.text });
   } catch (error: any) {
     console.error("AI Draft Proposal Error:", error);
-    res
-      .status(500)
-      .json({
-        error: error.message,
-        reply: "Failed to generate proposal using AI.",
-      });
+    res.status(500).json({
+      error: error.message,
+      reply: "Failed to generate proposal using AI.",
+    });
   }
 });
 

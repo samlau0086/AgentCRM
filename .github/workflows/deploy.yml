@@ -1,0 +1,42 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            # 使用 GitHub Secrets 中配置的部署路径
+            cd ${{ secrets.PROJECT_PATH }}
+            
+            # 拉取最新代码
+            git pull origin main
+            
+            # 写入或更新运行端口环境变量
+            echo "PORT=${{ secrets.APP_PORT }}" > .env
+            
+            # 安装依赖
+            npm install
+            
+            # 编译项目
+            npm run build
+            
+            # 重启服务 (附带 --update-env 读取最新的 .env)
+            pm2 reload ${{ secrets.APP_NAME }} --update-env || pm2 start dist/server.cjs --name ${{ secrets.APP_NAME }} --update-env
+            # 如果使用 systemd: sudo systemctl restart your-service
+            # 如果是普通的 docker-compose: docker-compose up -d --build

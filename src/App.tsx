@@ -3,23 +3,38 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import Layout from './Layout';
-import Dashboard from './pages/Dashboard';
-import Customers from './pages/Customers';
-import CustomerDetail from './pages/CustomerDetail';
-import EditCustomer from './pages/EditCustomer';
-import Sales from './pages/Sales';
-import Media from './pages/Media';
-import Inbox from './pages/Inbox';
-import KnowledgeBase from './pages/KnowledgeBase';
-import AgentCenter from './pages/AgentCenter';
-import Settings from './pages/Settings';
-import UserManagement from './pages/UserManagement';
-import { LanguageProvider } from './i18n';
-import { ThemeProvider } from './theme';
+import { useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import Layout from "./Layout";
+import Dashboard from "./pages/Dashboard";
+import Customers from "./pages/Customers";
+import CustomerDetail from "./pages/CustomerDetail";
+import EditCustomer from "./pages/EditCustomer";
+import Sales from "./pages/Sales";
+import Media from "./pages/Media";
+import Inbox from "./pages/Inbox";
+import KnowledgeBase from "./pages/KnowledgeBase";
+import AgentCenter from "./pages/AgentCenter";
+import Settings from "./pages/Settings";
+import UserManagement from "./pages/UserManagement";
+import Profile from "./pages/Profile";
+import Login from "./pages/Login";
+import { LanguageProvider } from "./i18n";
+import { ThemeProvider } from "./theme";
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return localStorage.getItem("crm_logged_in") === "true";
+  });
+
+  if (!isAuthenticated) {
+    return (
+      <ThemeProvider>
+        <Login onLogin={() => setIsAuthenticated(true)} />
+      </ThemeProvider>
+    );
+  }
+
   return (
     <ThemeProvider>
       <LanguageProvider>
@@ -36,6 +51,7 @@ export default function App() {
               <Route path="knowledge" element={<KnowledgeBase />} />
               <Route path="agent-center" element={<AgentCenter />} />
               <Route path="users" element={<UserManagement />} />
+              <Route path="profile" element={<Profile />} />
               <Route path="settings" element={<Settings />} />
             </Route>
           </Routes>
