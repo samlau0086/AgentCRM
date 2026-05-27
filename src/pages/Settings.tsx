@@ -731,7 +731,7 @@ export default function Settings() {
             <div className="bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 rounded-2xl p-6 flex flex-col gap-6">
               <div>
                 <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">Lead Generation Platforms</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Configure API connections for automated lead scraping and enrichment.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Manage platform connections for automated lead scraping and enrichment.</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
