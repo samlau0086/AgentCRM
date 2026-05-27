@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
-import { fetchClients, sendMessage, WaClient } from "../services/waHub";
+import { fetchClients, fetchMessages, sendMessage, WaClient } from "../services/waHub";
 import { fetchEmails, sendEmail } from "../services/emailSync";
 import {
   getInboxMessages,
@@ -32,6 +32,7 @@ import {
   Attachment,
   UniversalComment,
   getCurrentUser,
+  addOutboundMessage,
 } from "../services/db";
 import { CommentSection } from "../components/CommentSection";
 
@@ -96,6 +97,81 @@ export default function Inbox() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const resetCompose = () => {
+    setComposeTo([]);
+    setComposeCc([]);
+    setComposeBcc([]);
+    setComposeSubject("");
+    setComposeBody("");
+    setComposeAttachments([]);
+    setComposeScheduleDate("");
+    setComposeScheduleTime("");
+    setShowComposeSchedule(false);
+  };
+
+  const handleComposeSend = async () => {
+    if (!composeTo.length || !composeSubject.trim() || !composeBody.trim()) {
+      alert("Please add at least one recipient, a subject, and a message.");
+      return;
+    }
+
+    const isScheduled =
+      showComposeSchedule && composeScheduleDate && composeScheduleTime;
+
+    if (isScheduled) {
+      addOutboundMessage({
+        sender: "agent@example.com",
+        target: composeTo.join(", "),
+        intent: "Scheduled",
+        subject: composeSubject,
+        summary: `Scheduled for ${composeScheduleDate} ${composeScheduleTime}`,
+        channel: "Email",
+        thread: [
+          {
+            id: `t_${Date.now()}`,
+            sender: "agent",
+            content: composeBody,
+            time: `${composeScheduleDate} ${composeScheduleTime}`,
+          },
+        ],
+        tags: ["scheduled"],
+      });
+      setMessages(getInboxMessages());
+      resetCompose();
+      setActiveTab("inbox");
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      await sendEmail("default", composeTo.join(", "), composeSubject, composeBody);
+      addOutboundMessage({
+        sender: "agent@example.com",
+        target: composeTo.join(", "),
+        intent: "Outbound",
+        subject: composeSubject,
+        summary: composeBody.slice(0, 140),
+        channel: "Email",
+        thread: [
+          {
+            id: `t_${Date.now()}`,
+            sender: "agent",
+            content: composeBody,
+            time: new Date().toLocaleTimeString(),
+          },
+        ],
+        tags: composeAttachments.length ? ["attachments"] : [],
+      });
+      setMessages(getInboxMessages());
+      resetCompose();
+      setActiveTab("inbox");
+    } catch (e: any) {
+      alert(`Error sending: ${e.message}`);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   const [messages, setMessages] = useState<MessagePreview[]>([]);
   const [activeMessageId, setActiveMessageId] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -131,6 +207,56 @@ export default function Inbox() {
     }
 
     setCustomers(getCustomers());
+
+    Promise.all([fetchEmails(), fetchMessages(50)])
+      .then(([emails, waMessages]) => {
+        const existing = getInboxMessages();
+        const existingIds = new Set(existing.map((m) => m.id));
+        const emailPreviews: MessagePreview[] = emails
+          .filter((email) => !existingIds.has(email.id))
+          .map((email) => ({
+            ...email,
+            thread: [
+              {
+                id: `t_${email.id}`,
+                sender: "user",
+                content: email.summary,
+                time: email.date,
+              },
+            ],
+          }));
+        const waPreviews: MessagePreview[] = waMessages
+          .filter((msg) => !existingIds.has(msg.id))
+          .map((msg) => ({
+            id: msg.id,
+            sender: msg.sender,
+            target: msg.recipient,
+            intent: "WhatsApp",
+            subject: "WhatsApp conversation",
+            summary: msg.body,
+            channel: "WhatsApp",
+            date: new Date(msg.created_at).toLocaleString(),
+            read: msg.direction === "outbound",
+            thread: [
+              {
+                id: `t_${msg.id}`,
+                sender: msg.direction === "outbound" ? "agent" : "user",
+                content: msg.body,
+                time: new Date(msg.created_at).toLocaleTimeString(),
+              },
+            ],
+          }));
+        const merged = [...emailPreviews, ...waPreviews, ...existing];
+        if (merged.length !== existing.length) {
+          saveInboxMessages(merged);
+          const hydratedMessages = getInboxMessages();
+          setMessages(hydratedMessages);
+          if (!activeMessageIdRef.current && hydratedMessages.length > 0) {
+            setActiveMessageId(hydratedMessages[0].id);
+          }
+        }
+      })
+      .catch(console.error);
   }, []);
 
   const activeMessage =
@@ -195,8 +321,8 @@ export default function Inbox() {
         await sendMessage(activeMessage.target, replyText, selectedClientId);
       } else {
         await sendEmail(
-          replyTo.length > 0 ? replyTo[0] : activeMessage.target,
-          activeMessage.sender,
+          "default",
+          replyTo.length > 0 ? replyTo.join(", ") : activeMessage.sender,
           `Re: ${activeMessage.subject}`,
           replyText,
         );
@@ -656,47 +782,18 @@ export default function Inbox() {
                 </div>
                 <div className="flex gap-3">
                   <button
-                    onClick={() => {
-                      setComposeTo([]);
-                      setComposeCc([]);
-                      setComposeBcc([]);
-                      setComposeSubject("");
-                      setComposeBody("");
-                      setComposeAttachments([]);
-                      setComposeScheduleDate("");
-                      setComposeScheduleTime("");
-                      setShowComposeSchedule(false);
-                    }}
+                    onClick={resetCompose}
                     className="px-6 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-colors border border-transparent"
                   >
                     Clear
                   </button>
                   <button
-                    onClick={() => {
-                      const isScheduled =
-                        showComposeSchedule &&
-                        composeScheduleDate &&
-                        composeScheduleTime;
-                      if (isScheduled) {
-                        alert(
-                          `Message scheduled for ${composeScheduleDate} ${composeScheduleTime}`,
-                        );
-                      }
-                      setComposeTo([]);
-                      setComposeCc([]);
-                      setComposeBcc([]);
-                      setComposeSubject("");
-                      setComposeBody("");
-                      setComposeAttachments([]);
-                      setComposeScheduleDate("");
-                      setComposeScheduleTime("");
-                      setShowComposeSchedule(false);
-                      setActiveTab("inbox");
-                    }}
-                    className="px-6 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-colors flex items-center gap-2"
+                    onClick={handleComposeSend}
+                    disabled={isSending || !composeTo.length || !composeSubject.trim() || !composeBody.trim()}
+                    className="px-6 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50"
                   >
                     <Send className="w-4 h-4" />
-                    Send
+                    {isSending ? "Sending..." : showComposeSchedule ? "Schedule" : "Send"}
                   </button>
                 </div>
               </div>
@@ -1030,7 +1127,6 @@ export default function Inbox() {
                             activeMessage.thread
                               ?.map((m) => m.content)
                               .join("\n") || "";
-                          const promptText = `Please help draft a professional reply to the client based on this context: ${activeMessage.content}\n${threadCtx}\nDraft notes: ${replyText}`;
                           setReplyText(
                             `Thank you for your message.\nRegarding your inquiry:\n${replyText ? "Note: " + replyText : "We are looking into it."}\nLet us know if you need anything else.\nBest,\nSupport Team`,
                           );

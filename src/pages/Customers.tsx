@@ -105,9 +105,11 @@ function CustomerFormView({
       preferredLanguage: data.preferredLanguage as string,
       stage: data.stage as string,
       score: parseInt(data.score as string, 10),
-      risk: parseInt(data.risk as string, 10),
+      risk: data.risk as Customer["risk"],
       intent: data.intent as string,
       tags: tags,
+      logs: customer?.logs || [],
+      comments: customer?.comments || [],
     } as any);
   };
 

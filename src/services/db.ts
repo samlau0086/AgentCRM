@@ -110,7 +110,7 @@ export function claimLead(leadId: string, userId: string) {
     contact: lead.contact,
     stage: "New Lead",
     score: 50,
-    risk: 1,
+    risk: "Low",
     intent: "Low",
     contacts: lead.contacts || [],
     description: lead.description || `Sourced from ${lead.source}`,
@@ -137,7 +137,7 @@ export interface Customer {
   contact: string;
   stage: string;
   score: number;
-  risk: number;
+  risk: "Low" | "Medium" | "High";
   contacts: Contact[];
   intent: string;
   industry?: string;
@@ -219,6 +219,13 @@ export function getCustomers(): Customer[] {
       let parsed = JSON.parse(data);
       let needsSave = false;
       parsed = parsed.map((c: any) => {
+        if (typeof c.risk === "number") {
+          needsSave = true;
+          c.risk = c.risk >= 70 ? "High" : c.risk >= 30 ? "Medium" : "Low";
+        }
+        if (!c.preferredLanguage) {
+          c.preferredLanguage = "en";
+        }
         if (!c.logs || c.logs.length <= 3) {
           needsSave = true;
           c.logs = [
@@ -281,7 +288,7 @@ export function getCustomers(): Customer[] {
       contact: "John Doe",
       stage: "Negotiation",
       score: 95,
-      risk: 10,
+      risk: "Low",
       contacts: [{ id: "1", type: "Email", value: "john@acme.com" }],
       intent: "High",
     },
@@ -291,7 +298,7 @@ export function getCustomers(): Customer[] {
       contact: "Jane Smith",
       stage: "Qualified",
       score: 78,
-      risk: 25,
+      risk: "Medium",
       contacts: [
         { id: "2", type: "Email", value: "jane@globaltech.com" },
         { id: "w1", type: "WhatsApp", value: "15550000001" },
@@ -304,7 +311,7 @@ export function getCustomers(): Customer[] {
       contact: "Alice Brown",
       stage: "Lead",
       score: 45,
-      risk: 5,
+      risk: "Low",
       contacts: [{ id: "3", type: "Email", value: "alice@synergy.com" }],
       intent: "Low",
     },
@@ -607,6 +614,17 @@ export function saveAgentRuns(runs: AgentRun[]) {
   localStorage.setItem("crm_agent_runs", JSON.stringify(runs));
 }
 
+export function addAgentRun(run: Omit<AgentRun, "id" | "createdAt">) {
+  const runs = getAgentRuns();
+  const newRun: AgentRun = {
+    ...run,
+    id: `run_${Math.random().toString(36).substr(2, 9)}`,
+    createdAt: new Date().toISOString(),
+  };
+  saveAgentRuns([newRun, ...runs]);
+  return newRun;
+}
+
 export function getAgentSteps(): AgentStep[] {
   try {
     const data = localStorage.getItem("crm_agent_steps");
@@ -639,6 +657,17 @@ export function saveAgentSteps(steps: AgentStep[]) {
   localStorage.setItem("crm_agent_steps", JSON.stringify(steps));
 }
 
+export function addAgentStep(step: Omit<AgentStep, "id" | "createdAt">) {
+  const steps = getAgentSteps();
+  const newStep: AgentStep = {
+    ...step,
+    id: `step_${Math.random().toString(36).substr(2, 9)}`,
+    createdAt: new Date().toISOString(),
+  };
+  saveAgentSteps([...steps, newStep]);
+  return newStep;
+}
+
 export function getAgentApprovals(): AgentApproval[] {
   try {
     const data = localStorage.getItem("crm_agent_approvals");
@@ -665,6 +694,17 @@ export function getAgentApprovals(): AgentApproval[] {
 
 export function saveAgentApprovals(approvals: AgentApproval[]) {
   localStorage.setItem("crm_agent_approvals", JSON.stringify(approvals));
+}
+
+export function addAgentApproval(approval: Omit<AgentApproval, "id" | "createdAt">) {
+  const approvals = getAgentApprovals();
+  const newApproval: AgentApproval = {
+    ...approval,
+    id: `app_${Math.random().toString(36).substr(2, 9)}`,
+    createdAt: new Date().toISOString(),
+  };
+  saveAgentApprovals([newApproval, ...approvals]);
+  return newApproval;
 }
 
 export function getAgents(): Agent[] {
@@ -862,6 +902,8 @@ export interface MessagePreview {
   id: string;
   sender: string;
   target: string;
+  customerId?: string;
+  userId?: string;
   intent: string;
   subject: string;
   summary: string;
@@ -889,7 +931,28 @@ export function updateInboxMessage(
 export function getInboxMessages(): MessagePreview[] {
   try {
     const data = localStorage.getItem("crm_inbox");
-    if (data) return JSON.parse(data);
+    if (data) {
+      const customers = getCustomers();
+      let needsSave = false;
+      const parsed = (JSON.parse(data) as MessagePreview[]).map((msg) => {
+        if (!msg.customerId) {
+          const customer = customers.find((c) =>
+            c.contacts?.some(
+              (contact) =>
+                contact.value.toLowerCase() === msg.sender.toLowerCase() ||
+                contact.value.toLowerCase() === msg.target.toLowerCase(),
+            ),
+          );
+          if (customer) {
+            needsSave = true;
+            return { ...msg, customerId: customer.id, userId: customer.id };
+          }
+        }
+        return msg;
+      });
+      if (needsSave) saveInboxMessages(parsed);
+      return parsed;
+    }
   } catch (e) {}
 
   const initial: MessagePreview[] = [
@@ -897,6 +960,8 @@ export function getInboxMessages(): MessagePreview[] {
       id: "msg_local_1",
       sender: "john@acme.com",
       target: "agent@example.com",
+      customerId: "1",
+      userId: "1",
       intent: "Inquiry",
       subject: "Bulk Pricing Request",
       summary:
@@ -918,6 +983,8 @@ export function getInboxMessages(): MessagePreview[] {
       id: "msg_local_2",
       sender: "15550000001",
       target: "15551234567",
+      customerId: "2",
+      userId: "2",
       intent: "Support",
       subject: "MOQ clarification",
       summary:
@@ -963,6 +1030,19 @@ export function addDraftToThread(messageId: string, reply: string) {
     });
     saveInboxMessages(msgs);
   }
+}
+
+export function addOutboundMessage(message: Omit<MessagePreview, "id" | "read" | "date">) {
+  const msgs = getInboxMessages();
+  const newMessage: MessagePreview = {
+    ...message,
+    id: `msg_${Math.random().toString(36).substr(2, 9)}`,
+    read: true,
+    date: new Date().toLocaleString(),
+  };
+  msgs.unshift(newMessage);
+  saveInboxMessages(msgs);
+  return newMessage;
 }
 
 export function markMessageRead(messageId: string) {

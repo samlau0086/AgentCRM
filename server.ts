@@ -11,6 +11,7 @@ import jwt from "jsonwebtoken";
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_super_secret_key";
+const useSecureCookies = process.env.NODE_ENV === "production";
 
 app.use(express.json());
 app.use(cookieParser());
@@ -82,8 +83,8 @@ app.post("/api/login", async (req, res) => {
       );
       res.cookie("crm_token", token, {
         httpOnly: true,
-        secure: true,
-        sameSite: "none",
+        secure: useSecureCookies,
+        sameSite: useSecureCookies ? "none" : "lax",
       });
       return res.json({
         success: true,
@@ -130,8 +131,8 @@ app.post("/api/login", async (req, res) => {
 
     res.cookie("crm_token", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: useSecureCookies,
+      sameSite: useSecureCookies ? "none" : "lax",
       maxAge: 86400000, // 1 day
     });
 
@@ -153,8 +154,8 @@ app.post("/api/login", async (req, res) => {
 
 app.post("/api/logout", (req, res) => {
   res.clearCookie("crm_token", {
-    secure: true,
-    sameSite: "none",
+    secure: useSecureCookies,
+    sameSite: useSecureCookies ? "none" : "lax",
   });
   res.json({ success: true });
 });
@@ -220,8 +221,8 @@ app.put("/api/users/profile", authMiddleware, async (req: any, res: any) => {
     );
     res.cookie("crm_token", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: useSecureCookies,
+      sameSite: useSecureCookies ? "none" : "lax",
       maxAge: 86400000,
     });
 
@@ -504,15 +505,18 @@ const ai = new GoogleGenAI({
 });
 
 app.post("/api/ai/draft-reply", async (req, res) => {
+  const { message, intent, preferredLanguage = "en" } = req.body;
   if (!process.env.GEMINI_API_KEY) {
+    const mockReply =
+      preferredLanguage === "zh"
+        ? `您好，感谢您的来信。我们已了解您关于“${intent || "咨询"}”的需求：${message || "客户问题"}。我们可以根据订单规模提供更合适的方案，并会尽快确认交期与价格细节。`
+        : `[Mock AI Reply] Thanks for reaching out. Based on your ${intent || "inquiry"}, we can prepare a practical option for the requested volume and confirm pricing and lead time shortly.`;
     return res.json({
-      reply:
-        "[Mock AI Reply] Please configure GEMINI_API_KEY in settings to use real AI generation. Based on your inquiry, we can offer a 15% discount on bulk orders.",
+      reply: mockReply,
     });
   }
 
   try {
-    const { message, intent, preferredLanguage = "en" } = req.body;
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
       contents: `Draft a professional support reply to the following customer message summary: "${message}". The determined intent of the message is: ${intent}. Keep it concise, helpful, and under 3 paragraphs. Do not include placeholders like [Your Name]. PLEASE REPLY IN THIS LANGUAGE (very important): ${preferredLanguage}`,
@@ -529,20 +533,27 @@ app.post("/api/ai/draft-reply", async (req, res) => {
 });
 
 app.post("/api/ai/trigger-agent", async (req, res) => {
+  const { agentId, context, systemLanguage = "en" } = req.body;
   if (!process.env.GEMINI_API_KEY) {
+    const zhLogs = [
+      `[模拟] 已连接 CRM，正在执行 Agent ${agentId || ""}`,
+      "[模拟] 已读取客户上下文并评估风险：低",
+      "[模拟] 已生成建议动作并提交审批队列",
+      "执行完成。当前未配置 GEMINI_API_KEY，因此使用模拟流程。",
+    ];
+    const enLogs = [
+      `[Simulated] Connected to CRM for agent ${agentId || ""}`,
+      "[Simulated] Loaded customer context and evaluated risk: Low",
+      "[Simulated] Generated a recommended action and queued approval",
+      "Action completed. GEMINI_API_KEY is missing, so this was simulated.",
+    ];
     return res.json({
       success: true,
-      logs: [
-        "[Simulated] Connected to CRM",
-        "[Simulated] Evaluated risk: Low",
-        "[Simulated] Triggered automated email response.",
-        "Action completed. API key missing for real processing.",
-      ],
+      logs: systemLanguage === "zh" ? zhLogs : enLogs,
     });
   }
 
   try {
-    const { agentId, context, systemLanguage = "en" } = req.body;
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
       contents: `You are an autonomous agent system executing a workflow for agent ID ${agentId}. Based on this context: "${context}", generate a 4-step execution log of your actions. Format as a simple array of strings in JSON, like {"logs": ["step 1...", "step 2..."]}. VERY IMPORTANT: The logs MUST be written in this language: ${systemLanguage}.`,
@@ -580,15 +591,18 @@ app.post("/api/ai/vectorize-doc", async (req, res) => {
 });
 
 app.post("/api/ai/draft-proposal", async (req, res) => {
+  const { customerName, intent, preferredLanguage = "en" } = req.body;
   if (!process.env.GEMINI_API_KEY) {
+    const mockProposal =
+      preferredLanguage === "zh"
+        ? `[模拟方案] ${customerName || "客户"} 您好。基于当前 ${intent || "中等"} 意向，我们建议采用批量订单 5% 优惠，并可将 MOQ 分两批交付，以降低首次合作压力。`
+        : `[Mock Proposal] Hi ${customerName || "there"}, based on your ${intent || "medium"} intent, we recommend a 5% bulk-order discount and an option to split the MOQ across two deliveries.`;
     return res.json({
-      reply:
-        "[Mock Proposal] We are pleased to offer a 5% discount on bulk orders.",
+      reply: mockProposal,
     });
   }
 
   try {
-    const { customerName, intent, preferredLanguage = "en" } = req.body;
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
       contents: `Draft a professional sales proposal for ${customerName}. Their current intent is: ${intent}. Offer a 5% discount on bulk orders to close the deal. Keep it concise, helpful, and under 3 paragraphs. PLEASE REPLY IN THIS LANGUAGE (very important): ${preferredLanguage}`,

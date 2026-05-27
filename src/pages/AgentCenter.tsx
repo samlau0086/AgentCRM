@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
-import { getAgents, addAgent, updateAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, saveAgentApprovals } from "../services/db";
+import { getAgents, addAgent, updateAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, saveAgentApprovals, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
 
 export default function AgentCenter() {
   const { t, language } = useLanguage();
@@ -53,6 +53,16 @@ export default function AgentCenter() {
   };
 
   const handleTestAgent = async (agentId: string, wfName: string) => {
+    let runFailed = false;
+    const agent = agents.find((a) => a.id === agentId);
+    const run = addAgentRun({
+      agentId,
+      taskType: `Test: ${wfName}`,
+      status: "Running",
+      currentStep: "Initializing",
+      inputJson: { workflowName: wfName, language },
+    });
+    setRuns(getAgentRuns());
     setShowTestModal(true);
     setIsTestRunning(true);
     setTestLogs([
@@ -71,6 +81,28 @@ export default function AgentCenter() {
       });
       const data = await res.json();
       if (data.logs) {
+        data.logs.forEach((log: string, index: number) => {
+          addAgentStep({
+            runId: run.id,
+            stepType: index === 0 ? "Thought" : "Tool",
+            toolName: index === 0 ? "analyze_context" : "execute_step",
+            inputJson: { context: wfName },
+            outputJson: { log },
+            status: "Success",
+          });
+        });
+        if (agent?.harness === "Human-in-the-loop") {
+          addAgentApproval({
+            runId: run.id,
+            actionType: "send_email",
+            proposedPayload: {
+              to: "john@acme.com",
+              subject: `Follow-up from ${agent.name}`,
+              body: data.logs.join("\n"),
+            },
+            status: "Pending",
+          });
+        }
         setTestLogs((prev) => [
           ...prev,
           ...data.logs,
@@ -80,8 +112,30 @@ export default function AgentCenter() {
         setTestLogs((prev) => [...prev, "Failed to execute workflow."]);
       }
     } catch (err) {
+      runFailed = true;
+      addAgentStep({
+        runId: run.id,
+        stepType: "Tool",
+        toolName: "trigger_agent",
+        outputJson: { error: "Network error triggering agent." },
+        status: "Failed",
+      });
       setTestLogs((prev) => [...prev, "Network error triggering agent."]);
     } finally {
+      const updatedRuns = getAgentRuns().map((item) =>
+        item.id === run.id
+          ? {
+              ...item,
+              status: runFailed ? ("Failed" as const) : ("Completed" as const),
+              currentStep: runFailed ? "Failed" : "Completed",
+              errorMessage: runFailed ? "Network error triggering agent." : undefined,
+            }
+          : item,
+      );
+      localStorage.setItem("crm_agent_runs", JSON.stringify(updatedRuns));
+      setRuns(updatedRuns);
+      setSteps(getAgentSteps());
+      setApprovals(getAgentApprovals());
       setIsTestRunning(false);
     }
   };
@@ -121,6 +175,23 @@ export default function AgentCenter() {
       setEditingAgent({ ...editingAgent, status: newStatus as any });
     }
   };
+
+  const updateApprovalStatus = (id: string, status: "Approved" | "Rejected") => {
+    const updatedApprovals = getAgentApprovals().map((approval) =>
+      approval.id === id
+        ? {
+            ...approval,
+            status,
+            approvedAt: new Date().toISOString(),
+            approvedBy: "Current User",
+          }
+        : approval,
+    );
+    saveAgentApprovals(updatedApprovals);
+    setApprovals(updatedApprovals);
+  };
+
+  const pendingApprovals = approvals.filter((approval) => approval.status === "Pending");
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col w-full">
@@ -226,6 +297,13 @@ export default function AgentCenter() {
                         {agent.tasks}
                       </span>
                     </span>
+                    <button
+                      onClick={() => handleTestAgent(agent.id, agent.name)}
+                      className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-md transition-colors"
+                      title="Trigger/Test workflow"
+                    >
+                      <PlayCircle className="w-4 h-4" />
+                    </button>
                   </div>
                   {agent.integrations && agent.integrations.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5">
@@ -253,7 +331,7 @@ export default function AgentCenter() {
               Human Approvals
             </h2>
             <div className="flex-1 overflow-y-auto space-y-4">
-              {approvals.map(approval => {
+              {pendingApprovals.map(approval => {
                 const runInfo = runs.find(r => r.id === approval.runId);
                 const agentInfo = agents.find(a => a.id === runInfo?.agentId);
                 return (
@@ -288,19 +366,14 @@ export default function AgentCenter() {
                     <div className="flex justify-end gap-3 mt-4">
                       <button 
                         onClick={() => {
-                           const newApprovals = approvals.filter(a => a.id !== approval.id);
-                           setApprovals(newApprovals);
-                           saveAgentApprovals(newApprovals);
+                           updateApprovalStatus(approval.id, "Rejected");
                         }}
                         className="px-4 py-2 text-sm font-semibold flex items-center gap-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-transparent transition-colors rounded-lg">
                         <XCircle className="w-4 h-4" /> Reject
                       </button>
                       <button 
                         onClick={() => {
-                           // In a real app we would execute the approved action here
-                           const newApprovals = approvals.filter(a => a.id !== approval.id);
-                           setApprovals(newApprovals);
-                           saveAgentApprovals(newApprovals);
+                           updateApprovalStatus(approval.id, "Approved");
                         }}
                         className="px-5 py-2 flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors border border-transparent">
                         <CheckCircle2 className="w-4 h-4" /> Approve & Execute
@@ -309,7 +382,7 @@ export default function AgentCenter() {
                   </div>
                 );
               })}
-              {approvals.length === 0 && (
+              {pendingApprovals.length === 0 && (
                 <div className="text-center py-12">
                   <ShieldCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                   <h3 className="text-sm font-medium text-slate-900 dark:text-white">All Clear</h3>

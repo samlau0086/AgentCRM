@@ -39,6 +39,19 @@ export default function Sales() {
     setCustomers(getCustomers());
   }, []);
 
+  const calculateQuoteTotals = (quote: Partial<Quote>) => {
+    const items = quote.items || [];
+    const feeLines = quote.feeLines || [];
+    const subtotal = items.reduce((acc, it) => acc + it.unitPrice * it.quantity, 0);
+    const lineTotal = items.reduce((acc, it) => acc + Math.max(it.total, 0), 0);
+    const fees = feeLines.reduce((acc, f) => acc + f.amount, 0);
+    return {
+      subtotal,
+      totalDiscount: Math.max(subtotal - lineTotal, 0),
+      total: lineTotal + fees,
+    };
+  };
+
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct) return;
@@ -52,7 +65,8 @@ export default function Sales() {
         sku: editingProduct.sku || '',
         price: editingProduct.price || 0,
         currency: editingProduct.currency || 'USD',
-        status: editingProduct.status || 'Active'
+        status: editingProduct.status || 'Active',
+        image: editingProduct.image
       });
     }
     setProducts(getProducts());
@@ -75,22 +89,24 @@ export default function Sales() {
   const handleSaveQuote = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingQuote) return;
+    const totals = calculateQuoteTotals(editingQuote);
+    const quoteToSave = { ...editingQuote, ...totals };
 
     if (editingQuote.id) {
-      updateQuote(editingQuote.id, editingQuote);
+      updateQuote(editingQuote.id, quoteToSave);
     } else {
       addQuote({
-        customerId: editingQuote.customerId || '',
-        date: editingQuote.date || new Date().toISOString().split('T')[0],
-        validUntil: editingQuote.validUntil || '',
-        items: editingQuote.items || [],
-        feeLines: editingQuote.feeLines || [],
-        paymentTerms: editingQuote.paymentTerms || '',
-        subtotal: editingQuote.subtotal || 0,
-        totalDiscount: editingQuote.totalDiscount || 0,
-        total: editingQuote.total || 0,
-        status: editingQuote.status || 'Draft',
-        notes: editingQuote.notes || ''
+        customerId: quoteToSave.customerId || '',
+        date: quoteToSave.date || new Date().toISOString().split('T')[0],
+        validUntil: quoteToSave.validUntil || '',
+        items: quoteToSave.items || [],
+        feeLines: quoteToSave.feeLines || [],
+        paymentTerms: quoteToSave.paymentTerms || '',
+        subtotal: quoteToSave.subtotal || 0,
+        totalDiscount: quoteToSave.totalDiscount || 0,
+        total: quoteToSave.total || 0,
+        status: quoteToSave.status || 'Draft',
+        notes: quoteToSave.notes || ''
       });
     }
     setQuotes(getQuotes());
@@ -402,7 +418,7 @@ export default function Sales() {
                   {editingQuote?.items?.map((item, idx) => (
                     <div key={idx} className="flex gap-2 items-start bg-slate-50 dark:bg-white/5 p-3 rounded-lg border border-slate-200 dark:border-white/5">
                       <div className="flex-1 space-y-2">
-                         <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-2">
+                         <div className="grid grid-cols-[2fr_0.8fr_1fr_1fr_1fr] gap-2">
                            <select 
                              value={item.productId} 
                              onChange={e => {
@@ -410,7 +426,7 @@ export default function Sales() {
                                const prod = products.find(p => p.id === prodId);
                                if (prod) {
                                  const newItems = [...(editingQuote.items || [])];
-                                 newItems[idx] = { ...item, productId: prod.id, name: prod.name, unitPrice: prod.price, total: prod.price * item.quantity };
+                                 newItems[idx] = { ...item, productId: prod.id, name: prod.name, unitPrice: prod.price, total: Math.max(prod.price * item.quantity - item.discount, 0) };
                                  setEditingQuote({ ...editingQuote, items: newItems });
                                }
                              }}
@@ -422,13 +438,19 @@ export default function Sales() {
                            <input type="number" min="1" placeholder="Qty" value={item.quantity} onChange={e => {
                              const q = parseInt(e.target.value) || 0;
                              const newItems = [...(editingQuote.items || [])];
-                             newItems[idx] = { ...item, quantity: q, total: (item.unitPrice * q) - item.discount };
+                             newItems[idx] = { ...item, quantity: q, total: Math.max(item.unitPrice * q - item.discount, 0) };
                              setEditingQuote({ ...editingQuote, items: newItems });
                            }} className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none" />
                            <input type="number" step="0.01" placeholder="Price" value={item.unitPrice} onChange={e => {
                              const p = parseFloat(e.target.value) || 0;
                              const newItems = [...(editingQuote.items || [])];
-                             newItems[idx] = { ...item, unitPrice: p, total: (p * item.quantity) - item.discount };
+                             newItems[idx] = { ...item, unitPrice: p, total: Math.max(p * item.quantity - item.discount, 0) };
+                             setEditingQuote({ ...editingQuote, items: newItems });
+                           }} className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none" />
+                           <input type="number" step="0.01" min="0" placeholder="Discount" value={item.discount} onChange={e => {
+                             const discount = parseFloat(e.target.value) || 0;
+                             const newItems = [...(editingQuote.items || [])];
+                             newItems[idx] = { ...item, discount, total: Math.max(item.unitPrice * item.quantity - discount, 0) };
                              setEditingQuote({ ...editingQuote, items: newItems });
                            }} className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none" />
                            <div className="flex items-center px-2 py-1.5 bg-slate-100 dark:bg-white/10 rounded text-xs font-medium text-slate-800 dark:text-slate-200">
@@ -532,11 +554,7 @@ export default function Sales() {
               <div className="pt-2 flex justify-end gap-3">
                 <button type="button" onClick={() => setIsQuoteModalOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors">Cancel</button>
                 <button type="submit" onClick={() => {
-                  const items = editingQuote?.items || [];
-                  const feeLines = editingQuote?.feeLines || [];
-                  const subtotal = items.reduce((acc, it) => acc + (it.unitPrice * it.quantity), 0);
-                  const total = items.reduce((acc, it) => acc + it.total, 0) + feeLines.reduce((acc, f) => acc + f.amount, 0);
-                  setEditingQuote(prev => prev ? { ...prev, subtotal, total, totalDiscount: subtotal - items.reduce((acc, it) => acc + it.total, 0) } : null);
+                  setEditingQuote(prev => prev ? { ...prev, ...calculateQuoteTotals(prev) } : null);
                 }} className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-sm">Save Quote</button>
               </div>
             </form>

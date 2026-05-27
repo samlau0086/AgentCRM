@@ -48,6 +48,15 @@ export default function Settings() {
   const [pushAlerts, setPushAlerts] = useState(true);
 
   useEffect(() => {
+    const savedAgentConfigs = localStorage.getItem('agent_configs');
+    if (savedAgentConfigs) {
+      try {
+        setAgentConfigs(prev => ({ ...prev, ...JSON.parse(savedAgentConfigs) }));
+      } catch (e) {}
+    }
+    setTimezone(localStorage.getItem('crm_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
+    setEmailAlerts(localStorage.getItem('crm_email_alerts') !== 'false');
+    setPushAlerts(localStorage.getItem('crm_push_alerts') !== 'false');
     setReceiveProfiles(getReceiveProfiles());
     setSendProfiles(getSendProfiles());
     setEmailMappings(getEmailMappings());
@@ -57,6 +66,18 @@ export default function Settings() {
       .then(data => setVectorStatus(data))
       .catch(err => setVectorStatus({ configured: false, status: 'Error', details: err.message }));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('crm_timezone', timezone);
+  }, [timezone]);
+
+  useEffect(() => {
+    localStorage.setItem('crm_email_alerts', String(emailAlerts));
+  }, [emailAlerts]);
+
+  useEffect(() => {
+    localStorage.setItem('crm_push_alerts', String(pushAlerts));
+  }, [pushAlerts]);
 
   const handleInitVector = async () => {
     try {

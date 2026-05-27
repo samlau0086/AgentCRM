@@ -32,10 +32,11 @@ export default function KnowledgeBase() {
     try {
       // Simulate reading and call our vectorization ai endpoint
       setUploadProgress(30);
+      const content = await selectedFile.text().catch(() => "");
       const res = await fetch('/api/ai/vectorize-doc', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ filename: selectedFile.name, content: '' })
+        body: JSON.stringify({ filename: selectedFile.name, content })
       });
       const data = await res.json();
       setUploadProgress(70);
@@ -48,6 +49,7 @@ export default function KnowledgeBase() {
             pieces: data.pieces || Math.floor(Math.random() * 50) + 10,
             status: 'Active (Vectorized)',
             date: 'Just now',
+            content: content.slice(0, 5000),
           });
           
           setDocuments(getDocuments());
