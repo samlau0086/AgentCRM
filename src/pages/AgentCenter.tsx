@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
-import { getAgents, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
+import { getAgents, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, saveAgentSteps, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
 import { notify } from "../services/notifications";
 import ConfirmModal from "../components/ConfirmModal";
 
@@ -98,6 +98,10 @@ export default function AgentCenter() {
     deleteAgentTitle: "删除智能体",
     deleteAgentMessage: "确定要删除这个智能体吗？相关历史运行记录会保留，但该智能体不会再显示在列表中。",
     deleteConfirm: "删除",
+    deleteRun: "删除日志",
+    deleteRunTitle: "删除运行日志",
+    deleteRunMessage: "确定要删除这条智能体运行日志吗？关联的追踪步骤和审批记录也会一起删除。",
+    runDeleted: "运行日志已删除",
     active: "运行中",
     idle: "空闲",
     disabled: "已停用",
@@ -162,6 +166,10 @@ export default function AgentCenter() {
     deleteAgentTitle: "Delete Agent",
     deleteAgentMessage: "Are you sure you want to delete this agent? Existing run history will remain, but the agent will no longer appear in the list.",
     deleteConfirm: "Delete",
+    deleteRun: "Delete Log",
+    deleteRunTitle: "Delete Run Log",
+    deleteRunMessage: "Delete this agent run log? Related trace steps and approval records will also be removed.",
+    runDeleted: "Run log deleted",
     active: "Active",
     idle: "Idle",
     disabled: "Disabled",
@@ -250,6 +258,7 @@ export default function AgentCenter() {
   const [testLogs, setTestLogs] = useState<string[]>([]);
   const [showTestModal, setShowTestModal] = useState(false);
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
 
   const handleEdit = (agent: Agent) => {
     setEditingAgent(agent);
@@ -412,6 +421,22 @@ export default function AgentCenter() {
       setIsModalOpen(false);
     }
     setDeletingAgentId(null);
+  };
+
+  const confirmDeleteRun = () => {
+    if (!deletingRunId) return;
+    const updatedRuns = getAgentRuns().filter((run) => run.id !== deletingRunId);
+    const updatedSteps = getAgentSteps().filter((step) => step.runId !== deletingRunId);
+    const updatedApprovals = getAgentApprovals().filter((approval) => approval.runId !== deletingRunId);
+
+    saveAgentRuns(updatedRuns);
+    saveAgentSteps(updatedSteps);
+    saveAgentApprovals(updatedApprovals);
+    setRuns(updatedRuns);
+    setSteps(updatedSteps);
+    setApprovals(updatedApprovals);
+    setDeletingRunId(null);
+    notify(copy.runDeleted, "success");
   };
 
   const updateApprovalStatus = (id: string, status: "Approved" | "Rejected") => {
@@ -663,12 +688,23 @@ export default function AgentCenter() {
                 const runSteps = steps.filter(s => s.runId === run.id);
                 return (
                   <div key={run.id} className="p-4 border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-black/20 rounded-xl">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <span className={cn("flex w-2.5 h-2.5 rounded-full", run.status === 'Running' ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" : run.status === 'Pending' ? "bg-amber-500" : run.status === 'Failed' ? "bg-red-500" : "bg-emerald-500")} />
-                        <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">{runTaskLabel(run.taskType)}</h3>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={cn("flex w-2.5 h-2.5 rounded-full shrink-0", run.status === 'Running' ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" : run.status === 'Pending' ? "bg-amber-500" : run.status === 'Failed' ? "bg-red-500" : "bg-emerald-500")} />
+                        <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm truncate">{runTaskLabel(run.taskType)}</h3>
                       </div>
-                      <span className="text-xs text-slate-500">{statusLabel(run.status)}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs text-slate-500">{statusLabel(run.status)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingRunId(run.id)}
+                          title={copy.deleteRun}
+                          aria-label={copy.deleteRun}
+                          className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                     <div className="text-xs text-slate-500 mb-4 flex items-center gap-2">
                       <Bot className="w-3 h-3" /> {agentName(agentInfo)}
@@ -929,6 +965,15 @@ export default function AgentCenter() {
         cancelText={copy.cancel}
         onConfirm={confirmDeleteAgent}
         onCancel={() => setDeletingAgentId(null)}
+      />
+      <ConfirmModal
+        isOpen={deletingRunId !== null}
+        title={copy.deleteRunTitle}
+        message={copy.deleteRunMessage}
+        confirmText={copy.deleteConfirm}
+        cancelText={copy.cancel}
+        onConfirm={confirmDeleteRun}
+        onCancel={() => setDeletingRunId(null)}
       />
     </div>
   );
