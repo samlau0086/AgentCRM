@@ -606,11 +606,15 @@ export function getAgents(): Agent[] {
   try {
     const data = localStorage.getItem("crm_agents");
     if (data) {
-      let parsed = JSON.parse(data);
-      const existingIds = new Set(parsed.map((agent: Agent) => agent.id));
-      const missingBuiltIns = builtInAgents().filter((agent) => !existingIds.has(agent.id));
-      if (missingBuiltIns.length > 0) {
-        parsed = [...parsed, ...missingBuiltIns];
+      let parsed = JSON.parse(data) as Agent[];
+      const legacyLeadAgent = parsed.find((agent) => agent.id === "5");
+      if (legacyLeadAgent) {
+        parsed = [
+          { ...legacyLeadAgent, id: "lead_generation" },
+          ...parsed.filter(
+            (agent) => agent.id !== "5" && agent.id !== "lead_generation",
+          ),
+        ];
       }
       const normalized = parsed.map((agent: Agent) => ({
         ...agent,

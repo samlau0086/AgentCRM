@@ -18,12 +18,14 @@ import {
   Zap,
   CheckCircle2,
   XCircle,
-  ListTodo
+  ListTodo,
+  Trash2
 } from "lucide-react";
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
-import { getAgents, addAgent, updateAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
+import { getAgents, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
 import { notify } from "../services/notifications";
+import ConfirmModal from "../components/ConfirmModal";
 
 export default function AgentCenter() {
   const { t, language } = useLanguage();
@@ -82,6 +84,10 @@ export default function AgentCenter() {
     activateAgent: "启用智能体",
     cancel: "取消",
     saveChanges: "保存更改",
+    deleteAgent: "删除智能体",
+    deleteAgentTitle: "删除智能体",
+    deleteAgentMessage: "确定要删除这个智能体吗？相关历史运行记录会保留，但该智能体不会再显示在列表中。",
+    deleteConfirm: "删除",
     active: "运行中",
     idle: "空闲",
     disabled: "已停用",
@@ -141,6 +147,10 @@ export default function AgentCenter() {
     activateAgent: "Activate Agent",
     cancel: "Cancel",
     saveChanges: "Save Changes",
+    deleteAgent: "Delete Agent",
+    deleteAgentTitle: "Delete Agent",
+    deleteAgentMessage: "Are you sure you want to delete this agent? Existing run history will remain, but the agent will no longer appear in the list.",
+    deleteConfirm: "Delete",
     active: "Active",
     idle: "Idle",
     disabled: "Disabled",
@@ -228,6 +238,7 @@ export default function AgentCenter() {
   const [isTestRunning, setIsTestRunning] = useState(false);
   const [testLogs, setTestLogs] = useState<string[]>([]);
   const [showTestModal, setShowTestModal] = useState(false);
+  const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
 
   const handleEdit = (agent: Agent) => {
     setEditingAgent(agent);
@@ -379,6 +390,17 @@ export default function AgentCenter() {
     }
   };
 
+  const confirmDeleteAgent = () => {
+    if (!deletingAgentId) return;
+    deleteAgent(deletingAgentId);
+    setAgents(getAgents());
+    if (editingAgent?.id === deletingAgentId) {
+      setEditingAgent(null);
+      setIsModalOpen(false);
+    }
+    setDeletingAgentId(null);
+  };
+
   const updateApprovalStatus = (id: string, status: "Approved" | "Rejected") => {
     const updatedApprovals = getAgentApprovals().map((approval) =>
       approval.id === id
@@ -479,6 +501,14 @@ export default function AgentCenter() {
                         className="p-1 text-slate-400 hover:text-blue-600 bg-transparent rounded transition-colors opacity-0 group-hover:opacity-100"
                       >
                         <Settings className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setDeletingAgentId(agent.id)}
+                        className="p-1 text-slate-400 hover:text-red-500 bg-transparent rounded transition-colors opacity-0 group-hover:opacity-100"
+                        title={copy.deleteAgent}
+                        aria-label={copy.deleteAgent}
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -846,6 +876,15 @@ export default function AgentCenter() {
                 >
                   {copy.cancel}
                 </button>
+                {editingAgent && (
+                  <button
+                    type="button"
+                    onClick={() => setDeletingAgentId(editingAgent.id)}
+                    className="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-500/20"
+                  >
+                    {copy.deleteAgent}
+                  </button>
+                )}
                 <button
                   type="submit"
                   className="px-5 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors shadow-sm flex items-center gap-2"
@@ -858,6 +897,15 @@ export default function AgentCenter() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        isOpen={deletingAgentId !== null}
+        title={copy.deleteAgentTitle}
+        message={copy.deleteAgentMessage}
+        confirmText={copy.deleteConfirm}
+        cancelText={copy.cancel}
+        onConfirm={confirmDeleteAgent}
+        onCancel={() => setDeletingAgentId(null)}
+      />
     </div>
   );
 }
