@@ -4,7 +4,7 @@ import { useTheme } from '../theme';
 import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { cn } from '../Layout';
 import { ReceiveProfile, SendProfile, EmailMapping, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings } from '../services/emailSync';
-import { ModelProfile, getModelProfiles, saveModelProfiles } from '../services/db';
+import { Agent, ModelProfile, getAgents, getModelProfiles, saveModelProfiles, updateAgent } from '../services/db';
 
 type Tab = 'general' | 'agents' | 'integrations';
 
@@ -56,6 +56,7 @@ export default function Settings() {
   const [sendProfiles, setSendProfiles] = useState<SendProfile[]>([]);
   const [emailMappings, setEmailMappings] = useState<EmailMapping[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
 
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
 
@@ -84,6 +85,7 @@ export default function Settings() {
     setSendProfiles(getSendProfiles());
     setEmailMappings(getEmailMappings());
     setModelProfiles(getModelProfiles());
+    setAgents(getAgents());
     
     fetch('/api/config/vector')
       .then(res => res.json())
@@ -194,6 +196,11 @@ export default function Settings() {
       return;
     }
     setModelProfiles(modelProfiles.filter(profile => profile.id !== id));
+  };
+
+  const assignAgentModelProfile = (agentId: string, modelProfileId: string) => {
+    updateAgent(agentId, { modelProfileId });
+    setAgents(getAgents());
   };
 
   const addReceiveProfile = () => {
@@ -500,6 +507,36 @@ export default function Settings() {
                   })}
                 </div>
 
+              </div>
+            </section>
+
+            <section>
+              <div className="bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 rounded-2xl p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Agent Profile Assignments</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Choose which model profile each agent uses when it executes.</p>
+                </div>
+                <div className="space-y-3">
+                  {agents.map(agent => (
+                    <div key={agent.id} className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3 items-center bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/5 rounded-xl p-4">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{agent.name}</div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1">{agent.role}</p>
+                      </div>
+                      <select
+                        value={agent.modelProfileId || modelProfiles[0]?.id || "default_google"}
+                        onChange={e => assignAgentModelProfile(agent.id, e.target.value)}
+                        className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
+                      >
+                        {modelProfiles.map(profile => (
+                          <option key={profile.id} value={profile.id}>
+                            {profile.name} ({profile.provider} / {profile.model})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
           </div>

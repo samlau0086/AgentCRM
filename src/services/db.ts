@@ -432,6 +432,56 @@ export function saveModelProfiles(profiles: ModelProfile[]) {
   notifyDataChanged("crm_model_profiles");
 }
 
+function builtInAgents(): Agent[] {
+  return [
+    {
+      id: "orchestrator",
+      name: "Orchestrator Agent",
+      role: "Routes CRM work to specialized agents and summarizes outcomes.",
+      status: "Active",
+      tasks: 0,
+      harness: "Auto",
+      modelProfileId: "default_google",
+    },
+    {
+      id: "sdr",
+      name: "Sales Development Agent",
+      role: "Researches prospects, identifies high-intent leads, and prepares outreach.",
+      status: "Active",
+      tasks: 0,
+      harness: "Human-in-the-loop",
+      modelProfileId: "default_google",
+    },
+    {
+      id: "support",
+      name: "Support Agent",
+      role: "Drafts helpful replies and resolves customer questions using CRM context.",
+      status: "Active",
+      tasks: 0,
+      harness: "Human-in-the-loop",
+      modelProfileId: "default_google",
+    },
+    {
+      id: "lead_generation",
+      name: "Lead Generation Agent",
+      role: "Uses configured lead platforms to discover, enrich, and prepare new prospects.",
+      status: "Active",
+      tasks: 0,
+      harness: "Human-in-the-loop",
+      modelProfileId: "default_google",
+      integrations: [
+        "Outscraper",
+        "Apify",
+        "PhantomBuster",
+        "Scrap.io",
+        "HasData",
+        "Decodo",
+        "Clay.com",
+      ],
+    },
+  ];
+}
+
 export interface AgentRun {
   id: string;
   customerId?: string;
@@ -553,26 +603,10 @@ export function getAgents(): Agent[] {
     const data = localStorage.getItem("crm_agents");
     if (data) {
       let parsed = JSON.parse(data);
-      if (!parsed.find((a: any) => a.id === "5")) {
-        parsed.push({
-          id: "5",
-          name: "Lead Generation Agent",
-          role: "Navigates and scrapes leads autonomously.",
-          status: "Active",
-          tasks: 0,
-          harness: "Human-in-the-loop",
-          modelProfileId: "default_google",
-          integrations: [
-            "Outscraper",
-            "Apify",
-            "PhantomBuster",
-            "Scrap.io",
-            "HasData",
-            "Decodo",
-            "Clay.com",
-          ],
-        });
-        saveAgents(parsed);
+      const existingIds = new Set(parsed.map((agent: Agent) => agent.id));
+      const missingBuiltIns = builtInAgents().filter((agent) => !existingIds.has(agent.id));
+      if (missingBuiltIns.length > 0) {
+        parsed = [...parsed, ...missingBuiltIns];
       }
       const normalized = parsed.map((agent: Agent) => ({
         ...agent,
@@ -585,7 +619,7 @@ export function getAgents(): Agent[] {
     }
   } catch (e) {}
 
-  const initial: Agent[] = [];
+  const initial: Agent[] = builtInAgents();
   saveAgents(initial);
   return initial;
 }
