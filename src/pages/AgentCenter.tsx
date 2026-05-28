@@ -165,6 +165,7 @@ export default function AgentCenter() {
     allClear: "暂无待审批项",
     noApprovals: "当前没有需要人工审批的智能体动作。",
     runsTitle: "智能体运行与追踪日志",
+    noRuns: "当前没有智能体运行日志",
     executionLog: "智能体执行日志",
     processing: "正在处理 AI 任务...",
     configureAgent: "配置智能体",
@@ -210,7 +211,13 @@ export default function AgentCenter() {
     deleteRun: "删除日志",
     deleteRunTitle: "删除运行日志",
     deleteRunMessage: "确定要删除这条智能体运行日志吗？关联的追踪步骤和审批记录也会一起删除。",
+    clearRuns: "清空日志",
+    clearRunsTitle: "清空运行日志",
+    clearRunsMessage: "确定要清空所有智能体运行日志吗？关联的追踪步骤和审批记录也会一起删除。",
+    logsLimit: "最多展示",
+    logsUnit: "条",
     runDeleted: "运行日志已删除",
+    runsCleared: "运行日志已清空",
     active: "运行中",
     idle: "空闲",
     disabled: "已停用",
@@ -257,6 +264,7 @@ export default function AgentCenter() {
     allClear: "All Clear",
     noApprovals: "No pending approvals required.",
     runsTitle: "Agent Runs & Trace Log",
+    noRuns: "No agent run logs yet",
     executionLog: "Agent Execution Log",
     processing: "Processing AI tasks...",
     configureAgent: "Configure Agent",
@@ -302,7 +310,13 @@ export default function AgentCenter() {
     deleteRun: "Delete Log",
     deleteRunTitle: "Delete Run Log",
     deleteRunMessage: "Delete this agent run log? Related trace steps and approval records will also be removed.",
+    clearRuns: "Clear Logs",
+    clearRunsTitle: "Clear Run Logs",
+    clearRunsMessage: "Clear all agent run logs? Related trace steps and approval records will also be removed.",
+    logsLimit: "Show up to",
+    logsUnit: "logs",
     runDeleted: "Run log deleted",
+    runsCleared: "Run logs cleared",
     active: "Active",
     idle: "Idle",
     disabled: "Disabled",
@@ -391,6 +405,10 @@ export default function AgentCenter() {
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [approvals, setApprovals] = useState<AgentApproval[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
+  const [runLogLimit, setRunLogLimit] = useState(() => {
+    const saved = parseInt(localStorage.getItem("crm_agent_run_log_limit") || "20", 10);
+    return Number.isFinite(saved) && saved > 0 ? saved : 20;
+  });
   const [activeTab, setActiveTab] = useState<'agents' | 'harness'>('harness');
   const [selectedWorkflowTargets, setSelectedWorkflowTargets] = useState<Record<string, string>>({});
   const [scheduleModeDraft, setScheduleModeDraft] = useState<"interval" | "monthly">("interval");
@@ -429,6 +447,7 @@ export default function AgentCenter() {
   const [showTestModal, setShowTestModal] = useState(false);
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+  const [isClearingRuns, setIsClearingRuns] = useState(false);
 
   const refreshAgentRuntimeState = () => {
     setRuns(getAgentRuns());
@@ -771,6 +790,17 @@ export default function AgentCenter() {
     notify(copy.runDeleted, "success");
   };
 
+  const confirmClearRuns = () => {
+    saveAgentRuns([]);
+    saveAgentSteps([]);
+    saveAgentApprovals([]);
+    setRuns([]);
+    setSteps([]);
+    setApprovals([]);
+    setIsClearingRuns(false);
+    notify(copy.runsCleared, "success");
+  };
+
   const updateApprovalStatus = (id: string, status: "Approved" | "Rejected") => {
     const approvalToUpdate = getAgentApprovals().find((approval) => approval.id === id);
     if (status === "Approved" && approvalToUpdate?.actionType === "execute_workflow") {
@@ -831,6 +861,13 @@ export default function AgentCenter() {
   };
 
   const pendingApprovals = approvals.filter((approval) => approval.status === "Pending");
+  const visibleRuns = runs.slice(0, runLogLimit);
+
+  const updateRunLogLimit = (value: number) => {
+    const nextLimit = Math.max(1, Math.min(500, value || 20));
+    setRunLogLimit(nextLimit);
+    localStorage.setItem("crm_agent_run_log_limit", String(nextLimit));
+  };
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col w-full">
@@ -1395,12 +1432,37 @@ export default function AgentCenter() {
           </div>
           
           <div className="bg-white dark:bg-white/5 shadow-sm border border-slate-200 dark:border-white/10 rounded-2xl p-6 flex flex-col">
-            <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-              <ListTodo className="w-4 h-4 text-slate-400" />
-              {copy.runsTitle}
-            </h2>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+              <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <ListTodo className="w-4 h-4 text-slate-400" />
+                {copy.runsTitle}
+              </h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-slate-500">
+                  <span>{copy.logsLimit}</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    value={runLogLimit}
+                    onChange={(event) => updateRunLogLimit(parseInt(event.target.value, 10))}
+                    className="w-20 bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs text-slate-700 dark:text-slate-300 outline-none focus:border-blue-500"
+                  />
+                  <span>{copy.logsUnit}</span>
+                </label>
+                <button
+                  type="button"
+                  disabled={runs.length === 0}
+                  onClick={() => setIsClearingRuns(true)}
+                  className="px-2.5 py-1.5 text-xs font-medium text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {copy.clearRuns}
+                </button>
+              </div>
+            </div>
             <div className="flex-1 overflow-y-auto space-y-4">
-              {runs.map(run => {
+              {visibleRuns.map(run => {
                 const agentInfo = agents.find(a => a.id === run.agentId);
                 const runSteps = steps.filter(s => s.runId === run.id);
                 return (
@@ -1441,6 +1503,12 @@ export default function AgentCenter() {
                   </div>
                 );
               })}
+              {visibleRuns.length === 0 && (
+                <div className="text-center py-12">
+                  <ListTodo className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                  <h3 className="text-sm font-medium text-slate-900 dark:text-white">{copy.noRuns}</h3>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1497,6 +1565,15 @@ export default function AgentCenter() {
         cancelText={copy.cancel}
         onConfirm={confirmDeleteRun}
         onCancel={() => setDeletingRunId(null)}
+      />
+      <ConfirmModal
+        isOpen={isClearingRuns}
+        title={copy.clearRunsTitle}
+        message={copy.clearRunsMessage}
+        confirmText={copy.clearRuns}
+        cancelText={copy.cancel}
+        onConfirm={confirmClearRuns}
+        onCancel={() => setIsClearingRuns(false)}
       />
     </div>
   );
