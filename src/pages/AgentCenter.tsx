@@ -176,6 +176,19 @@ export default function AgentCenter() {
     autoExecute: "自动执行（无需审批）",
     humanLoop: "人工确认（需要审批）",
     harnessHelp: "决定该智能体是否可以直接执行动作，或是否必须先提交草稿等待审批。",
+    schedule: "执行周期",
+    scheduleMode: "周期类型",
+    scheduleUnit: "周期单位",
+    intervalSchedule: "每隔一段时间",
+    monthlySchedule: "每月指定日期",
+    every: "每隔",
+    monthlyDay: "每月第 N 日",
+    executionCount: "执行次数",
+    unlimitedRuns: "0 表示不限次数",
+    seconds: "秒",
+    minutes: "分",
+    hours: "小时",
+    days: "天",
     modelProfile: "模型 Profile",
     modelProfileHelp: "先在设置里配置模型 Profile，然后在这里分配给智能体。",
     tools: "可用工具",
@@ -255,6 +268,19 @@ export default function AgentCenter() {
     autoExecute: "Auto-execute (No approval needed)",
     humanLoop: "Human-in-the-loop (Requires approval)",
     harnessHelp: "Determines whether this agent can immediately send messages or if drafts must be approved.",
+    schedule: "Execution Schedule",
+    scheduleMode: "Schedule Type",
+    scheduleUnit: "Schedule Unit",
+    intervalSchedule: "Every interval",
+    monthlySchedule: "Monthly day",
+    every: "Every",
+    monthlyDay: "Day of month",
+    executionCount: "Execution Count",
+    unlimitedRuns: "0 means unlimited runs",
+    seconds: "Seconds",
+    minutes: "Minutes",
+    hours: "Hours",
+    days: "Days",
     modelProfile: "Model Profile",
     modelProfileHelp: "Configure profiles in Settings, then assign one to each agent here.",
     tools: "Available Tools",
@@ -329,6 +355,22 @@ export default function AgentCenter() {
     status;
   const harnessLabel = (harness: string) =>
     harness === "Auto" ? copy.auto : harness === "Human-in-the-loop" ? copy.human : harness;
+  const scheduleLabel = (agent: Agent) => {
+    const schedule = agent.schedule;
+    if (!schedule) return "";
+    const limit = schedule.maxRuns && schedule.maxRuns > 0
+      ? ` / ${copy.executionCount}: ${schedule.executedRuns || 0}/${schedule.maxRuns}`
+      : "";
+    if (schedule.mode === "monthly") {
+      return `${copy.monthlyDay}: ${schedule.monthlyDay || 1}${limit}`;
+    }
+    const unitLabel =
+      schedule.intervalUnit === "seconds" ? copy.seconds :
+      schedule.intervalUnit === "minutes" ? copy.minutes :
+      schedule.intervalUnit === "hours" ? copy.hours :
+      copy.days;
+    return `${copy.every} ${schedule.intervalEvery || 1} ${unitLabel}${limit}`;
+  };
   const actionLabel = (action: string) =>
     action === "review_agent_test_result" ? copy.reviewAgentTest :
     action === "execute_workflow" ? copy.runWorkflow :
@@ -640,9 +682,17 @@ export default function AgentCenter() {
     const selectedTools = formData.getAll("tools").map(String);
     const selectedIntegrations = formData.getAll("integrations").map(String);
     const selectedWorkflows = formData.getAll("workflowIds").map(String);
+    const schedule = {
+      mode: (data.scheduleMode as "interval" | "monthly") || "interval",
+      intervalEvery: Math.max(1, parseInt((data.intervalEvery as string) || "1", 10)),
+      intervalUnit: ((data.intervalUnit as string) || "days") as "seconds" | "minutes" | "hours" | "days",
+      monthlyDay: Math.min(31, Math.max(1, parseInt((data.monthlyDay as string) || "1", 10))),
+      maxRuns: Math.max(0, parseInt((data.maxRuns as string) || "0", 10)),
+      executedRuns: editingAgent?.schedule?.executedRuns || 0,
+    };
 
     if (editingAgent) {
-      updateAgent(editingAgent.id, { ...(Object.fromEntries(formData) as any), modelProfileId, tools: selectedTools, integrations: selectedIntegrations, workflowIds: selectedWorkflows });
+      updateAgent(editingAgent.id, { ...(Object.fromEntries(formData) as any), modelProfileId, tools: selectedTools, integrations: selectedIntegrations, workflowIds: selectedWorkflows, schedule });
     } else {
       addAgent({
         name: data.name as string,
@@ -653,6 +703,7 @@ export default function AgentCenter() {
         tools: selectedTools,
         integrations: selectedIntegrations,
         workflowIds: selectedWorkflows,
+        schedule,
       });
     }
     setAgents(getAgents());
@@ -874,6 +925,11 @@ export default function AgentCenter() {
                         {agent.tasks}
                       </span>
                     </span>
+                    {scheduleLabel(agent) && (
+                      <span className="text-[10px] font-mono tracking-widest uppercase text-slate-500 bg-slate-100 dark:bg-black/20 px-2 py-1 rounded-md border border-slate-200 dark:border-white/5 truncate max-w-[150px]" title={scheduleLabel(agent)}>
+                        {scheduleLabel(agent)}
+                      </span>
+                    )}
                     <button
                       onClick={() => handleTestAgent(agent.id, agent.name)}
                       className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-md transition-colors"
@@ -1017,6 +1073,73 @@ export default function AgentCenter() {
                       <option value="Human-in-the-loop">{copy.humanLoop}</option>
                     </select>
                     <p className="text-xs text-slate-500 mt-2">{copy.harnessHelp}</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                        {copy.schedule}
+                      </label>
+                      <select
+                        name="scheduleMode"
+                        defaultValue={editingAgent?.schedule?.mode || "interval"}
+                        className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
+                      >
+                        <option value="interval">{copy.intervalSchedule}</option>
+                        <option value="monthly">{copy.monthlySchedule}</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.every}</span>
+                        <input
+                          type="number"
+                          name="intervalEvery"
+                          min="1"
+                          defaultValue={editingAgent?.schedule?.intervalEvery || 1}
+                          className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.scheduleUnit}</span>
+                        <select
+                          name="intervalUnit"
+                          defaultValue={editingAgent?.schedule?.intervalUnit || "days"}
+                          className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                        >
+                          <option value="seconds">{copy.seconds}</option>
+                          <option value="minutes">{copy.minutes}</option>
+                          <option value="hours">{copy.hours}</option>
+                          <option value="days">{copy.days}</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.monthlyDay}</span>
+                        <input
+                          type="number"
+                          name="monthlyDay"
+                          min="1"
+                          max="31"
+                          defaultValue={editingAgent?.schedule?.monthlyDay || 1}
+                          className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.executionCount}</span>
+                        <input
+                          type="number"
+                          name="maxRuns"
+                          min="0"
+                          defaultValue={editingAgent?.schedule?.maxRuns ?? 0}
+                          className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                        />
+                        <span className="block text-[10px] text-slate-500 mt-1">{copy.unlimitedRuns}</span>
+                      </label>
+                    </div>
                   </div>
 
                   <div>

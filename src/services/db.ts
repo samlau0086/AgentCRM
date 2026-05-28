@@ -53,10 +53,23 @@ export interface PublicLead {
   enrichedAt?: string;
 }
 
+function isDemoPublicLead(lead: PublicLead) {
+  const text = [lead.id, lead.name, lead.contact, lead.source, lead.description]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return /\b(mock|demo|sample|test|fake|placeholder)\b/.test(text) || text.includes("techflow solutions");
+}
+
 export function getPublicLeads(): PublicLead[] {
   try {
     const data = localStorage.getItem("crm_public_leads");
-    if (data) return JSON.parse(data);
+    if (data) {
+      const parsed = JSON.parse(data) as PublicLead[];
+      const realLeads = parsed.filter((lead) => !isDemoPublicLead(lead));
+      if (realLeads.length !== parsed.length) savePublicLeads(realLeads);
+      return realLeads;
+    }
   } catch (e) {}
 
   const initial: PublicLead[] = [];
@@ -405,6 +418,14 @@ export interface Agent {
   tools?: string[];
   integrations?: string[];
   workflowIds?: string[];
+  schedule?: {
+    mode: "interval" | "monthly";
+    intervalEvery?: number;
+    intervalUnit?: "seconds" | "minutes" | "hours" | "days";
+    monthlyDay?: number;
+    maxRuns?: number;
+    executedRuns?: number;
+  };
 }
 
 export interface ModelProfile {
@@ -453,6 +474,7 @@ function builtInAgents(): Agent[] {
       modelProfileId: "default_google",
       tools: ["customers", "inbox", "quotes", "knowledge", "approvals"],
       workflowIds: ["customer_scoring", "quote_draft"],
+      schedule: { mode: "interval", intervalEvery: 1, intervalUnit: "days", maxRuns: 0, executedRuns: 0 },
     },
     {
       id: "sdr",
@@ -464,6 +486,7 @@ function builtInAgents(): Agent[] {
       modelProfileId: "default_google",
       tools: ["customers", "inbox", "email_send", "quotes", "approvals"],
       workflowIds: ["customer_scoring", "quote_draft"],
+      schedule: { mode: "interval", intervalEvery: 1, intervalUnit: "days", maxRuns: 0, executedRuns: 0 },
     },
     {
       id: "support",
@@ -475,6 +498,7 @@ function builtInAgents(): Agent[] {
       modelProfileId: "default_google",
       tools: ["customers", "inbox", "email_send", "whatsapp_send", "knowledge", "approvals"],
       workflowIds: ["customer_scoring"],
+      schedule: { mode: "interval", intervalEvery: 1, intervalUnit: "days", maxRuns: 0, executedRuns: 0 },
     },
     {
       id: "lead_generation",
@@ -486,6 +510,7 @@ function builtInAgents(): Agent[] {
       modelProfileId: "default_google",
       tools: ["lead_platforms", "customers", "knowledge", "approvals"],
       workflowIds: ["lead_scoring", "lead_enrichment"],
+      schedule: { mode: "interval", intervalEvery: 1, intervalUnit: "days", maxRuns: 0, executedRuns: 0 },
       integrations: [
         "Outscraper",
         "Apify",
@@ -508,7 +533,7 @@ export interface AgentRun {
   status: "Running" | "Pending" | "Completed" | "Failed";
   operationKey?: string;
   operationType?: string;
-  targetType?: "lead" | "customer" | "message" | "quote" | "global";
+  targetType?: "lead" | "customer" | "message" | "quote" | "platform" | "global";
   targetId?: string;
   repeatable?: boolean;
   inputJson?: any;
@@ -641,6 +666,7 @@ export function getAgents(): Agent[] {
         modelProfileId: agent.modelProfileId || "default_google",
         tools: agent.tools || builtInAgents().find((item) => item.id === agent.id)?.tools || [],
         workflowIds: agent.workflowIds || builtInAgents().find((item) => item.id === agent.id)?.workflowIds || [],
+        schedule: agent.schedule || builtInAgents().find((item) => item.id === agent.id)?.schedule || { mode: "interval", intervalEvery: 1, intervalUnit: "days", maxRuns: 0, executedRuns: 0 },
       }));
       if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
         saveAgents(normalized);

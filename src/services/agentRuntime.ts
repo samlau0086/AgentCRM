@@ -12,7 +12,7 @@ import {
   savePublicLeads,
 } from "./db";
 
-export type AgentWorkflowTargetType = "lead" | "customer";
+export type AgentWorkflowTargetType = "lead" | "customer" | "platform";
 
 export interface AgentWorkflowTarget {
   type: AgentWorkflowTargetType;
@@ -58,11 +58,11 @@ export const agentWorkflowDefinitions: AgentWorkflowDefinition[] = [
   {
     id: "lead_enrichment",
     name: "Lead Generation Platforms",
-    description: "Enrich one public lead through enabled Lead Generation Platform integrations.",
-    operationType: "lead_enrichment",
-    targetType: "lead",
-    requiredTools: ["lead_platforms", "customers"],
-    repeatable: false,
+    description: "Run an enabled Lead Generation Platform integration to collect real leads.",
+    operationType: "lead_platform_collection",
+    targetType: "platform",
+    requiredTools: ["lead_platforms"],
+    repeatable: true,
   },
   {
     id: "customer_scoring",
@@ -94,6 +94,15 @@ export function getAgentWorkflows(agent: Agent) {
 }
 
 export function getWorkflowTargets(workflow: AgentWorkflowDefinition): AgentWorkflowTarget[] {
+  if (workflow.targetType === "platform") {
+    return getEnabledLeadPlatforms().map((platform) => ({
+      type: "platform",
+      id: platform.id,
+      label: platform.name,
+      description: platform.baseUrl,
+    }));
+  }
+
   if (workflow.targetType === "lead") {
     return getPublicLeads().map((lead) => ({
       type: "lead",
@@ -173,7 +182,7 @@ function saveLeadUpdate(lead: PublicLead) {
   savePublicLeads(getPublicLeads().map((item) => (item.id === lead.id ? lead : item)));
 }
 
-function getEnabledLeadPlatforms(agent: Agent) {
+function getEnabledLeadPlatforms(agent?: Agent) {
   const configs = JSON.parse(localStorage.getItem("lead_platform_configs") || "{}") as Record<string, { enabled?: boolean; baseUrl?: string }>;
   const platformNames: Record<string, string> = {
     outscraper: "Outscraper",
@@ -184,7 +193,7 @@ function getEnabledLeadPlatforms(agent: Agent) {
     decodo: "Decodo",
     clay_com: "Clay.com",
   };
-  const allowed = new Set(agent.integrations || []);
+  const allowed = new Set(agent?.integrations || []);
   return Object.entries(configs)
     .filter(([, config]) => config.enabled)
     .map(([id, config]) => ({ id, name: platformNames[id] || id, baseUrl: config.baseUrl }))
@@ -239,35 +248,23 @@ export function executeAgentWorkflow(
   }
 
   if (workflow.id === "lead_enrichment") {
-    const lead = leadById(target.id);
-    if (!lead) throw new Error("Lead was not found.");
     const platforms = getEnabledLeadPlatforms(agent);
-    if (platforms.length === 0) {
-      throw new Error("No enabled Lead Generation Platforms are available for this agent. Configure them in Settings > Integrations first.");
+    const platform = platforms.find((item) => item.id === target.id);
+    if (!platform) {
+      throw new Error("This Lead Generation Platform is not enabled for the agent. Configure it in Settings > Integrations first.");
     }
-    const existingContacts = lead.contacts || [];
-    const updatedLead: PublicLead = {
-      ...lead,
-      contacts: existingContacts.length > 0 ? existingContacts : [{ id: `contact_${Date.now()}`, type: "primary", value: lead.contact }],
-      description: lead.description || `Enriched via ${platforms.map((platform) => platform.name).join(", ")} from ${lead.source}${lead.industry ? ` in ${lead.industry}` : ""}.`,
-      enrichmentPlatforms: platforms.map((platform) => platform.name),
-      enrichedAt: new Date().toISOString(),
-    };
-    saveLeadUpdate(updatedLead);
     return {
       logs: [
-        `Loaded lead ${lead.name}.`,
-        `Loaded enabled Lead Generation Platforms: ${platforms.map((platform) => platform.name).join(", ")}.`,
-        "Normalized platform enrichment into structured CRM contact/context fields.",
-        "Saved enriched lead details to the public lead pool.",
+        `Loaded Lead Generation Platform configuration for ${platform.name}.`,
+        "Verified that the platform is enabled and allowed for this agent.",
+        "Prepared a real lead collection job using the configured platform endpoint.",
+        "No mock lead was created. Connect the platform API worker to import returned leads into Public Pool.",
       ],
       steps: [
-        { toolName: "lead.read", label: "Read lead", inputJson: { leadId: lead.id }, outputJson: lead, status: "Success" },
-        { toolName: "lead_generation_platforms.load", label: "Load configured platforms", outputJson: platforms, status: "Success" },
-        { toolName: "lead_generation_platforms.enrich", label: "Enrich lead from platforms", inputJson: { leadId: lead.id, platforms }, outputJson: updatedLead, status: "Success" },
-        { toolName: "lead.update", label: "Update lead", inputJson: { leadId: lead.id }, outputJson: updatedLead, status: "Success" },
+        { toolName: "lead_generation_platforms.load", label: "Load configured platform", outputJson: platform, status: "Success" },
+        { toolName: "lead_generation_platforms.prepare_job", label: "Prepare collection job", inputJson: { platform }, outputJson: { platform: platform.name, baseUrl: platform.baseUrl, createdLeads: 0 }, status: "Success" },
       ],
-      outputJson: { leadId: lead.id, platforms: updatedLead.enrichmentPlatforms, contacts: updatedLead.contacts?.length || 0, enrichedAt: updatedLead.enrichedAt },
+      outputJson: { platform: platform.name, baseUrl: platform.baseUrl, createdLeads: 0, mockDataCreated: false },
     };
   }
 
