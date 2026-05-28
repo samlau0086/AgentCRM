@@ -67,11 +67,13 @@ When a user is logged in, the browser starts the agent scheduler automatically. 
 Current executable workflows include:
 
 - **AI Lead Analysis**: Analyzes a real public lead and stores score, intent, risk, AI analysis, and recommended next action.
-- **Lead Generation Platforms**: Uses enabled platform configuration from Settings. It does not create mock leads. A real platform API worker must be connected to import returned leads.
+- **Lead Generation Platforms**: Uses enabled platform configuration from Settings, calls the real platform API through `/api/lead-platforms/run`, normalizes returned records, and imports new leads into the Public Pool. It does not create mock leads.
 - **Customer Scoring**: Refreshes a customer score, intent, risk, and timeline log.
 - **Quote Draft**: Creates a draft quote from active products for a selected customer.
 
 Non-repeatable workflows are guarded by operation key, so the same lead/customer is not processed repeatedly for the same non-repeatable action while a run is pending, running, or completed.
+
+Lead platform connections are configured in Settings > Integrations. Add the real API key, base URL, endpoint path, auth header, search query, location, limit, and request JSON required by the selected provider. Apify also needs an Actor ID; PhantomBuster needs an Agent ID.
 
 ### Model Profiles
 
@@ -172,11 +174,13 @@ charlie@acmecorp.com / password
 当前可执行工作流包括：
 
 - **AI Lead Analysis**：对真实公共线索进行 AI 分析，写入评分、意向、风险、AI 分析摘要和下一步建议。
-- **Lead Generation Platforms**：读取系统设置中已启用的获客平台配置。它不会再生成 mock 线索；需要接入真实平台 API worker 后，才能把平台返回数据导入公共线索池。
+- **Lead Generation Platforms**：读取系统设置中已启用的获客平台配置，通过 `/api/lead-platforms/run` 调用真实平台 API，规范化返回记录，并把新增线索导入公共线索池。它不会再生成 mock 线索。
 - **Customer Scoring**：刷新客户评分、意向、风险，并写入客户时间线。
 - **Quote Draft**：基于启用产品为客户创建报价草稿。
 
 系统会对不应重复的工作流做防重复保护。同一个 lead/customer 在已有运行中、待审批或已完成的同类操作时，不会被重复执行。
+
+获客平台连接在“设置 > 系统集成”中配置。请填写真实 API Key、Base URL、Endpoint Path、认证 Header、搜索关键词、地区、数量限制，以及平台要求的 Request JSON。Apify 需要 Actor ID；PhantomBuster 需要 Agent ID。
 
 ### 模型 Profile
 

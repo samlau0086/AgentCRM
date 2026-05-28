@@ -107,7 +107,7 @@ function findRunnableTarget(agent: Agent, workflow: AgentWorkflowDefinition, run
   return undefined;
 }
 
-function executeScheduledWorkflow(
+async function executeScheduledWorkflow(
   agent: Agent,
   workflow: AgentWorkflowDefinition,
   target: AgentWorkflowTarget,
@@ -165,7 +165,7 @@ function executeScheduledWorkflow(
   }
 
   try {
-    const result = executeAgentWorkflow(workflow, target, agent);
+    const result = await executeAgentWorkflow(workflow, target, agent);
     result.steps.forEach((step) => {
       addAgentStep({
         runId: run.id,
@@ -206,7 +206,7 @@ function executeScheduledWorkflow(
   markScheduleAttempted(agent, now);
 }
 
-function runAgentIfDue(agent: Agent, now: Date) {
+async function runAgentIfDue(agent: Agent, now: Date) {
   if (!isAgentDue(agent, now)) return;
 
   const workflows = getAgentWorkflows(agent);
@@ -219,7 +219,7 @@ function runAgentIfDue(agent: Agent, now: Date) {
   for (const workflow of workflows) {
     const runnable = findRunnableTarget(agent, workflow, runs);
     if (runnable) {
-      executeScheduledWorkflow(agent, workflow, runnable.target, runnable.operationKey, now);
+      await executeScheduledWorkflow(agent, workflow, runnable.target, runnable.operationKey, now);
       return;
     }
   }
@@ -227,12 +227,14 @@ function runAgentIfDue(agent: Agent, now: Date) {
   writeFailedRun(agent, "No eligible target is available. Existing non-repeatable work was skipped or no CRM data matches this workflow.", now);
 }
 
-function tickAgentScheduler() {
+async function tickAgentScheduler() {
   if (tickInProgress) return;
   tickInProgress = true;
   try {
     const now = new Date();
-    getAgents().forEach((agent) => runAgentIfDue(agent, now));
+    for (const agent of getAgents()) {
+      await runAgentIfDue(agent, now);
+    }
   } finally {
     tickInProgress = false;
   }

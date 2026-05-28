@@ -182,8 +182,25 @@ function saveLeadUpdate(lead: PublicLead) {
   savePublicLeads(getPublicLeads().map((item) => (item.id === lead.id ? lead : item)));
 }
 
+type LeadPlatformConfig = {
+  enabled?: boolean;
+  apiKey?: string;
+  baseUrl?: string;
+  endpointPath?: string;
+  method?: "GET" | "POST";
+  searchQuery?: string;
+  location?: string;
+  limit?: number;
+  actorId?: string;
+  agentId?: string;
+  requestJson?: string;
+  authHeaderName?: string;
+  authScheme?: string;
+  notes?: string;
+};
+
 function getEnabledLeadPlatforms(agent?: Agent) {
-  const configs = JSON.parse(localStorage.getItem("lead_platform_configs") || "{}") as Record<string, { enabled?: boolean; baseUrl?: string }>;
+  const configs = JSON.parse(localStorage.getItem("lead_platform_configs") || "{}") as Record<string, LeadPlatformConfig>;
   const platformNames: Record<string, string> = {
     outscraper: "Outscraper",
     apify: "Apify",
@@ -196,15 +213,32 @@ function getEnabledLeadPlatforms(agent?: Agent) {
   const allowed = new Set(agent?.integrations || []);
   return Object.entries(configs)
     .filter(([, config]) => config.enabled)
-    .map(([id, config]) => ({ id, name: platformNames[id] || id, baseUrl: config.baseUrl }))
+    .map(([id, config]) => ({ id, name: platformNames[id] || id, baseUrl: config.baseUrl, config }))
     .filter((platform) => allowed.size === 0 || allowed.has(platform.name));
 }
 
-export function executeAgentWorkflow(
+function mergePublicLeads(newLeads: PublicLead[]) {
+  const existing = getPublicLeads();
+  const existingKeys = new Set(existing.map((lead) =>
+    [lead.source, lead.name, lead.contact].join("|").toLowerCase(),
+  ));
+  const uniqueLeads = newLeads.filter((lead) => {
+    const key = [lead.source, lead.name, lead.contact].join("|").toLowerCase();
+    if (existingKeys.has(key)) return false;
+    existingKeys.add(key);
+    return true;
+  });
+  if (uniqueLeads.length > 0) {
+    savePublicLeads([...uniqueLeads, ...existing]);
+  }
+  return uniqueLeads.length;
+}
+
+export async function executeAgentWorkflow(
   workflow: AgentWorkflowDefinition,
   target: AgentWorkflowTarget,
   agent: Agent,
-): AgentRuntimeResult {
+): Promise<AgentRuntimeResult> {
   if (workflow.id === "lead_scoring") {
     const lead = leadById(target.id);
     if (!lead) throw new Error("Lead was not found.");
@@ -253,18 +287,34 @@ export function executeAgentWorkflow(
     if (!platform) {
       throw new Error("This Lead Generation Platform is not enabled for the agent. Configure it in Settings > Integrations first.");
     }
+    const response = await fetch("/api/lead-platforms/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platformId: platform.id,
+        platformName: platform.name,
+        config: platform.config,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `${platform.name} request failed with HTTP ${response.status}.`);
+    }
+    const leads = (Array.isArray(data.leads) ? data.leads : []) as PublicLead[];
+    const importedCount = mergePublicLeads(leads);
     return {
       logs: [
         `Loaded Lead Generation Platform configuration for ${platform.name}.`,
         "Verified that the platform is enabled and allowed for this agent.",
-        "Prepared a real lead collection job using the configured platform endpoint.",
-        "No mock lead was created. Connect the platform API worker to import returned leads into Public Pool.",
+        `Called the real platform API endpoint and received ${data.rawCount || leads.length || 0} raw records.`,
+        `Imported ${importedCount} new lead(s) into Public Pool.`,
       ],
       steps: [
         { toolName: "lead_generation_platforms.load", label: "Load configured platform", outputJson: platform, status: "Success" },
-        { toolName: "lead_generation_platforms.prepare_job", label: "Prepare collection job", inputJson: { platform }, outputJson: { platform: platform.name, baseUrl: platform.baseUrl, createdLeads: 0 }, status: "Success" },
+        { toolName: "lead_generation_platforms.request", label: "Call platform API", inputJson: { platform: platform.name, baseUrl: platform.baseUrl }, outputJson: { requestedUrl: data.requestedUrl, rawCount: data.rawCount, sample: data.rawSample }, status: "Success" },
+        { toolName: "public_leads.import", label: "Import public leads", inputJson: { platform: platform.name }, outputJson: { returnedLeads: leads.length, importedCount }, status: "Success" },
       ],
-      outputJson: { platform: platform.name, baseUrl: platform.baseUrl, createdLeads: 0, mockDataCreated: false },
+      outputJson: { platform: platform.name, baseUrl: platform.baseUrl, returnedLeads: leads.length, importedCount, mockDataCreated: false },
     };
   }
 

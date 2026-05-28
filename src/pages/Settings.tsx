@@ -21,6 +21,16 @@ type LeadPlatformConfig = {
   enabled: boolean;
   apiKey: string;
   baseUrl: string;
+  endpointPath?: string;
+  method?: 'GET' | 'POST';
+  searchQuery?: string;
+  location?: string;
+  limit?: number;
+  actorId?: string;
+  agentId?: string;
+  requestJson?: string;
+  authHeaderName?: string;
+  authScheme?: string;
   notes: string;
   updatedAt?: string;
 };
@@ -44,7 +54,7 @@ const defaultBaseUrlByProvider: Partial<Record<ModelProfile['provider'], string>
 };
 
 const leadGenerationPlatforms: LeadPlatform[] = [
-  { id: 'outscraper', name: 'Outscraper', desc: 'Google Maps scraping', defaultBaseUrl: 'https://api.app.outscraper.com', helpText: 'Use an OutScraper API key with Google Maps Search or Places endpoints.' },
+  { id: 'outscraper', name: 'Outscraper', desc: 'Google Maps scraping', defaultBaseUrl: 'https://api.outscraper.cloud', helpText: 'Use an OutScraper API key with Google Maps Search or Places endpoints.' },
   { id: 'apify', name: 'Apify', desc: 'Web scraping & automation', defaultBaseUrl: 'https://api.apify.com/v2', helpText: 'Use an Apify token to run actors for prospect discovery and enrichment.' },
   { id: 'phantombuster', name: 'PhantomBuster', desc: 'Social media automation', defaultBaseUrl: 'https://api.phantombuster.com/api/v2', helpText: 'Use a PhantomBuster API key for social and LinkedIn-style automation workflows.' },
   { id: 'scrap_io', name: 'Scrap.io', desc: 'B2B leads from Maps', defaultBaseUrl: 'https://api.scrap.io', helpText: 'Use Scrap.io credentials for local business lead extraction.' },
@@ -75,6 +85,16 @@ export default function Settings() {
     enabled: false,
     apiKey: '',
     baseUrl: '',
+    endpointPath: '',
+    method: 'POST',
+    searchQuery: '',
+    location: '',
+    limit: 10,
+    actorId: '',
+    agentId: '',
+    requestJson: '',
+    authHeaderName: 'Authorization',
+    authScheme: 'Bearer',
     notes: ''
   });
 
@@ -123,6 +143,16 @@ export default function Settings() {
       enabled: existing?.enabled || false,
       apiKey: existing?.apiKey || '',
       baseUrl: existing?.baseUrl || platform.defaultBaseUrl,
+      endpointPath: existing?.endpointPath || '',
+      method: existing?.method || (platform.id === 'outscraper' ? 'GET' : 'POST'),
+      searchQuery: existing?.searchQuery || '',
+      location: existing?.location || '',
+      limit: existing?.limit || 10,
+      actorId: existing?.actorId || '',
+      agentId: existing?.agentId || '',
+      requestJson: existing?.requestJson || '',
+      authHeaderName: existing?.authHeaderName || 'Authorization',
+      authScheme: existing?.authScheme || 'Bearer',
       notes: existing?.notes || '',
       updatedAt: existing?.updatedAt,
     });
@@ -813,6 +843,11 @@ export default function Settings() {
                           <Link2 className="w-3 h-3 shrink-0" />
                           <span className="truncate">{config?.baseUrl || platform.defaultBaseUrl}</span>
                         </div>
+                        {(config?.searchQuery || config?.location) && (
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                            {[config.searchQuery, config.location].filter(Boolean).join(' / ')}
+                          </p>
+                        )}
                         {config?.updatedAt && (
                           <p className="text-[10px] text-slate-400 dark:text-slate-500">
                             Updated {new Date(config.updatedAt).toLocaleString()}
@@ -837,7 +872,7 @@ export default function Settings() {
 
       {editingLeadPlatform && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-slate-900">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-slate-900">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6 dark:border-white/10">
               <div>
                 <div className="flex items-center gap-2">
@@ -858,7 +893,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="space-y-5 p-6">
+            <div className="min-h-0 space-y-5 overflow-y-auto p-6">
               <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-black/20">
                 <div>
                   <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Enable connection</p>
@@ -889,6 +924,28 @@ export default function Settings() {
                 />
               </div>
 
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Auth Header</label>
+                  <input
+                    value={leadPlatformDraft.authHeaderName || 'Authorization'}
+                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, authHeaderName: e.target.value })}
+                    placeholder="Authorization or x-api-key"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Auth Scheme</label>
+                  <input
+                    value={leadPlatformDraft.authScheme || 'Bearer'}
+                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, authScheme: e.target.value })}
+                    placeholder="Bearer"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                  />
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Only used when Auth Header is Authorization.</p>
+                </div>
+              </div>
+
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Base URL</label>
                 <input
@@ -897,6 +954,100 @@ export default function Settings() {
                   placeholder={editingLeadPlatform.defaultBaseUrl}
                   className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Method</label>
+                  <select
+                    value={leadPlatformDraft.method || 'POST'}
+                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, method: e.target.value as 'GET' | 'POST' })}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                  >
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Endpoint Path</label>
+                  <input
+                    value={leadPlatformDraft.endpointPath || ''}
+                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, endpointPath: e.target.value })}
+                    placeholder={editingLeadPlatform.id === 'apify' ? 'acts/owner~actor/run-sync-get-dataset-items' : editingLeadPlatform.id === 'outscraper' ? 'google-maps-search' : 'Custom endpoint path'}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Search Query</label>
+                  <input
+                    value={leadPlatformDraft.searchQuery || ''}
+                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, searchQuery: e.target.value })}
+                    placeholder="e.g. dental clinics"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Location</label>
+                  <input
+                    value={leadPlatformDraft.location || ''}
+                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, location: e.target.value })}
+                    placeholder="e.g. Singapore"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Limit</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={leadPlatformDraft.limit || 10}
+                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, limit: Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 10)) })}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              {(editingLeadPlatform.id === 'apify' || editingLeadPlatform.id === 'phantombuster') && (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {editingLeadPlatform.id === 'apify' && (
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Apify Actor ID</label>
+                      <input
+                        value={leadPlatformDraft.actorId || ''}
+                        onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, actorId: e.target.value })}
+                        placeholder="owner~actor-name"
+                        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                      />
+                    </div>
+                  )}
+                  {editingLeadPlatform.id === 'phantombuster' && (
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">PhantomBuster Agent ID</label>
+                      <input
+                        value={leadPlatformDraft.agentId || ''}
+                        onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, agentId: e.target.value })}
+                        placeholder="Agent ID"
+                        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Request JSON</label>
+                <textarea
+                  rows={5}
+                  value={leadPlatformDraft.requestJson || ''}
+                  onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, requestJson: e.target.value })}
+                  placeholder={'Optional JSON body. Supports {{query}}, {{location}}, {{limit}} placeholders.'}
+                  className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                />
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">For platforms without a built-in preset, provide the real endpoint and request body from that platform's API docs.</p>
               </div>
 
               <div>

@@ -584,13 +584,13 @@ export default function AgentCenter() {
     }
   };
 
-  const writeRuntimeResult = (
+  const writeRuntimeResult = async (
     run: AgentRun,
     workflow: AgentWorkflowDefinition,
     target: AgentWorkflowTarget,
     agent: Agent,
   ) => {
-    const result = executeAgentWorkflow(workflow, target, agent);
+    const result = await executeAgentWorkflow(workflow, target, agent);
     result.steps.forEach((step) => {
       addAgentStep({
         runId: run.id,
@@ -618,7 +618,7 @@ export default function AgentCenter() {
     return result;
   };
 
-  const handleRunWorkflow = (agent: Agent, workflow: AgentWorkflowDefinition) => {
+  const handleRunWorkflow = async (agent: Agent, workflow: AgentWorkflowDefinition) => {
     const targets = getWorkflowTargets(workflow, agent);
     const selectedTargetId = selectedWorkflowTargets[`${agent.id}:${workflow.id}`] || targets[0]?.id;
     const target = targets.find((item) => item.id === selectedTargetId) || targets[0];
@@ -687,7 +687,7 @@ export default function AgentCenter() {
     }
 
     try {
-      writeRuntimeResult(run, workflow, target, agent);
+      await writeRuntimeResult(run, workflow, target, agent);
     } catch (err) {
       const message = err instanceof Error ? err.message : copy.unknownError;
       addAgentStep({
@@ -801,7 +801,7 @@ export default function AgentCenter() {
     notify(copy.runsCleared, "success");
   };
 
-  const updateApprovalStatus = (id: string, status: "Approved" | "Rejected") => {
+  const updateApprovalStatus = async (id: string, status: "Approved" | "Rejected") => {
     const approvalToUpdate = getAgentApprovals().find((approval) => approval.id === id);
     if (status === "Approved" && approvalToUpdate?.actionType === "execute_workflow") {
       const run = getAgentRuns().find((item) => item.id === approvalToUpdate.runId);
@@ -810,7 +810,7 @@ export default function AgentCenter() {
       const target = approvalToUpdate.proposedPayload.target as AgentWorkflowTarget | undefined;
       if (run && agent && workflow && target) {
         try {
-          writeRuntimeResult(run, workflow, target, agent);
+          await writeRuntimeResult(run, workflow, target, agent);
         } catch (err) {
           const message = err instanceof Error ? err.message : copy.unknownError;
           addAgentStep({

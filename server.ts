@@ -545,6 +545,248 @@ crudRoutes("inbox_messages", "/api/communication/inbox");
 crudRoutes("agent_pending_actions", "/api/agent/actions/pending");
 crudRoutes("knowledge_documents", "/api/knowledge");
 
+type LeadPlatformRunConfig = {
+  enabled?: boolean;
+  apiKey?: string;
+  baseUrl?: string;
+  endpointPath?: string;
+  method?: "GET" | "POST";
+  searchQuery?: string;
+  location?: string;
+  limit?: number;
+  actorId?: string;
+  agentId?: string;
+  requestJson?: string;
+  authHeaderName?: string;
+  authScheme?: string;
+};
+
+function joinUrl(baseUrl: string, endpointPath = "") {
+  const base = String(baseUrl || "").replace(/\/+$/, "");
+  const pathPart = String(endpointPath || "").replace(/^\/+/, "");
+  return pathPart ? `${base}/${pathPart}` : base;
+}
+
+function parseRequestJson(raw: string | undefined) {
+  if (!raw?.trim()) return {};
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Request JSON must be an object.");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function replaceTemplate(value: unknown, vars: Record<string, string | number>): unknown {
+  if (typeof value === "string") {
+    return Object.entries(vars).reduce(
+      (text, [key, val]) => text.replaceAll(`{{${key}}}`, String(val)),
+      value,
+    );
+  }
+  if (Array.isArray(value)) return value.map((item) => replaceTemplate(item, vars));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, val]) => [key, replaceTemplate(val, vars)]),
+    );
+  }
+  return value;
+}
+
+function flattenResults(value: any): any[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap(flattenResults);
+  if (Array.isArray(value.data)) return flattenResults(value.data);
+  if (Array.isArray(value.items)) return flattenResults(value.items);
+  if (Array.isArray(value.results)) return flattenResults(value.results);
+  if (Array.isArray(value.records)) return flattenResults(value.records);
+  if (Array.isArray(value.leads)) return flattenResults(value.leads);
+  if (Array.isArray(value.output)) return flattenResults(value.output);
+  if (value.data && typeof value.data === "object") return flattenResults(value.data);
+  return [value];
+}
+
+function firstValue(item: any, keys: string[]) {
+  for (const key of keys) {
+    const value = key.split(".").reduce((current, part) => current?.[part], item);
+    if (Array.isArray(value)) {
+      const first = value.find(Boolean);
+      if (first) return typeof first === "object" ? JSON.stringify(first) : String(first);
+    }
+    if (value !== undefined && value !== null && String(value).trim()) return String(value);
+  }
+  return "";
+}
+
+function normalizeLeadItem(item: any, platformName: string, platformId: string) {
+  const name = firstValue(item, [
+    "name",
+    "title",
+    "business_name",
+    "company_name",
+    "companyName",
+    "organization_name",
+    "organizationName",
+  ]);
+  const contact = firstValue(item, [
+    "email",
+    "email_1",
+    "emails",
+    "phone",
+    "phone_number",
+    "phoneNumber",
+    "site",
+    "website",
+    "domain",
+    "url",
+    "linkedin_url",
+  ]);
+  if (!name && !contact) return null;
+  const idSource = `${platformId}|${name}|${contact}|${firstValue(item, ["address", "full_address", "location"])}`;
+  const idHash = Buffer.from(idSource).toString("base64url").slice(0, 24);
+  return {
+    id: `lead_${platformId}_${idHash}`,
+    name: name || contact,
+    contact: contact || "No contact returned",
+    source: platformName,
+    scrapedAt: new Date().toISOString(),
+    industry: firstValue(item, ["category", "category_name", "type", "industry", "business_type"]) || undefined,
+    location: firstValue(item, ["full_address", "address", "location", "city", "region", "country"]) || undefined,
+    description: firstValue(item, ["description", "about", "snippet", "subtitle", "reviews"]) || undefined,
+    contacts: [
+      firstValue(item, ["email", "email_1", "emails"]) && {
+        id: `email_${idHash}`,
+        type: "Email",
+        value: firstValue(item, ["email", "email_1", "emails"]),
+      },
+      firstValue(item, ["phone", "phone_number", "phoneNumber"]) && {
+        id: `phone_${idHash}`,
+        type: "Phone",
+        value: firstValue(item, ["phone", "phone_number", "phoneNumber"]),
+      },
+      firstValue(item, ["site", "website", "domain", "url"]) && {
+        id: `web_${idHash}`,
+        type: "Website",
+        value: firstValue(item, ["site", "website", "domain", "url"]),
+      },
+    ].filter(Boolean),
+    raw: item,
+  };
+}
+
+function platformDefaults(platformId: string, config: LeadPlatformRunConfig) {
+  const query = [config.searchQuery || "business leads", config.location].filter(Boolean).join(", ");
+  const limit = Math.max(1, Math.min(Number(config.limit || 10), 100));
+  if (platformId === "outscraper") {
+    return {
+      baseUrl: config.baseUrl || "https://api.outscraper.cloud",
+      endpointPath: config.endpointPath || "google-maps-search",
+      method: config.method || "GET",
+      headers: { "X-API-KEY": config.apiKey || "" },
+      queryParams: { query, limit, async: "false" },
+      body: undefined,
+    };
+  }
+  if (platformId === "apify") {
+    if (!config.actorId?.trim()) throw new Error("Apify requires an Actor ID, such as owner~actor-name.");
+    return {
+      baseUrl: config.baseUrl || "https://api.apify.com/v2",
+      endpointPath: config.endpointPath || `acts/${encodeURIComponent(config.actorId)}/run-sync-get-dataset-items`,
+      method: config.method || "POST",
+      headers: {},
+      queryParams: { token: config.apiKey || "", clean: "true", format: "json" },
+      body: replaceTemplate(parseRequestJson(config.requestJson), { query, location: config.location || "", limit }),
+    };
+  }
+  if (platformId === "phantombuster") {
+    if (!config.agentId?.trim()) throw new Error("PhantomBuster requires an Agent ID.");
+    return {
+      baseUrl: config.baseUrl || "https://api.phantombuster.com",
+      endpointPath: config.endpointPath || `api/v1/agent/${encodeURIComponent(config.agentId)}/launch`,
+      method: config.method || "POST",
+      headers: { "X-Phantombuster-Key-1": config.apiKey || "" },
+      queryParams: { output: "json" },
+      body: {
+        argument: JSON.stringify(replaceTemplate(parseRequestJson(config.requestJson), { query, location: config.location || "", limit })),
+      },
+    };
+  }
+  return {
+    baseUrl: config.baseUrl || "",
+    endpointPath: config.endpointPath || "",
+    method: config.method || "POST",
+    headers: {
+      [config.authHeaderName || "Authorization"]:
+        config.authHeaderName && config.authHeaderName.toLowerCase() !== "authorization"
+          ? config.apiKey || ""
+          : `${config.authScheme || "Bearer"} ${config.apiKey || ""}`.trim(),
+    },
+    queryParams: {},
+    body: replaceTemplate(parseRequestJson(config.requestJson), { query, location: config.location || "", limit }),
+  };
+}
+
+app.post("/api/lead-platforms/run", async (req, res) => {
+  const { platformId, platformName, config = {} } = req.body as {
+    platformId?: string;
+    platformName?: string;
+    config?: LeadPlatformRunConfig;
+  };
+  if (!platformId || !platformName) return res.status(400).json({ error: "Platform ID and name are required." });
+  if (!config.enabled) return res.status(400).json({ error: `${platformName} is disabled.` });
+  if (!config.apiKey?.trim()) return res.status(400).json({ error: `${platformName} API key is required.` });
+
+  try {
+    const defaults = platformDefaults(platformId, config);
+    if (!defaults.baseUrl) return res.status(400).json({ error: `${platformName} Base URL is required.` });
+    const url = new URL(joinUrl(defaults.baseUrl, defaults.endpointPath));
+    Object.entries(defaults.queryParams).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value).trim()) {
+        url.searchParams.set(key, String(value));
+      }
+    });
+
+    const response = await fetch(url, {
+      method: defaults.method,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...defaults.headers,
+      },
+      body: defaults.method === "GET" ? undefined : JSON.stringify(defaults.body || {}),
+    });
+    const rawText = await response.text();
+    const rawData = rawText
+      ? (() => {
+          try {
+            return JSON.parse(rawText);
+          } catch {
+            return { text: rawText };
+          }
+        })()
+      : {};
+    if (!response.ok) {
+      const message = rawData?.error?.message || rawData?.message || rawText || `${platformName} returned HTTP ${response.status}.`;
+      return res.status(response.status).json({ error: message, status: response.status, raw: rawData });
+    }
+
+    const items = flattenResults(rawData);
+    const leads = items
+      .map((item) => normalizeLeadItem(item, platformName, platformId))
+      .filter(Boolean);
+    res.json({
+      success: true,
+      platformId,
+      platformName,
+      requestedUrl: `${url.origin}${url.pathname}`,
+      rawCount: items.length,
+      leads,
+      rawSample: items.slice(0, 3),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Lead platform request failed." });
+  }
+});
+
 app.get("/api/communication/timeline/:customerId", async (req, res) => {
   if (!requireDatabase(res)) return;
   try {
