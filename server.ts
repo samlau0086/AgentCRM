@@ -586,15 +586,19 @@ app.post("/api/ai/draft-reply", async (req, res) => {
 });
 
 app.post("/api/ai/trigger-agent", async (req, res) => {
-  const { agentId, agentRole = "", allowedTools = [], context, systemLanguage = "en", modelProfile = {} } = req.body;
+  const { agentId, agentRole = "", allowedTools = [], context, operationGuard = {}, systemLanguage = "en", modelProfile = {} } = req.body;
   const profile = requireModelProfile(modelProfile, res);
   if (!profile) return;
 
   try {
+    const guardNote = operationGuard?.repeatable === false
+      ? `This workflow is marked non-repeatable for target ${operationGuard.targetType}:${operationGuard.targetId}. Do not repeat completed work for the same target; report the guarded action once.`
+      : "If this workflow would mutate CRM data, avoid repeating the same non-repeatable action for the same record.";
     const prompt = `You are executing a CRM agent workflow.
 Agent ID: ${agentId}
 Context: ${context}
 Allowed business tools: ${Array.isArray(allowedTools) && allowedTools.length > 0 ? allowedTools.join(", ") : "none configured"}
+Duplicate operation policy: ${guardNote}
 
 Generate a 4-step execution log. Return strict JSON like {"logs":["step 1","step 2"]}. Write logs in this language: ${systemLanguage}.`;
     const text = await generateWithModelProfile(profile, agentRole, prompt);

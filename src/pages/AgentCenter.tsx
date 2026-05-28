@@ -27,6 +27,81 @@ import { getAgents, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, get
 import { notify } from "../services/notifications";
 import ConfirmModal from "../components/ConfirmModal";
 
+type OperationGuard = {
+  repeatable: boolean;
+  operationType?: string;
+  targetType?: AgentRun["targetType"];
+  targetId?: string;
+  operationKey?: string;
+};
+
+const nonRepeatableOperationPatterns = [
+  { type: "lead_scoring", pattern: /\b(lead scoring|score lead|score this lead|lead score|qualify lead|lead qualification)\b|线索评分|客户评分|线索资格/i },
+  { type: "lead_enrichment", pattern: /\b(enrich lead|lead enrichment|find contact|contact enrichment|data enrichment)\b|线索丰富|客户丰富|联系方式补全|数据补全/i },
+  { type: "lead_claim", pattern: /\b(claim lead|assign lead|convert lead)\b|领取线索|分配线索|转化线索/i },
+  { type: "proposal_generation", pattern: /\b(generate proposal|proposal draft|draft proposal)\b|生成方案|方案草稿|销售方案/i },
+  { type: "quote_generation", pattern: /\b(generate quote|create quote|quote draft|draft quote)\b|生成报价|创建报价|报价草稿/i },
+  { type: "outbound_send", pattern: /\b(send email|send whatsapp|send message|outbound send)\b|发送邮件|发送消息|发送whatsapp/i },
+];
+
+function normalizeOperationPart(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9@._-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function extractOperationTarget(text: string): Pick<OperationGuard, "targetType" | "targetId"> {
+  const patterns: { targetType: AgentRun["targetType"]; pattern: RegExp }[] = [
+    { targetType: "lead", pattern: /\blead(?:\s*id)?\s*[:#=]\s*([a-z0-9@._-]+)/i },
+    { targetType: "customer", pattern: /\bcustomer(?:\s*id)?\s*[:#=]\s*([a-z0-9@._-]+)/i },
+    { targetType: "message", pattern: /\bmessage(?:\s*id)?\s*[:#=]\s*([a-z0-9@._-]+)/i },
+    { targetType: "quote", pattern: /\bquote(?:\s*id)?\s*[:#=]\s*([a-z0-9@._-]+)/i },
+    { targetType: "lead", pattern: /\bfor\s+lead\s+([a-z0-9@._-]+)/i },
+    { targetType: "customer", pattern: /\bfor\s+customer\s+([a-z0-9@._-]+)/i },
+    { targetType: "lead", pattern: /线索(?:\s*id)?\s*[:#=：]\s*([a-z0-9@._-]+)/i },
+    { targetType: "customer", pattern: /客户(?:\s*id)?\s*[:#=：]\s*([a-z0-9@._-]+)/i },
+  ];
+  for (const item of patterns) {
+    const match = text.match(item.pattern);
+    if (match?.[1]) {
+      return { targetType: item.targetType, targetId: normalizeOperationPart(match[1]) };
+    }
+  }
+  return {};
+}
+
+function buildOperationGuard(workflowName: string, context = ""): OperationGuard {
+  const source = `${workflowName}\n${context}`;
+  const match = nonRepeatableOperationPatterns.find((item) => item.pattern.test(source));
+  if (!match) return { repeatable: true };
+
+  const target = extractOperationTarget(source);
+  if (!target.targetType || !target.targetId) {
+    return { repeatable: true, operationType: match.type };
+  }
+
+  const operationKey = [
+    match.type,
+    target.targetType,
+    target.targetId,
+  ].join(":");
+
+  return {
+    repeatable: false,
+    operationType: match.type,
+    targetType: target.targetType,
+    targetId: target.targetId,
+    operationKey,
+  };
+}
+
+function findBlockingRun(runs: AgentRun[], operationKey?: string) {
+  if (!operationKey) return undefined;
+  return runs.find((run) =>
+    run.operationKey === operationKey &&
+    run.repeatable === false &&
+    ["Running", "Pending", "Completed"].includes(run.status),
+  );
+}
+
 export default function AgentCenter() {
   const { t, language } = useLanguage();
   const availableTools = [
@@ -56,6 +131,8 @@ export default function AgentCenter() {
     createAgent: "创建智能体",
     modelProfileRequiredTitle: "需要模型配置",
     modelProfileRequired: "请先在设置里创建模型 Profile，然后再运行智能体。",
+    duplicateOperationTitle: "已跳过重复操作",
+    duplicateOperation: "这个智能体已经对同一个对象执行过该操作，系统已阻止重复执行。",
     initLog: "正在连接智能体工作流引擎...",
     contextLog: "正在加载 CRM 上下文...",
     testComplete: "测试运行已成功完成。",
@@ -124,6 +201,8 @@ export default function AgentCenter() {
     createAgent: "Create Agent",
     modelProfileRequiredTitle: "Model profile required",
     modelProfileRequired: "Please create a model profile in Settings before running agents.",
+    duplicateOperationTitle: "Duplicate operation skipped",
+    duplicateOperation: "This agent already ran the same non-repeatable operation for the same record, so the duplicate execution was blocked.",
     initLog: "Initializing connection to agent workflow engine...",
     contextLog: "Loading CRM context...",
     testComplete: "Test run completed successfully.",
@@ -269,6 +348,17 @@ export default function AgentCenter() {
     let runFailed = false;
     let runErrorMessage: string | undefined;
     let runOutput: any;
+    const context = `Workflow Name: ${wfName}. The user requested an execution test using the currently configured CRM and integration data.`;
+    const operationGuard = buildOperationGuard(wfName, context);
+    const duplicateRun = findBlockingRun(getAgentRuns(), operationGuard.operationKey);
+    if (duplicateRun) {
+      notify(
+        `${copy.duplicateOperation} (${runTaskLabel(duplicateRun.taskType)})`,
+        "warning",
+        copy.duplicateOperationTitle,
+      );
+      return;
+    }
     const agent = agents.find((a) => a.id === agentId);
     const modelProfile = modelProfiles.find((profile) => profile.id === agent?.modelProfileId) || modelProfiles[0];
     if (!modelProfile) {
@@ -280,7 +370,12 @@ export default function AgentCenter() {
       taskType: language === "zh" ? `测试：${agentName(agent)}` : `Test: ${wfName}`,
       status: "Running",
       currentStep: "Initializing",
-      inputJson: { workflowName: wfName, language, modelProfileId: modelProfile.id, tools: agent?.tools || [] },
+      operationKey: operationGuard.operationKey,
+      operationType: operationGuard.operationType,
+      targetType: operationGuard.targetType,
+      targetId: operationGuard.targetId,
+      repeatable: operationGuard.repeatable,
+      inputJson: { workflowName: wfName, language, modelProfileId: modelProfile.id, tools: agent?.tools || [], operationGuard },
     });
     setRuns(getAgentRuns());
     setShowTestModal(true);
@@ -297,7 +392,8 @@ export default function AgentCenter() {
           agentId,
           agentRole: agent?.role,
           allowedTools: agent?.tools || [],
-          context: `Workflow Name: ${wfName}. The user requested an execution test using the currently configured CRM and integration data.`,
+          context,
+          operationGuard,
           systemLanguage: language,
           modelProfile,
         }),

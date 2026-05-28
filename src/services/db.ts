@@ -492,6 +492,11 @@ export interface AgentRun {
   agentId: string;
   taskType: string;
   status: "Running" | "Pending" | "Completed" | "Failed";
+  operationKey?: string;
+  operationType?: string;
+  targetType?: "lead" | "customer" | "message" | "quote" | "global";
+  targetId?: string;
+  repeatable?: boolean;
   inputJson?: any;
   outputJson?: any;
   currentStep?: string;
