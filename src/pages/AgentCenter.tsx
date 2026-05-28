@@ -27,6 +27,168 @@ import { notify } from "../services/notifications";
 
 export default function AgentCenter() {
   const { t, language } = useLanguage();
+  const copy = language === "zh" ? {
+    subtitle: "监控智能体工作负载，并管理自动化执行与人工审批。",
+    harnessTab: "执行护栏与审批",
+    agentsTab: "智能体列表",
+    createAgent: "创建智能体",
+    modelProfileRequiredTitle: "需要模型配置",
+    modelProfileRequired: "请先在设置里创建模型 Profile，然后再运行智能体。",
+    initLog: "正在连接智能体工作流引擎...",
+    contextLog: "正在加载 CRM 上下文...",
+    testComplete: "测试运行已成功完成。",
+    unknownError: "未知的智能体执行错误。",
+    approvalTitle: "人工审批",
+    requiresApproval: "需要审批",
+    agentFallback: "智能体",
+    action: "动作",
+    to: "收件人",
+    subject: "主题",
+    reject: "拒绝",
+    approveExecute: "批准并执行",
+    allClear: "暂无待审批项",
+    noApprovals: "当前没有需要人工审批的智能体动作。",
+    runsTitle: "智能体运行与追踪日志",
+    executionLog: "智能体执行日志",
+    processing: "正在处理 AI 任务...",
+    configureAgent: "配置智能体",
+    agentName: "智能体名称",
+    agentNamePlaceholder: "例如：异议处理智能体",
+    prompt: "提示词 / 执行指令",
+    promptPlaceholder: "描述这个智能体应该做什么...",
+    harness: "执行护栏",
+    autoExecute: "自动执行（无需审批）",
+    humanLoop: "人工确认（需要审批）",
+    harnessHelp: "决定该智能体是否可以直接执行动作，或是否必须先提交草稿等待审批。",
+    modelProfile: "模型 Profile",
+    modelProfileHelp: "先在设置里配置模型 Profile，然后在这里分配给智能体。",
+    supportedIntegrations: "支持的集成（获客线索采集）",
+    agentStatus: "智能体状态",
+    currently: "当前状态：",
+    disableAgent: "停用智能体",
+    activateAgent: "启用智能体",
+    cancel: "取消",
+    saveChanges: "保存更改",
+    active: "运行中",
+    idle: "空闲",
+    disabled: "已停用",
+    running: "运行中",
+    pending: "待处理",
+    completed: "已完成",
+    failed: "失败",
+    success: "成功",
+    analyzeContext: "分析上下文",
+    executeStep: "执行步骤",
+    triggerAgent: "触发智能体",
+    reviewAgentTest: "审查智能体测试结果",
+    auto: "自动执行",
+    human: "人工确认",
+    testTitle: "触发 / 测试工作流",
+  } : {
+    subtitle: "Monitor workloads and manage the intelligence layer.",
+    harnessTab: "Harness & Approvals",
+    agentsTab: "Agent Fleet",
+    createAgent: "Create Agent",
+    modelProfileRequiredTitle: "Model profile required",
+    modelProfileRequired: "Please create a model profile in Settings before running agents.",
+    initLog: "Initializing connection to agent workflow engine...",
+    contextLog: "Loading CRM context...",
+    testComplete: "Test run completed successfully.",
+    unknownError: "Unknown agent execution error.",
+    approvalTitle: "Human Approvals",
+    requiresApproval: "Requires Approval",
+    agentFallback: "Agent",
+    action: "Action",
+    to: "To",
+    subject: "Subject",
+    reject: "Reject",
+    approveExecute: "Approve & Execute",
+    allClear: "All Clear",
+    noApprovals: "No pending approvals required.",
+    runsTitle: "Agent Runs & Trace Log",
+    executionLog: "Agent Execution Log",
+    processing: "Processing AI tasks...",
+    configureAgent: "Configure Agent",
+    agentName: "Agent Name",
+    agentNamePlaceholder: "e.g. Objections Handler Agent",
+    prompt: "Prompt / Instructions",
+    promptPlaceholder: "Describe what this agent does...",
+    harness: "Harness / Guardrails",
+    autoExecute: "Auto-execute (No approval needed)",
+    humanLoop: "Human-in-the-loop (Requires approval)",
+    harnessHelp: "Determines whether this agent can immediately send messages or if drafts must be approved.",
+    modelProfile: "Model Profile",
+    modelProfileHelp: "Configure profiles in Settings, then assign one to each agent here.",
+    supportedIntegrations: "Supported Integrations (Scraping Leads)",
+    agentStatus: "Agent Status",
+    currently: "Currently: ",
+    disableAgent: "Disable Agent",
+    activateAgent: "Activate Agent",
+    cancel: "Cancel",
+    saveChanges: "Save Changes",
+    active: "Active",
+    idle: "Idle",
+    disabled: "Disabled",
+    running: "Running",
+    pending: "Pending",
+    completed: "Completed",
+    failed: "Failed",
+    success: "Success",
+    analyzeContext: "Analyze Context",
+    executeStep: "Execute Step",
+    triggerAgent: "Trigger Agent",
+    reviewAgentTest: "Review Agent Test Result",
+    auto: "Auto",
+    human: "Human-in-the-loop",
+    testTitle: "Trigger/Test workflow",
+  };
+
+  const agentText: Record<string, { zhName: string; zhRole: string }> = {
+    orchestrator: {
+      zhName: "编排调度智能体",
+      zhRole: "将 CRM 工作分派给专用智能体，并汇总执行结果。",
+    },
+    sdr: {
+      zhName: "销售开发智能体",
+      zhRole: "研究潜在客户，识别高意向线索，并准备外联内容。",
+    },
+    support: {
+      zhName: "客户支持智能体",
+      zhRole: "基于 CRM 上下文起草回复，并协助解决客户问题。",
+    },
+    lead_generation: {
+      zhName: "获客线索智能体",
+      zhRole: "使用已配置的获客平台发现、丰富并整理新潜在客户。",
+    },
+  };
+
+  const agentName = (agent?: Agent) =>
+    language === "zh" && agent ? agentText[agent.id]?.zhName || agent.name : agent?.name || copy.agentFallback;
+  const agentRole = (agent: Agent) =>
+    language === "zh" ? agentText[agent.id]?.zhRole || agent.role : agent.role;
+  const statusLabel = (status: string) =>
+    status === "Active" ? copy.active :
+    status === "Idle" ? copy.idle :
+    status === "Disabled" ? copy.disabled :
+    status === "Running" ? copy.running :
+    status === "Pending" ? copy.pending :
+    status === "Completed" ? copy.completed :
+    status === "Failed" ? copy.failed :
+    status === "Success" ? copy.success :
+    status;
+  const harnessLabel = (harness: string) =>
+    harness === "Auto" ? copy.auto : harness === "Human-in-the-loop" ? copy.human : harness;
+  const actionLabel = (action: string) =>
+    action === "review_agent_test_result" ? copy.reviewAgentTest :
+    action === "send_email" ? (language === "zh" ? "发送邮件" : "Send Email") :
+    action;
+  const toolLabel = (tool?: string) =>
+    tool === "analyze_context" ? copy.analyzeContext :
+    tool === "execute_step" ? copy.executeStep :
+    tool === "trigger_agent" ? copy.triggerAgent :
+    tool || "";
+  const runTaskLabel = (taskType: string) =>
+    language === "zh" ? taskType.replace(/^Test:\s*/, "测试：") : taskType;
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
@@ -62,12 +224,12 @@ export default function AgentCenter() {
     const agent = agents.find((a) => a.id === agentId);
     const modelProfile = modelProfiles.find((profile) => profile.id === agent?.modelProfileId) || modelProfiles[0];
     if (!modelProfile) {
-      notify("Please create a model profile in Settings before running agents.", "warning", "Model profile required");
+      notify(copy.modelProfileRequired, "warning", copy.modelProfileRequiredTitle);
       return;
     }
     const run = addAgentRun({
       agentId,
-      taskType: `Test: ${wfName}`,
+      taskType: language === "zh" ? `测试：${agentName(agent)}` : `Test: ${wfName}`,
       status: "Running",
       currentStep: "Initializing",
       inputJson: { workflowName: wfName, language, modelProfileId: modelProfile.id },
@@ -76,8 +238,8 @@ export default function AgentCenter() {
     setShowTestModal(true);
     setIsTestRunning(true);
     setTestLogs([
-      "Initializing connection to agent workflow engine...",
-      "Loading CRM context...",
+      copy.initLog,
+      copy.contextLog,
     ]);
     try {
       const res = await fetch("/api/ai/trigger-agent", {
@@ -122,14 +284,14 @@ export default function AgentCenter() {
         setTestLogs((prev) => [
           ...prev,
           ...data.logs,
-          "Test run completed successfully.",
+          copy.testComplete,
         ]);
       } else {
         throw new Error(data.error || "Agent engine returned no execution logs.");
       }
     } catch (err) {
       runFailed = true;
-      const message = err instanceof Error ? err.message : "Unknown agent execution error.";
+      const message = err instanceof Error ? err.message : copy.unknownError;
       runErrorMessage = message;
       addAgentStep({
         runId: run.id,
@@ -222,7 +384,7 @@ export default function AgentCenter() {
             {t("ac.title")}
           </h1>
           <p className="text-slate-500 mt-1 text-sm font-light">
-            Monitor workloads and manage the intelligence layer.
+            {copy.subtitle}
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -231,13 +393,13 @@ export default function AgentCenter() {
               onClick={() => setActiveTab('harness')}
               className={cn("px-4 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2", activeTab === 'harness' ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300")}
             >
-              <Network className="w-4 h-4" /> Harness & Approvals
+              <Network className="w-4 h-4" /> {copy.harnessTab}
             </button>
             <button
               onClick={() => setActiveTab('agents')}
               className={cn("px-4 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2", activeTab === 'agents' ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300")}
             >
-              <Server className="w-4 h-4" /> Agent Fleet
+              <Server className="w-4 h-4" /> {copy.agentsTab}
             </button>
           </div>
           <button
@@ -245,7 +407,7 @@ export default function AgentCenter() {
             className="bg-blue-600 hover:bg-blue-500 text-white shadow-sm px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors border border-transparent"
           >
             <Plus className="w-4 h-4" />
-            Create Agent
+            {copy.createAgent}
           </button>
         </div>
       </div>
@@ -266,7 +428,7 @@ export default function AgentCenter() {
                 >
                   <div className="flex justify-between items-start mb-2">
                     <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">
-                      {agent.name}
+                      {agentName(agent)}
                     </h3>
                     <div className="flex items-center gap-2">
                       <button
@@ -290,7 +452,7 @@ export default function AgentCenter() {
                                 : "bg-slate-400",
                           )}
                         ></span>
-                        {agent.status}
+                        {statusLabel(agent.status)}
                       </button>
                       <button
                         onClick={() => handleEdit(agent)}
@@ -301,16 +463,16 @@ export default function AgentCenter() {
                     </div>
                   </div>
                   <p className="text-xs text-slate-500 mb-4 line-clamp-2 min-h-[32px]">
-                    {agent.role}
+                    {agentRole(agent)}
                   </p>
                   <div className="flex items-center justify-between mt-4">
-                    <span className="text-[10px] font-mono tracking-widest uppercase text-slate-500 bg-slate-100 dark:bg-black/20 px-2 py-1 rounded-md border border-slate-200 dark:border-white/5 flex items-center gap-1" title="Harness / Guardrails">
+                    <span className="text-[10px] font-mono tracking-widest uppercase text-slate-500 bg-slate-100 dark:bg-black/20 px-2 py-1 rounded-md border border-slate-200 dark:border-white/5 flex items-center gap-1" title={copy.harness}>
                       {agent.harness === "Auto" ? (
                         <Zap className="w-3 h-3 text-amber-500" />
                       ) : (
                         <ShieldCheck className="w-3 h-3 text-blue-500" />
                       )}
-                      {agent.harness}
+                      {harnessLabel(agent.harness)}
                     </span>
                     <span className="text-[10px] font-mono tracking-widest uppercase text-slate-500 bg-slate-100 dark:bg-black/20 px-2 py-1 rounded-md border border-slate-200 dark:border-white/5">
                       {t("ac.tasksProcessed")}{" "}
@@ -321,7 +483,7 @@ export default function AgentCenter() {
                     <button
                       onClick={() => handleTestAgent(agent.id, agent.name)}
                       className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-md transition-colors"
-                      title="Trigger/Test workflow"
+                      title={copy.testTitle}
                     >
                       <PlayCircle className="w-4 h-4" />
                     </button>
@@ -349,7 +511,7 @@ export default function AgentCenter() {
           <div className="bg-white dark:bg-white/5 shadow-sm border border-slate-200 dark:border-white/10 rounded-2xl p-6 flex flex-col">
             <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-slate-400" />
-              Human Approvals
+              {copy.approvalTitle}
             </h2>
             <div className="flex-1 overflow-y-auto space-y-4">
               {pendingApprovals.map(approval => {
@@ -361,14 +523,14 @@ export default function AgentCenter() {
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 rounded text-[10px] uppercase font-bold tracking-wider">
-                            Requires Approval
+                            {copy.requiresApproval}
                           </span>
                           <span className="text-xs text-slate-500 flex items-center gap-1">
-                            <Bot className="w-3 h-3" /> {agentInfo?.name || 'Agent'}
+                            <Bot className="w-3 h-3" /> {agentName(agentInfo)}
                           </span>
                         </div>
                         <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-2">
-                          Action: {approval.actionType}
+                          {copy.action}: {actionLabel(approval.actionType)}
                         </h3>
                       </div>
                       <span className="text-[10px] font-mono text-slate-400 max-w-[80px] text-right break-words">{approval.createdAt}</span>
@@ -376,8 +538,8 @@ export default function AgentCenter() {
                     {approval.actionType === 'send_email' && (
                       <div className="bg-white dark:bg-black/20 p-3 rounded-lg border border-slate-100 dark:border-white/5 shadow-sm text-sm mb-4">
                         <div className="mb-2 text-xs text-slate-500">
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">To:</span> {approval.proposedPayload.to}<br/>
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">Subject:</span> {approval.proposedPayload.subject}
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">{copy.to}:</span> {approval.proposedPayload.to}<br/>
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">{copy.subject}:</span> {approval.proposedPayload.subject}
                         </div>
                         <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-serif">
                           {approval.proposedPayload.body}
@@ -390,14 +552,14 @@ export default function AgentCenter() {
                            updateApprovalStatus(approval.id, "Rejected");
                         }}
                         className="px-4 py-2 text-sm font-semibold flex items-center gap-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-transparent transition-colors rounded-lg">
-                        <XCircle className="w-4 h-4" /> Reject
+                        <XCircle className="w-4 h-4" /> {copy.reject}
                       </button>
                       <button 
                         onClick={() => {
                            updateApprovalStatus(approval.id, "Approved");
                         }}
                         className="px-5 py-2 flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors border border-transparent">
-                        <CheckCircle2 className="w-4 h-4" /> Approve & Execute
+                        <CheckCircle2 className="w-4 h-4" /> {copy.approveExecute}
                       </button>
                     </div>
                   </div>
@@ -406,8 +568,8 @@ export default function AgentCenter() {
               {pendingApprovals.length === 0 && (
                 <div className="text-center py-12">
                   <ShieldCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                  <h3 className="text-sm font-medium text-slate-900 dark:text-white">All Clear</h3>
-                  <p className="text-sm text-slate-500">No pending approvals required.</p>
+                  <h3 className="text-sm font-medium text-slate-900 dark:text-white">{copy.allClear}</h3>
+                  <p className="text-sm text-slate-500">{copy.noApprovals}</p>
                 </div>
               )}
             </div>
@@ -416,7 +578,7 @@ export default function AgentCenter() {
           <div className="bg-white dark:bg-white/5 shadow-sm border border-slate-200 dark:border-white/10 rounded-2xl p-6 flex flex-col">
             <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
               <ListTodo className="w-4 h-4 text-slate-400" />
-              Agent Runs & Trace Log
+              {copy.runsTitle}
             </h2>
             <div className="flex-1 overflow-y-auto space-y-4">
               {runs.map(run => {
@@ -427,20 +589,20 @@ export default function AgentCenter() {
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
                         <span className={cn("flex w-2.5 h-2.5 rounded-full", run.status === 'Running' ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" : run.status === 'Pending' ? "bg-amber-500" : run.status === 'Failed' ? "bg-red-500" : "bg-emerald-500")} />
-                        <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">{run.taskType}</h3>
+                        <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">{runTaskLabel(run.taskType)}</h3>
                       </div>
-                      <span className="text-xs text-slate-500">{run.status}</span>
+                      <span className="text-xs text-slate-500">{statusLabel(run.status)}</span>
                     </div>
                     <div className="text-xs text-slate-500 mb-4 flex items-center gap-2">
-                      <Bot className="w-3 h-3" /> {agentInfo?.name}
+                      <Bot className="w-3 h-3" /> {agentName(agentInfo)}
                     </div>
                     <div className="space-y-2">
                       {runSteps.map((step, idx) => (
                         <div key={step.id} className="flex gap-3 text-xs">
                           <span className="text-slate-400 font-mono w-4 shrink-0 mt-0.5">{idx + 1}.</span>
                           <div className="flex-1">
-                            <span className="text-blue-600 dark:text-blue-400 font-mono bg-blue-50 dark:bg-blue-900/20 px-1.5 py-0.5 rounded mr-2">{step.toolName || step.stepType}</span>
-                            <span className="text-slate-600 dark:text-slate-400">{step.status}</span>
+                            <span className="text-blue-600 dark:text-blue-400 font-mono bg-blue-50 dark:bg-blue-900/20 px-1.5 py-0.5 rounded mr-2">{toolLabel(step.toolName) || step.stepType}</span>
+                            <span className="text-slate-600 dark:text-slate-400">{statusLabel(step.status)}</span>
                           </div>
                         </div>
                       ))}
@@ -461,7 +623,7 @@ export default function AgentCenter() {
             <div className="flex justify-between items-center p-4 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-black/20">
               <h2 className="text-sm font-semibold flex items-center gap-2 text-slate-800 dark:text-slate-200">
                 <Bot className="w-4 h-4 text-blue-500" />
-                Agent Execution Log
+                {copy.executionLog}
               </h2>
               <button
                 onClick={() => setShowTestModal(false)}
@@ -479,8 +641,7 @@ export default function AgentCenter() {
               ))}
               {isTestRunning && (
                 <div className="mt-2 flex items-center gap-2 text-blue-400">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Processing AI
-                  tasks...
+                  <Loader2 className="w-3 h-3 animate-spin" /> {copy.processing}
                 </div>
               )}
             </div>
@@ -493,7 +654,7 @@ export default function AgentCenter() {
           <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 flex flex-col">
             <div className="flex justify-between items-center p-6 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-black/20">
               <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                {editingAgent ? "Configure Agent" : "Create Agent"}
+                {editingAgent ? copy.configureAgent : copy.createAgent}
               </h2>
               <button
                 onClick={() => setIsModalOpen(false)}
@@ -506,20 +667,20 @@ export default function AgentCenter() {
             <form onSubmit={handleSave} className="p-6 space-y-5">
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Agent Name
+                  {copy.agentName}
                 </label>
                 <input
                   required
                   name="name"
                   defaultValue={editingAgent?.name}
                   className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
-                  placeholder="e.g. Objections Handler Agent"
+                  placeholder={copy.agentNamePlaceholder}
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Prompt / Instructions
+                  {copy.prompt}
                 </label>
                 <textarea
                   required
@@ -527,13 +688,13 @@ export default function AgentCenter() {
                   rows={4}
                   defaultValue={editingAgent?.role}
                   className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors resize-none"
-                  placeholder="Describe what this agent does..."
+                  placeholder={copy.promptPlaceholder}
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Harness / Guardrails
+                  {copy.harness}
                 </label>
                 <select
                   name="harness"
@@ -541,21 +702,20 @@ export default function AgentCenter() {
                   className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
                 >
                   <option value="Auto">
-                    Auto-execute (No approval needed)
+                    {copy.autoExecute}
                   </option>
                   <option value="Human-in-the-loop">
-                    Human-in-the-loop (Requires approval)
+                    {copy.humanLoop}
                   </option>
                 </select>
                 <p className="text-xs text-slate-500 mt-2">
-                  Determines whether this agent can immediately send messages or
-                  if drafts must be approved.
+                  {copy.harnessHelp}
                 </p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Model Profile
+                  {copy.modelProfile}
                 </label>
                 <select
                   name="modelProfileId"
@@ -569,14 +729,14 @@ export default function AgentCenter() {
                   ))}
                 </select>
                 <p className="text-xs text-slate-500 mt-2">
-                  Configure profiles in Settings, then assign one to each agent here.
+                  {copy.modelProfileHelp}
                 </p>
               </div>
 
               {editingAgent?.integrations && editingAgent.integrations.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                    Supported Integrations (Scraping Leads)
+                    {copy.supportedIntegrations}
                   </label>
                   <div className="flex flex-wrap gap-2">
                     {editingAgent.integrations.map(integration => (
@@ -592,10 +752,10 @@ export default function AgentCenter() {
                 <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/5 flex justify-between items-center">
                   <div>
                     <p className="text-sm font-medium text-slate-800 dark:text-white">
-                      Agent Status
+                      {copy.agentStatus}
                     </p>
                     <p className="text-xs text-slate-500">
-                      Currently: {editingAgent.status}
+                      {copy.currently}{statusLabel(editingAgent.status)}
                     </p>
                   </div>
                   <button
@@ -612,8 +772,8 @@ export default function AgentCenter() {
                   >
                     <Power className="w-3.5 h-3.5" />
                     {editingAgent.status === "Active"
-                      ? "Disable Agent"
-                      : "Activate Agent"}
+                      ? copy.disableAgent
+                      : copy.activateAgent}
                   </button>
                 </div>
               )}
@@ -624,14 +784,14 @@ export default function AgentCenter() {
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-slate-200 dark:hover:border-white/10"
                 >
-                  Cancel
+                  {copy.cancel}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors shadow-sm flex items-center gap-2"
                 >
                   <Save className="w-4 h-4" />
-                  {editingAgent ? "Save Changes" : "Create Agent"}
+                  {editingAgent ? copy.saveChanges : copy.createAgent}
                 </button>
               </div>
             </form>
