@@ -425,6 +425,7 @@ export interface Agent {
     monthlyDay?: number;
     maxRuns?: number;
     executedRuns?: number;
+    lastRunAt?: string;
   };
 }
 

@@ -93,9 +93,9 @@ export function getAgentWorkflows(agent: Agent) {
   });
 }
 
-export function getWorkflowTargets(workflow: AgentWorkflowDefinition): AgentWorkflowTarget[] {
+export function getWorkflowTargets(workflow: AgentWorkflowDefinition, agent?: Agent): AgentWorkflowTarget[] {
   if (workflow.targetType === "platform") {
-    return getEnabledLeadPlatforms().map((platform) => ({
+    return getEnabledLeadPlatforms(agent).map((platform) => ({
       type: "platform",
       id: platform.id,
       label: platform.name,

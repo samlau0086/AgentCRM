@@ -60,7 +60,7 @@ Each agent can be configured with:
   - Or monthly on day N
   - Optional maximum execution count, where `0` means unlimited
 
-The schedule is currently stored as configuration. A background scheduler still needs to be connected before agents run automatically by time.
+When a user is logged in, the browser starts the agent scheduler automatically. It checks active agents every second, respects each agent's interval/monthly schedule and execution-count limit, then writes scheduled runs, trace steps, and approval records into the Agent Runs log. For always-on execution while nobody has the web app open, add a server-side worker or cron job that runs the same scheduling rules against a shared database.
 
 ### Agent Workflows
 
@@ -165,7 +165,7 @@ charlie@acmecorp.com / password
   - 或每月第 N 日
   - 可配置执行次数，`0` 表示不限次数
 
-当前执行周期已经作为配置保存。真正按时间自动触发智能体，还需要继续接入后台调度器。
+用户登录后，浏览器会自动启动智能体调度器。调度器每秒检查一次启用中的智能体，按每隔 N 秒/分/小时/天或每月第 N 日的配置触发，并遵守执行次数限制；触发结果会写入智能体运行日志、追踪步骤和审批记录。如果需要在无人打开网页时也持续执行，需要再接入服务端 worker 或 cron，并让它基于共享数据库执行同样的调度规则。
 
 ### 智能体工作流
 

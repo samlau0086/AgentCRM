@@ -401,6 +401,24 @@ export default function AgentCenter() {
     setSteps(getAgentSteps());
     setApprovals(getAgentApprovals());
     setModelProfiles(getModelProfiles());
+    const handleDataChanged = (event: Event) => {
+      const key = (event as CustomEvent<{ key?: string }>).detail?.key;
+      if (!key || ![
+        "crm_agents",
+        "crm_agent_runs",
+        "crm_agent_steps",
+        "crm_agent_approvals",
+        "crm_model_profiles",
+      ].includes(key)) return;
+
+      setAgents(getAgents());
+      setRuns(getAgentRuns());
+      setSteps(getAgentSteps());
+      setApprovals(getAgentApprovals());
+      setModelProfiles(getModelProfiles());
+    };
+    window.addEventListener("crm:data-changed", handleDataChanged);
+    return () => window.removeEventListener("crm:data-changed", handleDataChanged);
   }, []);
 
   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
@@ -582,7 +600,7 @@ export default function AgentCenter() {
   };
 
   const handleRunWorkflow = (agent: Agent, workflow: AgentWorkflowDefinition) => {
-    const targets = getWorkflowTargets(workflow);
+    const targets = getWorkflowTargets(workflow, agent);
     const selectedTargetId = selectedWorkflowTargets[`${agent.id}:${workflow.id}`] || targets[0]?.id;
     const target = targets.find((item) => item.id === selectedTargetId) || targets[0];
     if (!target) {
@@ -692,6 +710,7 @@ export default function AgentCenter() {
       monthlyDay: Math.min(31, Math.max(1, parseInt((data.monthlyDay as string) || "1", 10))),
       maxRuns: Math.max(0, parseInt((data.maxRuns as string) || "0", 10)),
       executedRuns: editingAgent?.schedule?.executedRuns || 0,
+      lastRunAt: editingAgent?.schedule?.lastRunAt,
     };
 
     if (editingAgent) {
@@ -972,7 +991,7 @@ export default function AgentCenter() {
                         {copy.workflowRuntime}
                       </div>
                       {getAgentWorkflows(agent).map((workflow) => {
-                        const targets = getWorkflowTargets(workflow);
+                        const targets = getWorkflowTargets(workflow, agent);
                         const selectionKey = `${agent.id}:${workflow.id}`;
                         const selectedValue = selectedWorkflowTargets[selectionKey] || targets[0]?.id || "";
                         return (

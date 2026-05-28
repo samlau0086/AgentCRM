@@ -21,11 +21,17 @@ import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import { LanguageProvider } from "./i18n";
 import { ThemeProvider } from "./theme";
+import { startAgentScheduler } from "./services/agentScheduler";
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return localStorage.getItem("crm_logged_in") === "true";
   });
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    return startAgentScheduler();
+  }, [isAuthenticated]);
 
   if (!isAuthenticated) {
     return (
