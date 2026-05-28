@@ -360,7 +360,7 @@ export default function AgentCenter() {
     setModelProfiles(getModelProfiles());
   }, []);
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
 
   const [isTestRunning, setIsTestRunning] = useState(false);
@@ -377,7 +377,7 @@ export default function AgentCenter() {
 
   const handleEdit = (agent: Agent) => {
     setEditingAgent(agent);
-    setIsModalOpen(true);
+    setIsConfigPanelOpen(true);
     setActiveTab("agents");
   };
 
@@ -628,7 +628,7 @@ export default function AgentCenter() {
 
   const handleAdd = () => {
     setEditingAgent(null);
-    setIsModalOpen(true);
+    setIsConfigPanelOpen(true);
     setActiveTab("agents");
   };
 
@@ -656,7 +656,7 @@ export default function AgentCenter() {
       });
     }
     setAgents(getAgents());
-    setIsModalOpen(false);
+    setIsConfigPanelOpen(false);
   };
 
   const toggleStatus = (id: string, currentStatus: string) => {
@@ -677,7 +677,7 @@ export default function AgentCenter() {
     setAgents(getAgents());
     if (editingAgent?.id === deletingAgentId) {
       setEditingAgent(null);
-      setIsModalOpen(false);
+      setIsConfigPanelOpen(false);
     }
     setDeletingAgentId(null);
   };
@@ -799,7 +799,7 @@ export default function AgentCenter() {
       </div>
 
       {activeTab === 'agents' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(380px,520px)] gap-8 items-start">
           {/* Agent Fleet */}
           <div className="bg-white dark:bg-white/5 shadow-sm border border-slate-200 dark:border-white/10 rounded-2xl p-6">
             <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
@@ -962,21 +962,21 @@ export default function AgentCenter() {
               ))}
             </div>
           </div>
-          <div className="bg-white dark:bg-white/5 shadow-sm border border-slate-200 dark:border-white/10 rounded-2xl flex flex-col min-h-[520px] overflow-hidden">
-            {isModalOpen ? (
+          <div className="bg-white dark:bg-white/5 shadow-sm border border-slate-200 dark:border-white/10 rounded-2xl flex flex-col min-h-[520px] lg:max-h-[calc(100vh-150px)] lg:sticky lg:top-6 overflow-hidden">
+            {isConfigPanelOpen ? (
               <>
                 <div className="flex justify-between items-center p-6 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-black/20">
                   <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
                     {editingAgent ? copy.configureAgent : copy.createAgent}
                   </h2>
                   <button
-                    onClick={() => setIsModalOpen(false)}
+                    onClick={() => setIsConfigPanelOpen(false)}
                     className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors p-1"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
-                <form key={editingAgent?.id || "new-agent"} onSubmit={handleSave} className="p-6 space-y-5 overflow-y-auto">
+                <form key={editingAgent?.id || "new-agent"} onSubmit={handleSave} className="p-6 space-y-5 overflow-y-auto min-h-0">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                       {copy.agentName}
@@ -1128,7 +1128,7 @@ export default function AgentCenter() {
                   <div className="pt-4 flex justify-end gap-3 border-t border-slate-200 dark:border-white/5">
                     <button
                       type="button"
-                      onClick={() => setIsModalOpen(false)}
+                      onClick={() => setIsConfigPanelOpen(false)}
                       className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-slate-200 dark:hover:border-white/10"
                     >
                       {copy.cancel}
@@ -1268,9 +1268,10 @@ export default function AgentCenter() {
                           onClick={() => setDeletingRunId(run.id)}
                           title={copy.deleteRun}
                           aria-label={copy.deleteRun}
-                          className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors"
+                          className="px-2 py-1.5 text-xs font-medium text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
+                          <span>{copy.deleteRun}</span>
                         </button>
                       </div>
                     </div>
