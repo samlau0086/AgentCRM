@@ -53,18 +53,60 @@ export default function Sales() {
     };
   };
 
+  const normalizePricingTiers = (product: Partial<Product>) => {
+    const baseTier = { minQty: 1, unitPrice: product.price || 0 };
+    const tiers = product.pricingTiers?.length
+      ? product.pricingTiers
+      : [baseTier];
+
+    const normalized = tiers
+      .map((tier) => ({
+        minQty: Math.max(1, Math.floor(Number(tier.minQty) || 1)),
+        unitPrice: Math.max(0, Number(tier.unitPrice) || 0),
+      }))
+      .sort((a, b) => a.minQty - b.minQty);
+
+    if (!normalized.some((tier) => tier.minQty === 1)) {
+      normalized.unshift(baseTier);
+    }
+
+    return normalized;
+  };
+
+  const getTierPrice = (product: Product, quantity: number) => {
+    const qty = Math.max(1, Math.floor(quantity || 1));
+    const tiers = normalizePricingTiers(product);
+    return tiers.reduce(
+      (price, tier) => (qty >= tier.minQty ? tier.unitPrice : price),
+      product.price,
+    );
+  };
+
+  const updateQuoteItem = (index: number, item: Quote['items'][number]) => {
+    const newItems = [...(editingQuote?.items || [])];
+    newItems[index] = item;
+    setEditingQuote({ ...editingQuote, items: newItems });
+  };
+
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct) return;
     
     if (editingProduct.id) {
-      updateProduct(editingProduct.id, editingProduct);
+      const pricingTiers = normalizePricingTiers(editingProduct);
+      updateProduct(editingProduct.id, {
+        ...editingProduct,
+        price: pricingTiers[0]?.unitPrice || editingProduct.price || 0,
+        pricingTiers,
+      });
     } else {
+      const pricingTiers = normalizePricingTiers(editingProduct);
       addProduct({
         name: editingProduct.name || '',
         description: editingProduct.description || '',
         sku: editingProduct.sku || '',
-        price: editingProduct.price || 0,
+        price: pricingTiers[0]?.unitPrice || editingProduct.price || 0,
+        pricingTiers,
         currency: editingProduct.currency || 'USD',
         status: editingProduct.status || 'Active',
         image: editingProduct.image
@@ -217,7 +259,16 @@ export default function Sales() {
                        </div>
                      </td>
                      <td className="px-6 py-4 text-slate-500 font-mono text-xs">{product.sku}</td>
-                     <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{product.price.toLocaleString()} {product.currency}</td>
+                     <td className="px-6 py-4">
+                       <div className="font-medium text-slate-900 dark:text-white">
+                         {product.price.toLocaleString()} {product.currency}
+                       </div>
+                       {product.pricingTiers && product.pricingTiers.length > 1 && (
+                         <div className="text-[10px] text-slate-500 mt-0.5">
+                           {product.pricingTiers.length} quantity tiers
+                         </div>
+                       )}
+                     </td>
                      <td className="px-6 py-4">
                        <span className={cn("px-2 py-1 rounded text-[10px] font-medium", product.status === 'Active' ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400" : "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-400")}>
                          {product.status}
@@ -291,7 +342,7 @@ export default function Sales() {
 
       {isProductModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-white/10">
               <h2 className="text-xl font-semibold text-slate-800 dark:text-white">
                 {editingProduct?.id ? 'Edit Product' : 'Add Product'}
@@ -300,7 +351,7 @@ export default function Sales() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleSaveProduct} className="p-6 space-y-4">
+            <form onSubmit={handleSaveProduct} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Name</label>
@@ -332,8 +383,81 @@ export default function Sales() {
                     <input required type="text" value={editingProduct?.sku || ''} onChange={e => setEditingProduct({ ...editingProduct, sku: e.target.value })} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Price</label>
-                    <input required type="number" step="0.01" value={editingProduct?.price || ''} onChange={e => setEditingProduct({ ...editingProduct, price: parseFloat(e.target.value) })} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none" />
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Base Price</label>
+                    <input required type="number" step="0.01" value={editingProduct?.price || ''} onChange={e => {
+                      const price = parseFloat(e.target.value) || 0;
+                      const tiers = normalizePricingTiers({ ...editingProduct, price });
+                      const updatedTiers = tiers.map((tier) => tier.minQty === 1 ? { ...tier, unitPrice: price } : tier);
+                      setEditingProduct({ ...editingProduct, price, pricingTiers: updatedTiers });
+                    }} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none" />
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Quantity Price Tiers</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const tiers = normalizePricingTiers(editingProduct || {});
+                        setEditingProduct({
+                          ...editingProduct,
+                          pricingTiers: [
+                            ...tiers,
+                            { minQty: Math.max(...tiers.map((tier) => tier.minQty)) + 1, unitPrice: editingProduct?.price || 0 },
+                          ],
+                        });
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-500 font-medium"
+                    >
+                      + Add Tier
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {normalizePricingTiers(editingProduct || {}).map((tier, idx) => (
+                      <div key={idx} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                        <input
+                          type="number"
+                          min="1"
+                          value={tier.minQty}
+                          onChange={e => {
+                            const tiers = normalizePricingTiers(editingProduct || {});
+                            tiers[idx] = { ...tiers[idx], minQty: parseInt(e.target.value) || 1 };
+                            setEditingProduct({ ...editingProduct, pricingTiers: tiers });
+                          }}
+                          className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                          placeholder="Minimum quantity"
+                        />
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={tier.unitPrice}
+                          onChange={e => {
+                            const tiers = normalizePricingTiers(editingProduct || {});
+                            tiers[idx] = { ...tiers[idx], unitPrice: parseFloat(e.target.value) || 0 };
+                            setEditingProduct({
+                              ...editingProduct,
+                              price: tiers.some((item) => item.minQty === 1) ? tiers.find((item) => item.minQty === 1)?.unitPrice : editingProduct?.price,
+                              pricingTiers: tiers,
+                            });
+                          }}
+                          className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                          placeholder="Unit price"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const tiers = normalizePricingTiers(editingProduct || {});
+                            if (tiers.length <= 1) return;
+                            setEditingProduct({ ...editingProduct, pricingTiers: tiers.filter((_, tierIdx) => tierIdx !== idx) });
+                          }}
+                          className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+                          aria-label="Remove price tier"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -426,21 +550,20 @@ export default function Sales() {
                                const prodId = e.target.value;
                                const prod = products.find(p => p.id === prodId);
                                if (prod) {
-                                 const newItems = [...(editingQuote.items || [])];
-                                 newItems[idx] = { ...item, productId: prod.id, name: prod.name, unitPrice: prod.price, total: Math.max(prod.price * item.quantity - item.discount, 0) };
-                                 setEditingQuote({ ...editingQuote, items: newItems });
+                                 const unitPrice = getTierPrice(prod, item.quantity);
+                                 updateQuoteItem(idx, { ...item, productId: prod.id, name: prod.name, unitPrice, total: Math.max(unitPrice * item.quantity - item.discount, 0) });
                                }
                              }}
                              className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none"
                            >
                              <option value="" disabled>Select Product</option>
-                             {products.map(p => <option key={p.id} value={p.id}>{p.name} - ${p.price}</option>)}
+                             {products.map(p => <option key={p.id} value={p.id}>{p.name} - {p.currency} {p.price}</option>)}
                            </select>
                            <input type="number" min="1" placeholder="Qty" value={item.quantity} onChange={e => {
                              const q = parseInt(e.target.value) || 0;
-                             const newItems = [...(editingQuote.items || [])];
-                             newItems[idx] = { ...item, quantity: q, total: Math.max(item.unitPrice * q - item.discount, 0) };
-                             setEditingQuote({ ...editingQuote, items: newItems });
+                             const prod = products.find(p => p.id === item.productId);
+                             const unitPrice = prod ? getTierPrice(prod, q) : item.unitPrice;
+                             updateQuoteItem(idx, { ...item, quantity: q, unitPrice, total: Math.max(unitPrice * q - item.discount, 0) });
                            }} className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none" />
                            <input type="number" step="0.01" placeholder="Price" value={item.unitPrice} onChange={e => {
                              const p = parseFloat(e.target.value) || 0;

@@ -248,6 +248,7 @@ export interface Product {
   description: string;
   sku: string;
   price: number;
+  pricingTiers?: { minQty: number; unitPrice: number }[];
   currency: string;
   status: "Active" | "Inactive";
   image?: string;
