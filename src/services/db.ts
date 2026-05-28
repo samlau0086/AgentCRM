@@ -43,6 +43,11 @@ export interface PublicLead {
   industry?: string;
   location?: string;
   description?: string;
+  score?: number;
+  risk?: "Low" | "Medium" | "High";
+  intent?: "Low" | "Medium" | "High";
+  scoredAt?: string;
+  enrichedAt?: string;
 }
 
 export function getPublicLeads(): PublicLead[] {
@@ -396,6 +401,7 @@ export interface Agent {
   modelProfileId?: string;
   tools?: string[];
   integrations?: string[];
+  workflowIds?: string[];
 }
 
 export interface ModelProfile {
@@ -443,6 +449,7 @@ function builtInAgents(): Agent[] {
       harness: "Auto",
       modelProfileId: "default_google",
       tools: ["customers", "inbox", "quotes", "knowledge", "approvals"],
+      workflowIds: ["customer_scoring", "quote_draft"],
     },
     {
       id: "sdr",
@@ -453,6 +460,7 @@ function builtInAgents(): Agent[] {
       harness: "Human-in-the-loop",
       modelProfileId: "default_google",
       tools: ["customers", "inbox", "email_send", "quotes", "approvals"],
+      workflowIds: ["customer_scoring", "quote_draft"],
     },
     {
       id: "support",
@@ -463,6 +471,7 @@ function builtInAgents(): Agent[] {
       harness: "Human-in-the-loop",
       modelProfileId: "default_google",
       tools: ["customers", "inbox", "email_send", "whatsapp_send", "knowledge", "approvals"],
+      workflowIds: ["customer_scoring"],
     },
     {
       id: "lead_generation",
@@ -473,6 +482,7 @@ function builtInAgents(): Agent[] {
       harness: "Human-in-the-loop",
       modelProfileId: "default_google",
       tools: ["lead_platforms", "customers", "knowledge", "approvals"],
+      workflowIds: ["lead_scoring", "lead_enrichment"],
       integrations: [
         "Outscraper",
         "Apify",
@@ -491,6 +501,7 @@ export interface AgentRun {
   customerId?: string;
   agentId: string;
   taskType: string;
+  workflowId?: string;
   status: "Running" | "Pending" | "Completed" | "Failed";
   operationKey?: string;
   operationType?: string;
@@ -499,6 +510,7 @@ export interface AgentRun {
   repeatable?: boolean;
   inputJson?: any;
   outputJson?: any;
+  toolResults?: any[];
   currentStep?: string;
   errorMessage?: string;
   createdAt: string;
@@ -625,6 +637,7 @@ export function getAgents(): Agent[] {
         ...agent,
         modelProfileId: agent.modelProfileId || "default_google",
         tools: agent.tools || builtInAgents().find((item) => item.id === agent.id)?.tools || [],
+        workflowIds: agent.workflowIds || builtInAgents().find((item) => item.id === agent.id)?.workflowIds || [],
       }));
       if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
         saveAgents(normalized);

@@ -24,6 +24,16 @@ import {
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
 import { getAgents, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, saveAgentSteps, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
+import {
+  AgentWorkflowDefinition,
+  AgentWorkflowTarget,
+  agentWorkflowDefinitions,
+  buildAgentOperationKey,
+  executeAgentWorkflow,
+  findDuplicateRun,
+  getAgentWorkflows,
+  getWorkflowTargets,
+} from "../services/agentRuntime";
 import { notify } from "../services/notifications";
 import ConfirmModal from "../components/ConfirmModal";
 
@@ -133,6 +143,13 @@ export default function AgentCenter() {
     modelProfileRequired: "请先在设置里创建模型 Profile，然后再运行智能体。",
     duplicateOperationTitle: "已跳过重复操作",
     duplicateOperation: "这个智能体已经对同一个对象执行过该操作，系统已阻止重复执行。",
+    workflowRuntime: "工作流工具",
+    workflowTarget: "目标对象",
+    runWorkflow: "执行",
+    noTargets: "暂无可执行目标",
+    workflowQueued: "工作流已提交审批",
+    workflowCompleted: "工作流执行完成",
+    workflowFailed: "工作流执行失败",
     initLog: "正在连接智能体工作流引擎...",
     contextLog: "正在加载 CRM 上下文...",
     testComplete: "测试运行已成功完成。",
@@ -163,6 +180,8 @@ export default function AgentCenter() {
     modelProfileHelp: "先在设置里配置模型 Profile，然后在这里分配给智能体。",
     tools: "可用工具",
     toolsHelp: "只允许该智能体使用已勾选的业务工具。",
+    workflows: "可执行工作流",
+    workflowsHelp: "工作流会调用真实系统工具，并受到工具权限、审批和防重复规则约束。",
     supportedIntegrations: "支持的集成（获客线索采集）",
     integrationsHelp: "选择该智能体允许使用的获客平台。平台 API Key 仍在设置的系统集成里配置。",
     agentStatus: "智能体状态",
@@ -203,6 +222,13 @@ export default function AgentCenter() {
     modelProfileRequired: "Please create a model profile in Settings before running agents.",
     duplicateOperationTitle: "Duplicate operation skipped",
     duplicateOperation: "This agent already ran the same non-repeatable operation for the same record, so the duplicate execution was blocked.",
+    workflowRuntime: "Workflow Tools",
+    workflowTarget: "Target",
+    runWorkflow: "Run",
+    noTargets: "No available targets",
+    workflowQueued: "Workflow submitted for approval",
+    workflowCompleted: "Workflow completed",
+    workflowFailed: "Workflow failed",
     initLog: "Initializing connection to agent workflow engine...",
     contextLog: "Loading CRM context...",
     testComplete: "Test run completed successfully.",
@@ -233,6 +259,8 @@ export default function AgentCenter() {
     modelProfileHelp: "Configure profiles in Settings, then assign one to each agent here.",
     tools: "Available Tools",
     toolsHelp: "This agent can only use the business tools selected here.",
+    workflows: "Executable Workflows",
+    workflowsHelp: "Workflows call real system tools and are controlled by tool permissions, approvals, and duplicate-operation guards.",
     supportedIntegrations: "Supported Integrations (Scraping Leads)",
     integrationsHelp: "Choose which lead-generation platforms this agent can use. Platform API keys are still configured in Settings integrations.",
     agentStatus: "Agent Status",
@@ -303,6 +331,7 @@ export default function AgentCenter() {
     harness === "Auto" ? copy.auto : harness === "Human-in-the-loop" ? copy.human : harness;
   const actionLabel = (action: string) =>
     action === "review_agent_test_result" ? copy.reviewAgentTest :
+    action === "execute_workflow" ? copy.runWorkflow :
     action === "send_email" ? (language === "zh" ? "发送邮件" : "Send Email") :
     action;
   const toolLabel = (tool?: string) =>
@@ -321,6 +350,7 @@ export default function AgentCenter() {
   const [approvals, setApprovals] = useState<AgentApproval[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [activeTab, setActiveTab] = useState<'agents' | 'harness'>('harness');
+  const [selectedWorkflowTargets, setSelectedWorkflowTargets] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setAgents(getAgents());
@@ -338,6 +368,12 @@ export default function AgentCenter() {
   const [showTestModal, setShowTestModal] = useState(false);
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+
+  const refreshAgentRuntimeState = () => {
+    setRuns(getAgentRuns());
+    setSteps(getAgentSteps());
+    setApprovals(getAgentApprovals());
+  };
 
   const handleEdit = (agent: Agent) => {
     setEditingAgent(agent);
@@ -466,6 +502,129 @@ export default function AgentCenter() {
     }
   };
 
+  const writeRuntimeResult = (
+    run: AgentRun,
+    workflow: AgentWorkflowDefinition,
+    target: AgentWorkflowTarget,
+    agent: Agent,
+  ) => {
+    const result = executeAgentWorkflow(workflow, target, agent);
+    result.steps.forEach((step) => {
+      addAgentStep({
+        runId: run.id,
+        stepType: "Tool",
+        toolName: step.toolName,
+        inputJson: step.inputJson,
+        outputJson: step.outputJson,
+        status: step.status,
+      });
+    });
+    const updatedRuns = getAgentRuns().map((item) =>
+      item.id === run.id
+        ? {
+            ...item,
+            status: "Completed" as const,
+            currentStep: "Completed",
+            outputJson: result.outputJson,
+            toolResults: result.steps,
+          }
+        : item,
+    );
+    saveAgentRuns(updatedRuns);
+    notify(`${workflow.name}: ${target.label}`, "success", copy.workflowCompleted);
+    refreshAgentRuntimeState();
+    return result;
+  };
+
+  const handleRunWorkflow = (agent: Agent, workflow: AgentWorkflowDefinition) => {
+    const targets = getWorkflowTargets(workflow);
+    const selectedTargetId = selectedWorkflowTargets[`${agent.id}:${workflow.id}`] || targets[0]?.id;
+    const target = targets.find((item) => item.id === selectedTargetId) || targets[0];
+    if (!target) {
+      notify(copy.noTargets, "warning", workflow.name);
+      return;
+    }
+
+    const operationKey = workflow.repeatable ? undefined : buildAgentOperationKey(workflow, target);
+    const duplicateRun = findDuplicateRun(getAgentRuns(), operationKey);
+    if (duplicateRun) {
+      notify(
+        `${copy.duplicateOperation} (${runTaskLabel(duplicateRun.taskType)})`,
+        "warning",
+        copy.duplicateOperationTitle,
+      );
+      return;
+    }
+
+    const run = addAgentRun({
+      agentId: agent.id,
+      workflowId: workflow.id,
+      taskType: `${workflow.name}: ${target.label}`,
+      status: agent.harness === "Human-in-the-loop" ? "Pending" : "Running",
+      currentStep: agent.harness === "Human-in-the-loop" ? "Awaiting Approval" : "Executing",
+      operationKey,
+      operationType: workflow.operationType,
+      targetType: target.type,
+      targetId: target.id,
+      repeatable: workflow.repeatable,
+      inputJson: {
+        workflowId: workflow.id,
+        target,
+        requiredTools: workflow.requiredTools,
+        agentTools: agent.tools || [],
+      },
+    });
+
+    addAgentStep({
+      runId: run.id,
+      stepType: "Thought",
+      toolName: "workflow.plan",
+      inputJson: { workflowId: workflow.id, target },
+      outputJson: {
+        role: agent.role,
+        requiredTools: workflow.requiredTools,
+        harness: agent.harness,
+      },
+      status: "Success",
+    });
+
+    if (agent.harness === "Human-in-the-loop") {
+      addAgentApproval({
+        runId: run.id,
+        actionType: "execute_workflow",
+        proposedPayload: {
+          agentId: agent.id,
+          workflowId: workflow.id,
+          target,
+        },
+        status: "Pending",
+      });
+      notify(`${workflow.name}: ${target.label}`, "success", copy.workflowQueued);
+      refreshAgentRuntimeState();
+      return;
+    }
+
+    try {
+      writeRuntimeResult(run, workflow, target, agent);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : copy.unknownError;
+      addAgentStep({
+        runId: run.id,
+        stepType: "Tool",
+        toolName: workflow.id,
+        outputJson: { error: message },
+        status: "Failed",
+      });
+      saveAgentRuns(getAgentRuns().map((item) =>
+        item.id === run.id
+          ? { ...item, status: "Failed" as const, currentStep: "Failed", errorMessage: message }
+          : item,
+      ));
+      notify(message, "error", copy.workflowFailed);
+      refreshAgentRuntimeState();
+    }
+  };
+
   const handleAdd = () => {
     setEditingAgent(null);
     setIsModalOpen(true);
@@ -478,9 +637,10 @@ export default function AgentCenter() {
     const modelProfileId = (data.modelProfileId as string) || modelProfiles[0]?.id || "default_google";
     const selectedTools = formData.getAll("tools").map(String);
     const selectedIntegrations = formData.getAll("integrations").map(String);
+    const selectedWorkflows = formData.getAll("workflowIds").map(String);
 
     if (editingAgent) {
-      updateAgent(editingAgent.id, { ...(Object.fromEntries(formData) as any), modelProfileId, tools: selectedTools, integrations: selectedIntegrations });
+      updateAgent(editingAgent.id, { ...(Object.fromEntries(formData) as any), modelProfileId, tools: selectedTools, integrations: selectedIntegrations, workflowIds: selectedWorkflows });
     } else {
       addAgent({
         name: data.name as string,
@@ -490,6 +650,7 @@ export default function AgentCenter() {
         modelProfileId,
         tools: selectedTools,
         integrations: selectedIntegrations,
+        workflowIds: selectedWorkflows,
       });
     }
     setAgents(getAgents());
@@ -536,6 +697,48 @@ export default function AgentCenter() {
   };
 
   const updateApprovalStatus = (id: string, status: "Approved" | "Rejected") => {
+    const approvalToUpdate = getAgentApprovals().find((approval) => approval.id === id);
+    if (status === "Approved" && approvalToUpdate?.actionType === "execute_workflow") {
+      const run = getAgentRuns().find((item) => item.id === approvalToUpdate.runId);
+      const agent = agents.find((item) => item.id === approvalToUpdate.proposedPayload.agentId);
+      const workflow = agentWorkflowDefinitions.find((item) => item.id === approvalToUpdate.proposedPayload.workflowId);
+      const target = approvalToUpdate.proposedPayload.target as AgentWorkflowTarget | undefined;
+      if (run && agent && workflow && target) {
+        try {
+          writeRuntimeResult(run, workflow, target, agent);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : copy.unknownError;
+          addAgentStep({
+            runId: run.id,
+            stepType: "Tool",
+            toolName: workflow.id,
+            outputJson: { error: message },
+            status: "Failed",
+          });
+          saveAgentRuns(getAgentRuns().map((item) =>
+            item.id === run.id
+              ? { ...item, status: "Failed" as const, currentStep: "Failed", errorMessage: message }
+              : item,
+          ));
+          notify(message, "error", copy.workflowFailed);
+        }
+      }
+    }
+    if (status === "Rejected" && approvalToUpdate?.actionType === "execute_workflow") {
+      saveAgentRuns(getAgentRuns().map((run) =>
+        run.id === approvalToUpdate.runId
+          ? { ...run, status: "Failed" as const, currentStep: "Rejected", errorMessage: "Workflow rejected by user." }
+          : run,
+      ));
+      addAgentStep({
+        runId: approvalToUpdate.runId,
+        stepType: "Action",
+        toolName: "approval.reject",
+        outputJson: { status: "Rejected" },
+        status: "Failed",
+      });
+    }
+
     const updatedApprovals = getAgentApprovals().map((approval) =>
       approval.id === id
         ? {
@@ -548,6 +751,8 @@ export default function AgentCenter() {
     );
     saveAgentApprovals(updatedApprovals);
     setApprovals(updatedApprovals);
+    setRuns(getAgentRuns());
+    setSteps(getAgentSteps());
   };
 
   const pendingApprovals = approvals.filter((approval) => approval.status === "Pending");
@@ -697,6 +902,57 @@ export default function AgentCenter() {
                       )}
                     </div>
                   )}
+                  {getAgentWorkflows(agent).length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5 space-y-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+                        {copy.workflowRuntime}
+                      </div>
+                      {getAgentWorkflows(agent).map((workflow) => {
+                        const targets = getWorkflowTargets(workflow);
+                        const selectionKey = `${agent.id}:${workflow.id}`;
+                        const selectedValue = selectedWorkflowTargets[selectionKey] || targets[0]?.id || "";
+                        return (
+                          <div key={workflow.id} className="grid grid-cols-1 sm:grid-cols-[1fr_1.2fr_auto] gap-2 items-center">
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate">{workflow.name}</div>
+                              <p className="text-[10px] text-slate-500 truncate">{workflow.description}</p>
+                            </div>
+                            <select
+                              value={selectedValue}
+                              disabled={targets.length === 0}
+                              onChange={(e) =>
+                                setSelectedWorkflowTargets((current) => ({
+                                  ...current,
+                                  [selectionKey]: e.target.value,
+                                }))
+                              }
+                              className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-blue-500 disabled:opacity-50"
+                              aria-label={copy.workflowTarget}
+                            >
+                              {targets.length === 0 ? (
+                                <option value="">{copy.noTargets}</option>
+                              ) : (
+                                targets.map((target) => (
+                                  <option key={target.id} value={target.id}>
+                                    {target.label}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                            <button
+                              type="button"
+                              disabled={targets.length === 0}
+                              onClick={() => handleRunWorkflow(agent, workflow)}
+                              className="px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center justify-center gap-1"
+                            >
+                              <Play className="w-3 h-3" />
+                              {copy.runWorkflow}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -742,6 +998,20 @@ export default function AgentCenter() {
                         <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-serif">
                           {approval.proposedPayload.body}
                         </p>
+                      </div>
+                    )}
+                    {approval.actionType === 'execute_workflow' && (
+                      <div className="bg-white dark:bg-black/20 p-3 rounded-lg border border-slate-100 dark:border-white/5 shadow-sm text-sm mb-4">
+                        <div className="text-xs text-slate-500 space-y-1">
+                          <div>
+                            <span className="font-semibold text-slate-700 dark:text-slate-300">Workflow:</span>{" "}
+                            {agentWorkflowDefinitions.find((workflow) => workflow.id === approval.proposedPayload.workflowId)?.name || approval.proposedPayload.workflowId}
+                          </div>
+                          <div>
+                            <span className="font-semibold text-slate-700 dark:text-slate-300">Target:</span>{" "}
+                            {approval.proposedPayload.target?.label || approval.proposedPayload.target?.id}
+                          </div>
+                        </div>
                       </div>
                     )}
                     <div className="flex justify-end gap-3 mt-4">
@@ -991,6 +1261,35 @@ export default function AgentCenter() {
                 </div>
                 <p className="text-xs text-slate-500 mt-2">
                   {copy.toolsHelp}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  {copy.workflows}
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  {agentWorkflowDefinitions.map((workflow) => (
+                    <label
+                      key={workflow.id}
+                      className="flex items-start gap-2 px-3 py-2 bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-700 dark:text-slate-300"
+                    >
+                      <input
+                        type="checkbox"
+                        name="workflowIds"
+                        value={workflow.id}
+                        defaultChecked={(editingAgent?.workflowIds || []).includes(workflow.id)}
+                        className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-xs font-semibold">{workflow.name}</span>
+                        <span className="block text-[10px] text-slate-500">{workflow.description}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  {copy.workflowsHelp}
                 </p>
               </div>
 

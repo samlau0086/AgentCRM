@@ -807,6 +807,31 @@ export default function Customers() {
                                 {lead.industry}
                               </span>
                             )}
+                            {typeof lead.score === "number" && (
+                              <div className="flex items-center gap-2 mt-1">
+                                <div className="h-1.5 w-14 bg-slate-100 dark:bg-white/10 rounded-full overflow-hidden">
+                                  <div
+                                    className={cn(
+                                      "h-full rounded-full",
+                                      lead.score >= 75
+                                        ? "bg-emerald-500"
+                                        : lead.score >= 55
+                                          ? "bg-amber-500"
+                                          : "bg-rose-500",
+                                    )}
+                                    style={{ width: `${lead.score}%` }}
+                                  />
+                                </div>
+                                <span className="font-mono text-[10px] text-slate-500">
+                                  {lead.score}
+                                </span>
+                                {lead.intent && (
+                                  <span className="text-[10px] uppercase tracking-wide text-slate-400">
+                                    {lead.intent}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </td>
                         <td className="px-6 py-4 text-slate-400 dark:text-slate-500">
