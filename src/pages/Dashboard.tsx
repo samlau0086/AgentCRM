@@ -3,7 +3,8 @@ import { Users, TrendingUp, AlertCircle, Clock, CheckCircle2 } from 'lucide-reac
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../i18n';
-import { getCustomers, getInboxMessages, getAgents } from '../services/db';
+import { cn } from '../Layout';
+import { getAgentApprovals, getAgentRuns, getCustomers, getInboxMessages } from '../services/db';
 
 const data = [
   { name: 'Mon', leads: 400, deals: 240 },
@@ -18,6 +19,10 @@ const data = [
 export default function Dashboard() {
   const { t } = useLanguage();
   const navigate = useNavigate();
+  const [contributionWeeks, setContributionWeeks] = useState<
+    { date: Date; dateKey: string; count: number }[][]
+  >([]);
+  const [contributionTotal, setContributionTotal] = useState(0);
 
   const [stats, setStats] = useState({
     activeDeals: 0,
@@ -29,6 +34,8 @@ export default function Dashboard() {
   useEffect(() => {
     const customers = getCustomers();
     const messages = getInboxMessages();
+    const runs = getAgentRuns();
+    const approvals = getAgentApprovals();
 
     setStats({
       activeDeals: customers.filter(c => c.stage === 'Negotiation' || c.stage === 'Qualified').length,
@@ -36,7 +43,55 @@ export default function Dashboard() {
       pendingApprovals: messages.filter(m => !m.read).length,
       churnRisk: customers.filter(c => c.risk > 50).length,
     });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    start.setDate(today.getDate() - today.getDay() - 77);
+
+    const dayCounts = new Map<string, number>();
+    const addEvent = (value?: string) => {
+      if (!value) return;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return;
+      date.setHours(0, 0, 0, 0);
+      if (date < start || date > today) return;
+      const key = date.toISOString().slice(0, 10);
+      dayCounts.set(key, (dayCounts.get(key) || 0) + 1);
+    };
+
+    customers.forEach((customer) => {
+      (customer.logs || []).forEach((log) => addEvent(log.time));
+    });
+    messages.forEach((message) => addEvent(message.date));
+    runs.forEach((run) => addEvent(run.createdAt));
+    approvals.forEach((approval) => addEvent(approval.createdAt));
+
+    const weeks: { date: Date; dateKey: string; count: number }[][] = [];
+    let total = 0;
+    for (let week = 0; week < 12; week += 1) {
+      const days = [];
+      for (let day = 0; day < 7; day += 1) {
+        const date = new Date(start);
+        date.setDate(start.getDate() + week * 7 + day);
+        const dateKey = date.toISOString().slice(0, 10);
+        const count = dayCounts.get(dateKey) || 0;
+        total += count;
+        days.push({ date, dateKey, count });
+      }
+      weeks.push(days);
+    }
+    setContributionWeeks(weeks);
+    setContributionTotal(total);
   }, []);
+
+  const contributionTone = (count: number) => {
+    if (count === 0) return 'bg-slate-100 dark:bg-white/5 border-slate-200 dark:border-white/10';
+    if (count <= 1) return 'bg-emerald-100 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-900';
+    if (count <= 3) return 'bg-emerald-300 dark:bg-emerald-800 border-emerald-300 dark:border-emerald-700';
+    if (count <= 6) return 'bg-emerald-500 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-500';
+    return 'bg-emerald-700 dark:bg-emerald-400 border-emerald-700 dark:border-emerald-400';
+  };
 
   return (
     <div className="w-full p-4 md:p-8 space-y-8">
@@ -151,6 +206,48 @@ export default function Dashboard() {
              >
                {t('dash.reviewAll') || 'Review All Agents'}
              </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white/[0.02] border border-slate-200 dark:border-white/5 rounded-2xl p-6">
+        <div className="flex items-center justify-between gap-4 mb-5">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white tracking-wide">
+              用户事件贡献图
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              最近 12 周共 {contributionTotal} 个客户、消息和智能体相关事件
+            </p>
+          </div>
+          <div className="hidden sm:flex items-center gap-2 text-[10px] text-slate-500">
+            <span>少</span>
+            {[0, 1, 3, 6, 9].map((level) => (
+              <span
+                key={level}
+                className={cn(
+                  "w-3 h-3 rounded-[3px] border",
+                  contributionTone(level),
+                )}
+              />
+            ))}
+            <span>多</span>
+          </div>
+        </div>
+        <div className="overflow-x-auto pb-1">
+          <div className="inline-grid grid-flow-col grid-rows-7 gap-1 min-w-max">
+            {contributionWeeks.flatMap((week) =>
+              week.map((day) => (
+                <div
+                  key={day.dateKey}
+                  title={`${day.dateKey}: ${day.count} 个事件`}
+                  className={cn(
+                    "w-3.5 h-3.5 rounded-[3px] border transition-transform hover:scale-125",
+                    contributionTone(day.count),
+                  )}
+                />
+              )),
+            )}
           </div>
         </div>
       </div>
