@@ -27,6 +27,17 @@ import { notify } from "../services/notifications";
 
 export default function AgentCenter() {
   const { t, language } = useLanguage();
+  const availableTools = [
+    { id: "customers", zh: "客户资料", en: "Customer Records" },
+    { id: "inbox", zh: "统一收件箱", en: "Unified Inbox" },
+    { id: "email_send", zh: "发送邮件", en: "Send Email" },
+    { id: "whatsapp_send", zh: "发送 WhatsApp", en: "Send WhatsApp" },
+    { id: "quotes", zh: "产品与报价", en: "Products & Quotes" },
+    { id: "knowledge", zh: "知识库检索", en: "Knowledge Search" },
+    { id: "lead_platforms", zh: "获客平台", en: "Lead Platforms" },
+    { id: "media", zh: "媒体素材库", en: "Media Library" },
+    { id: "approvals", zh: "人工审批", en: "Human Approvals" },
+  ];
   const copy = language === "zh" ? {
     subtitle: "监控智能体工作负载，并管理自动化执行与人工审批。",
     harnessTab: "执行护栏与审批",
@@ -62,6 +73,8 @@ export default function AgentCenter() {
     harnessHelp: "决定该智能体是否可以直接执行动作，或是否必须先提交草稿等待审批。",
     modelProfile: "模型 Profile",
     modelProfileHelp: "先在设置里配置模型 Profile，然后在这里分配给智能体。",
+    tools: "可用工具",
+    toolsHelp: "只允许该智能体使用已勾选的业务工具。",
     supportedIntegrations: "支持的集成（获客线索采集）",
     agentStatus: "智能体状态",
     currently: "当前状态：",
@@ -119,6 +132,8 @@ export default function AgentCenter() {
     harnessHelp: "Determines whether this agent can immediately send messages or if drafts must be approved.",
     modelProfile: "Model Profile",
     modelProfileHelp: "Configure profiles in Settings, then assign one to each agent here.",
+    tools: "Available Tools",
+    toolsHelp: "This agent can only use the business tools selected here.",
     supportedIntegrations: "Supported Integrations (Scraping Leads)",
     agentStatus: "Agent Status",
     currently: "Currently: ",
@@ -187,6 +202,8 @@ export default function AgentCenter() {
     tool === "execute_step" ? copy.executeStep :
     tool === "trigger_agent" ? copy.triggerAgent :
     tool || "";
+  const businessToolLabel = (toolId: string) =>
+    availableTools.find((tool) => tool.id === toolId)?.[language === "zh" ? "zh" : "en"] || toolId;
   const runTaskLabel = (taskType: string) =>
     language === "zh" ? taskType.replace(/^Test:\s*/, "测试：") : taskType;
 
@@ -232,7 +249,7 @@ export default function AgentCenter() {
       taskType: language === "zh" ? `测试：${agentName(agent)}` : `Test: ${wfName}`,
       status: "Running",
       currentStep: "Initializing",
-      inputJson: { workflowName: wfName, language, modelProfileId: modelProfile.id },
+      inputJson: { workflowName: wfName, language, modelProfileId: modelProfile.id, tools: agent?.tools || [] },
     });
     setRuns(getAgentRuns());
     setShowTestModal(true);
@@ -248,6 +265,7 @@ export default function AgentCenter() {
         body: JSON.stringify({
           agentId,
           agentRole: agent?.role,
+          allowedTools: agent?.tools || [],
           context: `Workflow Name: ${wfName}. The user requested an execution test using the currently configured CRM and integration data.`,
           systemLanguage: language,
           modelProfile,
@@ -268,7 +286,7 @@ export default function AgentCenter() {
             status: "Success",
           });
         });
-        runOutput = { logs: data.logs, model: data.model, provider: data.provider, modelProfileId: modelProfile.id };
+        runOutput = { logs: data.logs, model: data.model, provider: data.provider, modelProfileId: modelProfile.id, tools: agent?.tools || [] };
         if (agent?.harness === "Human-in-the-loop") {
           addAgentApproval({
             runId: run.id,
@@ -331,9 +349,10 @@ export default function AgentCenter() {
     const formData = new FormData(e.currentTarget);
     const data = Object.fromEntries(formData);
     const modelProfileId = (data.modelProfileId as string) || modelProfiles[0]?.id || "default_google";
+    const selectedTools = formData.getAll("tools").map(String);
 
     if (editingAgent) {
-      updateAgent(editingAgent.id, { ...(Object.fromEntries(formData) as any), modelProfileId });
+      updateAgent(editingAgent.id, { ...(Object.fromEntries(formData) as any), modelProfileId, tools: selectedTools });
     } else {
       addAgent({
         name: data.name as string,
@@ -341,6 +360,7 @@ export default function AgentCenter() {
         status: "Idle",
         harness: data.harness as "Auto" | "Human-in-the-loop",
         modelProfileId,
+        tools: selectedTools,
       });
     }
     setAgents(getAgents());
@@ -497,6 +517,20 @@ export default function AgentCenter() {
                           </span>
                         ))}
                       </div>
+                    </div>
+                  )}
+                  {agent.tools && agent.tools.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {agent.tools.slice(0, 4).map((tool) => (
+                        <span key={tool} className="px-2 py-0.5 text-[10px] bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10 rounded">
+                          {businessToolLabel(tool)}
+                        </span>
+                      ))}
+                      {agent.tools.length > 4 && (
+                        <span className="px-2 py-0.5 text-[10px] text-slate-400">
+                          +{agent.tools.length - 4}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -747,6 +781,32 @@ export default function AgentCenter() {
                   </div>
                 </div>
               )}
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  {copy.tools}
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {availableTools.map((tool) => (
+                    <label
+                      key={tool.id}
+                      className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-700 dark:text-slate-300"
+                    >
+                      <input
+                        type="checkbox"
+                        name="tools"
+                        value={tool.id}
+                        defaultChecked={(editingAgent?.tools || []).includes(tool.id)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>{businessToolLabel(tool.id)}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  {copy.toolsHelp}
+                </p>
+              </div>
 
               {editingAgent && (
                 <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/5 flex justify-between items-center">

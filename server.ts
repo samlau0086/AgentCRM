@@ -578,7 +578,7 @@ app.post("/api/ai/draft-reply", async (req, res) => {
 });
 
 app.post("/api/ai/trigger-agent", async (req, res) => {
-  const { agentId, agentRole = "", context, systemLanguage = "en", modelProfile = {} } = req.body;
+  const { agentId, agentRole = "", allowedTools = [], context, systemLanguage = "en", modelProfile = {} } = req.body;
   const profile = requireModelProfile(modelProfile, res);
   if (!profile) return;
 
@@ -586,6 +586,7 @@ app.post("/api/ai/trigger-agent", async (req, res) => {
     const prompt = `You are executing a CRM agent workflow.
 Agent ID: ${agentId}
 Context: ${context}
+Allowed business tools: ${Array.isArray(allowedTools) && allowedTools.length > 0 ? allowedTools.join(", ") : "none configured"}
 
 Generate a 4-step execution log. Return strict JSON like {"logs":["step 1","step 2"]}. Write logs in this language: ${systemLanguage}.`;
     const text = await generateWithModelProfile(profile, agentRole, prompt);

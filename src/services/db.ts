@@ -394,6 +394,7 @@ export interface Agent {
   tasks: number;
   harness: "Auto" | "Human-in-the-loop";
   modelProfileId?: string;
+  tools?: string[];
   integrations?: string[];
 }
 
@@ -441,6 +442,7 @@ function builtInAgents(): Agent[] {
       tasks: 0,
       harness: "Auto",
       modelProfileId: "default_google",
+      tools: ["customers", "inbox", "quotes", "knowledge", "approvals"],
     },
     {
       id: "sdr",
@@ -450,6 +452,7 @@ function builtInAgents(): Agent[] {
       tasks: 0,
       harness: "Human-in-the-loop",
       modelProfileId: "default_google",
+      tools: ["customers", "inbox", "email_send", "quotes", "approvals"],
     },
     {
       id: "support",
@@ -459,6 +462,7 @@ function builtInAgents(): Agent[] {
       tasks: 0,
       harness: "Human-in-the-loop",
       modelProfileId: "default_google",
+      tools: ["customers", "inbox", "email_send", "whatsapp_send", "knowledge", "approvals"],
     },
     {
       id: "lead_generation",
@@ -468,6 +472,7 @@ function builtInAgents(): Agent[] {
       tasks: 0,
       harness: "Human-in-the-loop",
       modelProfileId: "default_google",
+      tools: ["lead_platforms", "customers", "knowledge", "approvals"],
       integrations: [
         "Outscraper",
         "Apify",
@@ -610,6 +615,7 @@ export function getAgents(): Agent[] {
       const normalized = parsed.map((agent: Agent) => ({
         ...agent,
         modelProfileId: agent.modelProfileId || "default_google",
+        tools: agent.tools || builtInAgents().find((item) => item.id === agent.id)?.tools || [],
       }));
       if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
         saveAgents(normalized);
