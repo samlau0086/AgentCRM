@@ -37,7 +37,6 @@ const modelsByProvider: Record<string, string[]> = {
   openai: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
   anthropic: ['claude-3-5-sonnet', 'claude-3-opus', 'claude-3-haiku'],
   google: ['gemini-1.5-pro', 'gemini-1.5-flash'],
-  openrouter: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-flash-1.5']
 };
 
 const defaultBaseUrlByProvider: Partial<Record<ModelProfile['provider'], string>> = {
@@ -441,7 +440,7 @@ export default function Settings() {
                               const provider = e.target.value as ModelProfile['provider'];
                               updateModelProfile(profile.id, {
                                 provider,
-                                model: provider === 'custom' ? '' : (modelsByProvider[provider]?.[0] || ''),
+                                model: provider === 'custom' || provider === 'openrouter' ? '' : (modelsByProvider[provider]?.[0] || ''),
                                 baseUrl: defaultBaseUrlByProvider[provider] || '',
                               });
                             }}
@@ -449,11 +448,11 @@ export default function Settings() {
                           >
                             {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                           </select>
-                          {profile.provider === 'custom' ? (
+                          {profile.provider === 'custom' || profile.provider === 'openrouter' ? (
                             <input
                               value={profile.model}
                               onChange={e => updateModelProfile(profile.id, { model: e.target.value })}
-                              placeholder="Model name"
+                              placeholder={profile.provider === 'openrouter' ? 'openai/gpt-4o-mini' : 'Model name'}
                               className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
                             />
                           ) : (
