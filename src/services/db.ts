@@ -46,6 +46,9 @@ export interface PublicLead {
   score?: number;
   risk?: "Low" | "Medium" | "High";
   intent?: "Low" | "Medium" | "High";
+  aiAnalysis?: string;
+  recommendedAction?: string;
+  enrichmentPlatforms?: string[];
   scoredAt?: string;
   enrichedAt?: string;
 }

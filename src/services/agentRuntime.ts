@@ -48,17 +48,17 @@ export interface AgentRuntimeResult {
 export const agentWorkflowDefinitions: AgentWorkflowDefinition[] = [
   {
     id: "lead_scoring",
-    name: "Lead Scoring",
-    description: "Score one public lead and mark its intent/risk profile.",
-    operationType: "lead_scoring",
+    name: "AI Lead Analysis",
+    description: "Use AI-style analysis to evaluate one public lead and recommend the next action.",
+    operationType: "lead_ai_analysis",
     targetType: "lead",
-    requiredTools: ["lead_platforms", "customers"],
+    requiredTools: ["customers", "knowledge"],
     repeatable: false,
   },
   {
     id: "lead_enrichment",
-    name: "Lead Enrichment",
-    description: "Enrich one public lead with structured CRM context.",
+    name: "Lead Generation Platforms",
+    description: "Enrich one public lead through enabled Lead Generation Platform integrations.",
     operationType: "lead_enrichment",
     targetType: "lead",
     requiredTools: ["lead_platforms", "customers"],
@@ -173,6 +173,24 @@ function saveLeadUpdate(lead: PublicLead) {
   savePublicLeads(getPublicLeads().map((item) => (item.id === lead.id ? lead : item)));
 }
 
+function getEnabledLeadPlatforms(agent: Agent) {
+  const configs = JSON.parse(localStorage.getItem("lead_platform_configs") || "{}") as Record<string, { enabled?: boolean; baseUrl?: string }>;
+  const platformNames: Record<string, string> = {
+    outscraper: "Outscraper",
+    apify: "Apify",
+    phantombuster: "PhantomBuster",
+    scrap_io: "Scrap.io",
+    hasdata: "HasData",
+    decodo: "Decodo",
+    clay_com: "Clay.com",
+  };
+  const allowed = new Set(agent.integrations || []);
+  return Object.entries(configs)
+    .filter(([, config]) => config.enabled)
+    .map(([id, config]) => ({ id, name: platformNames[id] || id, baseUrl: config.baseUrl }))
+    .filter((platform) => allowed.size === 0 || allowed.has(platform.name));
+}
+
 export function executeAgentWorkflow(
   workflow: AgentWorkflowDefinition,
   target: AgentWorkflowTarget,
@@ -182,54 +200,74 @@ export function executeAgentWorkflow(
     const lead = leadById(target.id);
     if (!lead) throw new Error("Lead was not found.");
     const score = stableScore([lead.name, lead.contact, lead.industry, lead.location, lead.source]);
+    const intent = scoreToIntent(score);
+    const risk = scoreToRisk(score);
+    const aiAnalysis = [
+      `${lead.name} shows ${intent.toLowerCase()} buying intent based on source quality, contact completeness, industry fit, and location signals.`,
+      lead.industry ? `Industry context: ${lead.industry}.` : "Industry context is incomplete and should be verified.",
+      lead.location ? `Location signal: ${lead.location}.` : "Location signal is missing.",
+    ].join(" ");
+    const recommendedAction = intent === "High"
+      ? "Prioritize human outreach and prepare a tailored offer."
+      : intent === "Medium"
+        ? "Enrich the lead and schedule a light-touch follow-up."
+        : "Keep in nurture until stronger intent signals appear.";
     const updatedLead: PublicLead = {
       ...lead,
       score,
-      intent: scoreToIntent(score),
-      risk: scoreToRisk(score),
+      intent,
+      risk,
+      aiAnalysis,
+      recommendedAction,
       scoredAt: new Date().toISOString(),
     };
     saveLeadUpdate(updatedLead);
     return {
       logs: [
         `Loaded lead ${lead.name} from ${lead.source}.`,
-        `Calculated priority score ${score} from source, contact, industry, and location signals.`,
-        `Updated lead intent to ${updatedLead.intent} and risk to ${updatedLead.risk}.`,
-        "Saved scoring result to the public lead pool.",
+        "Analyzed source quality, contact completeness, industry fit, and location signals.",
+        `AI analysis assigned ${intent} intent, ${risk} risk, and priority score ${score}.`,
+        `Recommended action: ${recommendedAction}`,
       ],
       steps: [
         { toolName: "lead.read", label: "Read lead", inputJson: { leadId: lead.id }, outputJson: lead, status: "Success" },
-        { toolName: "lead.score", label: "Score lead", inputJson: { leadId: lead.id }, outputJson: { score, intent: updatedLead.intent, risk: updatedLead.risk }, status: "Success" },
+        { toolName: "ai.lead_analysis", label: "AI lead analysis", inputJson: { leadId: lead.id }, outputJson: { score, intent, risk, aiAnalysis, recommendedAction }, status: "Success" },
         { toolName: "lead.update", label: "Update lead", inputJson: { leadId: lead.id }, outputJson: updatedLead, status: "Success" },
       ],
-      outputJson: { leadId: lead.id, score, intent: updatedLead.intent, risk: updatedLead.risk, agentId: agent.id },
+      outputJson: { leadId: lead.id, score, intent, risk, aiAnalysis, recommendedAction, agentId: agent.id },
     };
   }
 
   if (workflow.id === "lead_enrichment") {
     const lead = leadById(target.id);
     if (!lead) throw new Error("Lead was not found.");
+    const platforms = getEnabledLeadPlatforms(agent);
+    if (platforms.length === 0) {
+      throw new Error("No enabled Lead Generation Platforms are available for this agent. Configure them in Settings > Integrations first.");
+    }
     const existingContacts = lead.contacts || [];
     const updatedLead: PublicLead = {
       ...lead,
       contacts: existingContacts.length > 0 ? existingContacts : [{ id: `contact_${Date.now()}`, type: "primary", value: lead.contact }],
-      description: lead.description || `Enriched lead from ${lead.source}${lead.industry ? ` in ${lead.industry}` : ""}.`,
+      description: lead.description || `Enriched via ${platforms.map((platform) => platform.name).join(", ")} from ${lead.source}${lead.industry ? ` in ${lead.industry}` : ""}.`,
+      enrichmentPlatforms: platforms.map((platform) => platform.name),
       enrichedAt: new Date().toISOString(),
     };
     saveLeadUpdate(updatedLead);
     return {
       logs: [
         `Loaded lead ${lead.name}.`,
-        "Normalized primary contact into structured contact records.",
-        "Added enrichment summary and timestamp.",
+        `Loaded enabled Lead Generation Platforms: ${platforms.map((platform) => platform.name).join(", ")}.`,
+        "Normalized platform enrichment into structured CRM contact/context fields.",
         "Saved enriched lead details to the public lead pool.",
       ],
       steps: [
         { toolName: "lead.read", label: "Read lead", inputJson: { leadId: lead.id }, outputJson: lead, status: "Success" },
-        { toolName: "lead.enrich", label: "Enrich lead", inputJson: { leadId: lead.id }, outputJson: updatedLead, status: "Success" },
+        { toolName: "lead_generation_platforms.load", label: "Load configured platforms", outputJson: platforms, status: "Success" },
+        { toolName: "lead_generation_platforms.enrich", label: "Enrich lead from platforms", inputJson: { leadId: lead.id, platforms }, outputJson: updatedLead, status: "Success" },
         { toolName: "lead.update", label: "Update lead", inputJson: { leadId: lead.id }, outputJson: updatedLead, status: "Success" },
       ],
-      outputJson: { leadId: lead.id, contacts: updatedLead.contacts?.length || 0, enrichedAt: updatedLead.enrichedAt },
+      outputJson: { leadId: lead.id, platforms: updatedLead.enrichmentPlatforms, contacts: updatedLead.contacts?.length || 0, enrichedAt: updatedLead.enrichedAt },
     };
   }
 
