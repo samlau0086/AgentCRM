@@ -393,6 +393,7 @@ export default function AgentCenter() {
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [activeTab, setActiveTab] = useState<'agents' | 'harness'>('harness');
   const [selectedWorkflowTargets, setSelectedWorkflowTargets] = useState<Record<string, string>>({});
+  const [scheduleModeDraft, setScheduleModeDraft] = useState<"interval" | "monthly">("interval");
 
   useEffect(() => {
     setAgents(getAgents());
@@ -419,6 +420,7 @@ export default function AgentCenter() {
 
   const handleEdit = (agent: Agent) => {
     setEditingAgent(agent);
+    setScheduleModeDraft(agent.schedule?.mode || "interval");
     setIsConfigPanelOpen(true);
     setActiveTab("agents");
   };
@@ -670,6 +672,7 @@ export default function AgentCenter() {
 
   const handleAdd = () => {
     setEditingAgent(null);
+    setScheduleModeDraft("interval");
     setIsConfigPanelOpen(true);
     setActiveTab("agents");
   };
@@ -1082,7 +1085,8 @@ export default function AgentCenter() {
                       </label>
                       <select
                         name="scheduleMode"
-                        defaultValue={editingAgent?.schedule?.mode || "interval"}
+                        value={scheduleModeDraft}
+                        onChange={(event) => setScheduleModeDraft(event.target.value as "interval" | "monthly")}
                         className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
                       >
                         <option value="interval">{copy.intervalSchedule}</option>
@@ -1090,33 +1094,33 @@ export default function AgentCenter() {
                       </select>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <label className="block">
-                        <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.every}</span>
-                        <input
-                          type="number"
-                          name="intervalEvery"
-                          min="1"
-                          defaultValue={editingAgent?.schedule?.intervalEvery || 1}
-                          className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.scheduleUnit}</span>
-                        <select
-                          name="intervalUnit"
-                          defaultValue={editingAgent?.schedule?.intervalUnit || "days"}
-                          className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
-                        >
-                          <option value="seconds">{copy.seconds}</option>
-                          <option value="minutes">{copy.minutes}</option>
-                          <option value="hours">{copy.hours}</option>
-                          <option value="days">{copy.days}</option>
-                        </select>
-                      </label>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {scheduleModeDraft === "interval" ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="block">
+                          <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.every}</span>
+                          <input
+                            type="number"
+                            name="intervalEvery"
+                            min="1"
+                            defaultValue={editingAgent?.schedule?.intervalEvery || 1}
+                            className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.scheduleUnit}</span>
+                          <select
+                            name="intervalUnit"
+                            defaultValue={editingAgent?.schedule?.intervalUnit || "days"}
+                            className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                          >
+                            <option value="seconds">{copy.seconds}</option>
+                            <option value="minutes">{copy.minutes}</option>
+                            <option value="hours">{copy.hours}</option>
+                            <option value="days">{copy.days}</option>
+                          </select>
+                        </label>
+                      </div>
+                    ) : (
                       <label className="block">
                         <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.monthlyDay}</span>
                         <input
@@ -1128,6 +1132,9 @@ export default function AgentCenter() {
                           className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
                         />
                       </label>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <label className="block">
                         <span className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{copy.executionCount}</span>
                         <input
