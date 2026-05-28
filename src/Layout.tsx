@@ -17,12 +17,16 @@ import {
   Shield,
   Receipt,
   Film,
+  CheckCircle2,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useLanguage } from "./i18n";
 import { useTheme } from "./theme";
 import { getAgentApprovals, getCurrentUser, getInboxMessages } from "./services/db";
+import { AppNotification } from "./services/notifications";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -35,6 +39,7 @@ export default function Layout() {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [inboxCount, setInboxCount] = useState(0);
   const [pendingAgentCount, setPendingAgentCount] = useState(0);
+  const [toasts, setToasts] = useState<AppNotification[]>([]);
   const notificationRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -98,6 +103,21 @@ export default function Layout() {
 
   // Close dropdowns when clicking outside
   useEffect(() => {
+    const handleNotify = (event: Event) => {
+      const notification = (event as CustomEvent<AppNotification>).detail;
+      setToasts((current) => [...current, notification].slice(-4));
+      window.setTimeout(() => {
+        setToasts((current) =>
+          current.filter((toast) => toast.id !== notification.id),
+        );
+      }, 4500);
+    };
+
+    window.addEventListener("crm:notify", handleNotify);
+    return () => window.removeEventListener("crm:notify", handleNotify);
+  }, []);
+
+  useEffect(() => {
     refreshNavCounts();
 
     const handleDataChanged = () => refreshNavCounts();
@@ -109,6 +129,25 @@ export default function Layout() {
       window.removeEventListener("crm:data-changed", handleDataChanged);
     };
   }, []);
+
+  const toastStyles = {
+    success: {
+      icon: CheckCircle2,
+      tone: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300",
+    },
+    error: {
+      icon: AlertTriangle,
+      tone: "border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300",
+    },
+    warning: {
+      icon: AlertTriangle,
+      tone: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300",
+    },
+    info: {
+      icon: Info,
+      tone: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300",
+    },
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -346,6 +385,49 @@ export default function Layout() {
         {/* Page content */}
         <div className="flex-1 overflow-auto relative">
           <Outlet />
+        </div>
+
+        <div className="fixed right-4 top-20 z-[120] w-[min(360px,calc(100vw-2rem))] space-y-3 pointer-events-none">
+          {toasts.map((toast) => {
+            const style = toastStyles[toast.type];
+            const Icon = style.icon;
+            return (
+              <div
+                key={toast.id}
+                className="pointer-events-auto flex gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#111318] shadow-xl p-4 animate-in slide-in-from-right-4 fade-in duration-200"
+              >
+                <div
+                  className={cn(
+                    "w-9 h-9 rounded-lg border flex items-center justify-center shrink-0",
+                    style.tone,
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  {toast.title && (
+                    <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                      {toast.title}
+                    </div>
+                  )}
+                  <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {toast.message}
+                  </p>
+                </div>
+                <button
+                  onClick={() =>
+                    setToasts((current) =>
+                      current.filter((item) => item.id !== toast.id),
+                    )
+                  }
+                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded transition-colors"
+                  aria-label="Dismiss notification"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {/* Status Bar */}

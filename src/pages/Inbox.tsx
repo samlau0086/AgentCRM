@@ -38,6 +38,7 @@ import {
 } from "../services/db";
 import { CommentSection } from "../components/CommentSection";
 import ConfirmModal from "../components/ConfirmModal";
+import { notify } from "../services/notifications";
 
 export default function Inbox() {
   const { t, language } = useLanguage();
@@ -66,7 +67,7 @@ export default function Inbox() {
 
   const handleAIGenerateSubject = () => {
     if (!composeBody.trim()) {
-      alert("Please enter some message content first.");
+      notify("Please enter some message content first.", "warning", "Message content required");
       return;
     }
     setComposeSubject(
@@ -114,7 +115,7 @@ export default function Inbox() {
 
   const handleComposeSend = async () => {
     if (!composeTo.length || !composeSubject.trim() || !composeBody.trim()) {
-      alert("Please add at least one recipient, a subject, and a message.");
+      notify("Please add at least one recipient, a subject, and a message.", "warning", "Missing email details");
       return;
     }
 
@@ -122,7 +123,7 @@ export default function Inbox() {
       showComposeSchedule && composeScheduleDate && composeScheduleTime;
 
     if (isScheduled) {
-      alert("Scheduled sending requires a real backend scheduler. Send immediately or configure a scheduler endpoint first.");
+      notify("Scheduled sending requires a real backend scheduler. Send immediately or configure a scheduler endpoint first.", "warning", "Scheduler not configured");
       return;
     }
 
@@ -150,7 +151,7 @@ export default function Inbox() {
       resetCompose();
       setActiveTab("inbox");
     } catch (e: any) {
-      alert(`Error sending: ${e.message}`);
+      notify(`Error sending: ${e.message}`, "error", "Send failed");
     } finally {
       setIsSending(false);
     }
@@ -295,8 +296,8 @@ export default function Inbox() {
       showReplySchedule && replyScheduleDate && replyScheduleTime;
 
     try {
-      if (isScheduled) {
-        alert("Scheduled sending requires a real backend scheduler. Send immediately or configure a scheduler endpoint first.");
+    if (isScheduled) {
+        notify("Scheduled sending requires a real backend scheduler. Send immediately or configure a scheduler endpoint first.", "warning", "Scheduler not configured");
         return;
       }
 
@@ -322,7 +323,7 @@ export default function Inbox() {
       });
       setScheduleDefaults();
     } catch (e: any) {
-      alert(`Error sending: ${e.message}`);
+      notify(`Error sending: ${e.message}`, "error", "Send failed");
     } finally {
       setIsSending(false);
     }

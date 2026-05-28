@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
 import { useLanguage } from '../i18n';
 import { getCustomer, updateCustomer, Customer } from '../services/db';
+import { notify } from '../services/notifications';
 
 export default function EditCustomer() {
   const { id } = useParams();
@@ -20,7 +21,7 @@ export default function EditCustomer() {
   const handleSave = () => {
     if (customer && id) {
       updateCustomer(id, customer);
-      alert('Customer updated successfully');
+      notify('Customer updated successfully', 'success', 'Customer saved');
       navigate(`/customers/${id}`);
     }
   };

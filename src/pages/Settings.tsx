@@ -5,6 +5,7 @@ import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, 
 import { cn } from '../Layout';
 import { ReceiveProfile, SendProfile, EmailMapping, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings } from '../services/emailSync';
 import { Agent, ModelProfile, getAgents, getModelProfiles, saveModelProfiles, updateAgent } from '../services/db';
+import { notify } from '../services/notifications';
 
 type Tab = 'general' | 'agents' | 'integrations';
 
@@ -147,16 +148,16 @@ export default function Settings() {
       const res = await fetch('/api/vector/init', { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message);
+        notify(data.message, 'success', 'Vector database initialized');
         // recheck status
         const statusRes = await fetch('/api/config/vector');
         const statusData = await statusRes.json();
         setVectorStatus(statusData);
       } else {
-        alert('Error: ' + data.error);
+        notify('Error: ' + data.error, 'error', 'Vector setup failed');
       }
     } catch(e: any) {
-      alert('Error: ' + e.message);
+      notify('Error: ' + e.message, 'error', 'Vector setup failed');
     }
   };
 
@@ -164,12 +165,12 @@ export default function Settings() {
     saveReceiveProfiles(receiveProfiles);
     saveSendProfiles(sendProfiles);
     saveEmailMappings(emailMappings);
-    alert('Saved Email configuration');
+    notify('Saved Email configuration', 'success', 'Email settings saved');
   };
 
   const handleSaveModelProfiles = () => {
     saveModelProfiles(modelProfiles);
-    alert('Saved Model Profiles');
+    notify('Saved Model Profiles', 'success', 'Model profiles saved');
   };
 
   const addModelProfile = () => {
@@ -191,7 +192,7 @@ export default function Settings() {
 
   const deleteModelProfile = (id: string) => {
     if (modelProfiles.length <= 1) {
-      alert('At least one model profile is required.');
+      notify('At least one model profile is required.', 'warning', 'Cannot delete profile');
       return;
     }
     setModelProfiles(modelProfiles.filter(profile => profile.id !== id));
@@ -707,7 +708,7 @@ export default function Settings() {
                     onClick={() => {
                       localStorage.setItem('wa_hub_url', (document.getElementById('hub_url') as HTMLInputElement).value);
                       localStorage.setItem('wa_hub_token', (document.getElementById('hub_token') as HTMLInputElement).value);
-                      alert('Saved WhatsApp Actor Hub configuration');
+                      notify('Saved WhatsApp Actor Hub configuration', 'success', 'WhatsApp settings saved');
                     }}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded transition-colors shadow-sm"
                   >

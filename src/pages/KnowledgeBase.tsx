@@ -3,6 +3,7 @@ import { Book, FileText, Upload, MoreVertical, RefreshCw, X, File, Plus } from '
 import { useLanguage } from '../i18n';
 import ConfirmModal from '../components/ConfirmModal';
 import { getDocuments, saveDocuments, deleteDocument, addDocument, Document } from '../services/db';
+import { notify } from '../services/notifications';
 
 export default function KnowledgeBase() {
   const { t } = useLanguage();
@@ -63,7 +64,7 @@ export default function KnowledgeBase() {
       }, 500);
     } catch(err) {
       console.error(err);
-      alert('Failed to upload and vectorize');
+      notify('Failed to upload and vectorize', 'error', 'Upload failed');
       setIsUploading(false);
       setUploadProgress(0);
     }

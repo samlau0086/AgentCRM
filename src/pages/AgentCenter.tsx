@@ -23,6 +23,7 @@ import {
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
 import { getAgents, addAgent, updateAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
+import { notify } from "../services/notifications";
 
 export default function AgentCenter() {
   const { t, language } = useLanguage();
@@ -61,7 +62,7 @@ export default function AgentCenter() {
     const agent = agents.find((a) => a.id === agentId);
     const modelProfile = modelProfiles.find((profile) => profile.id === agent?.modelProfileId) || modelProfiles[0];
     if (!modelProfile) {
-      alert("Please create a model profile in Settings before running agents.");
+      notify("Please create a model profile in Settings before running agents.", "warning", "Model profile required");
       return;
     }
     const run = addAgentRun({

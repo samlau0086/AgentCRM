@@ -4,6 +4,7 @@ import { cn } from '../Layout';
 import { useLanguage } from '../i18n';
 import MediaLibraryModal from '../components/MediaLibraryModal';
 import ConfirmModal from '../components/ConfirmModal';
+import { notify } from '../services/notifications';
 import {
   Product, getProducts, addProduct, updateProduct, deleteProduct,
   Quote, getQuotes, addQuote, updateQuote, deleteQuote,
@@ -570,7 +571,7 @@ export default function Sales() {
               setEditingProduct(prev => prev ? { ...prev, image: media.url } : null);
               setIsMediaPickerOpen(false);
             } else {
-              alert('Please select an image file.');
+              notify('Please select an image file.', 'warning', 'Image required');
             }
           }} 
         />
