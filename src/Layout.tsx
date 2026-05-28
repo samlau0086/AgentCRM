@@ -22,7 +22,7 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useLanguage } from "./i18n";
 import { useTheme } from "./theme";
-import { getCurrentUser } from "./services/db";
+import { getAgentApprovals, getCurrentUser, getInboxMessages } from "./services/db";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -33,22 +33,32 @@ export default function Layout() {
   const { theme, toggleTheme } = useTheme();
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [inboxCount, setInboxCount] = useState(0);
+  const [pendingAgentCount, setPendingAgentCount] = useState(0);
   const notificationRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   const currentUser = getCurrentUser();
+
+  const refreshNavCounts = () => {
+    setInboxCount(getInboxMessages().length);
+    setPendingAgentCount(
+      getAgentApprovals().filter((approval) => approval.status === "Pending")
+        .length,
+    );
+  };
 
   const navigation = [
     { name: t("nav.dashboard"), href: "/", icon: LayoutDashboard },
     { name: t("nav.customers"), href: "/customers", icon: Users },
     { name: t("nav.sales"), href: "/sales", icon: Receipt },
     { name: t("nav.media"), href: "/media", icon: Film },
-    { name: t("nav.inbox"), href: "/inbox", icon: InboxIcon, badge: "5" },
+    { name: t("nav.inbox"), href: "/inbox", icon: InboxIcon, badge: inboxCount },
     {
       name: t("nav.agentCenter"),
       href: "/agent-center",
       icon: Bot,
-      badge: "2",
+      badge: pendingAgentCount,
     },
     { name: t("nav.knowledge"), href: "/knowledge", icon: BookOpen },
     ...(currentUser.role === "superadmin"
@@ -87,6 +97,19 @@ export default function Layout() {
   ];
 
   // Close dropdowns when clicking outside
+  useEffect(() => {
+    refreshNavCounts();
+
+    const handleDataChanged = () => refreshNavCounts();
+    window.addEventListener("storage", handleDataChanged);
+    window.addEventListener("crm:data-changed", handleDataChanged);
+
+    return () => {
+      window.removeEventListener("storage", handleDataChanged);
+      window.removeEventListener("crm:data-changed", handleDataChanged);
+    };
+  }, []);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (

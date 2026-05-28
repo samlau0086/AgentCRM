@@ -22,6 +22,10 @@ export interface UniversalComment {
   replies?: UniversalComment[];
 }
 
+function notifyDataChanged(key: string) {
+  window.dispatchEvent(new CustomEvent("crm:data-changed", { detail: { key } }));
+}
+
 export interface CustomerLog {
   id: string;
   time: string;
@@ -491,6 +495,7 @@ export function getAgentApprovals(): AgentApproval[] {
 
 export function saveAgentApprovals(approvals: AgentApproval[]) {
   localStorage.setItem("crm_agent_approvals", JSON.stringify(approvals));
+  notifyDataChanged("crm_agent_approvals");
 }
 
 export function addAgentApproval(approval: Omit<AgentApproval, "id" | "createdAt">) {
@@ -709,6 +714,7 @@ export function getInboxMessages(): MessagePreview[] {
 
 export function saveInboxMessages(msgs: MessagePreview[]) {
   localStorage.setItem("crm_inbox", JSON.stringify(msgs));
+  notifyDataChanged("crm_inbox");
 }
 
 export function deleteInboxMessage(id: string) {
