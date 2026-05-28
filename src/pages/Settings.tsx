@@ -181,7 +181,6 @@ export default function Settings() {
         provider: 'google',
         model: 'gemini-1.5-flash',
         temperature: 0.4,
-        systemPrompt: 'You are a CRM automation agent. Execute tasks carefully and report concise operational logs.',
       },
     ]);
   };
@@ -495,13 +494,6 @@ export default function Settings() {
                             className="w-full"
                           />
                         </div>
-                        <textarea
-                          rows={3}
-                          value={profile.systemPrompt || ''}
-                          onChange={e => updateModelProfile(profile.id, { systemPrompt: e.target.value })}
-                          placeholder="System prompt used by agents that select this profile"
-                          className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-xs focus:border-blue-500 outline-none font-mono resize-none"
-                        />
                       </div>
                     );
                   })}

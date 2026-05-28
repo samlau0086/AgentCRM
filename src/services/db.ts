@@ -404,7 +404,6 @@ export interface ModelProfile {
   baseUrl?: string;
   apiKey?: string;
   temperature?: number;
-  systemPrompt?: string;
 }
 
 export function getModelProfiles(): ModelProfile[] {
@@ -420,7 +419,6 @@ export function getModelProfiles(): ModelProfile[] {
       provider: "google",
       model: "gemini-1.5-flash",
       temperature: 0.4,
-      systemPrompt: "You are a CRM automation agent. Execute tasks carefully and report concise operational logs.",
     },
   ];
   saveModelProfiles(initial);

@@ -203,7 +203,6 @@ type ModelProfile = {
   baseUrl?: string;
   apiKey?: string;
   temperature?: number;
-  systemPrompt?: string;
 };
 
 function providerApiKey(profile: ModelProfile) {
@@ -236,11 +235,12 @@ function requireModelProfile(profile: ModelProfile, res: express.Response) {
 
 async function generateWithModelProfile(
   profile: Required<Pick<ModelProfile, "provider" | "model" | "apiKey">> & ModelProfile,
+  agentInstructions: string,
   prompt: string,
 ) {
   const temperature = profile.temperature ?? 0.4;
-  const systemPrompt =
-    profile.systemPrompt ||
+  const instructions =
+    agentInstructions ||
     "You are a CRM automation agent. Execute tasks carefully and report concise operational logs.";
 
   if (profile.provider === "google") {
@@ -250,7 +250,7 @@ async function generateWithModelProfile(
     });
     const response = await profileAi.models.generateContent({
       model: profile.model,
-      contents: `${systemPrompt}\n\n${prompt}`,
+      contents: `${instructions}\n\n${prompt}`,
       config: { responseMimeType: "application/json", temperature },
     });
     return response.text || "";
@@ -268,7 +268,7 @@ async function generateWithModelProfile(
         model: profile.model,
         max_tokens: 1000,
         temperature,
-        system: systemPrompt,
+        system: instructions,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -294,7 +294,7 @@ async function generateWithModelProfile(
       temperature,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: instructions },
         { role: "user", content: prompt },
       ],
     }),
@@ -585,11 +585,10 @@ app.post("/api/ai/trigger-agent", async (req, res) => {
   try {
     const prompt = `You are executing a CRM agent workflow.
 Agent ID: ${agentId}
-Agent instructions: ${agentRole || "Use the configured profile system prompt."}
 Context: ${context}
 
 Generate a 4-step execution log. Return strict JSON like {"logs":["step 1","step 2"]}. Write logs in this language: ${systemLanguage}.`;
-    const text = await generateWithModelProfile(profile, prompt);
+    const text = await generateWithModelProfile(profile, agentRole, prompt);
     const data = parseAiJson(text);
     const logs = Array.isArray(data.logs)
       ? data.logs.map((log: unknown) => String(log)).filter(Boolean)
