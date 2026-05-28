@@ -29,13 +29,19 @@ const providers = [
   { id: 'openai', name: 'OpenAI' },
   { id: 'anthropic', name: 'Anthropic' },
   { id: 'google', name: 'Google' },
+  { id: 'openrouter', name: 'OpenRouter.ai' },
   { id: 'custom', name: 'Custom (OpenAI API)' }
 ];
 
 const modelsByProvider: Record<string, string[]> = {
   openai: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
   anthropic: ['claude-3-5-sonnet', 'claude-3-opus', 'claude-3-haiku'],
-  google: ['gemini-1.5-pro', 'gemini-1.5-flash']
+  google: ['gemini-1.5-pro', 'gemini-1.5-flash'],
+  openrouter: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-flash-1.5']
+};
+
+const defaultBaseUrlByProvider: Partial<Record<ModelProfile['provider'], string>> = {
+  openrouter: 'https://openrouter.ai/api/v1'
 };
 
 const leadGenerationPlatforms: LeadPlatform[] = [
@@ -436,6 +442,7 @@ export default function Settings() {
                               updateModelProfile(profile.id, {
                                 provider,
                                 model: provider === 'custom' ? '' : (modelsByProvider[provider]?.[0] || ''),
+                                baseUrl: defaultBaseUrlByProvider[provider] || '',
                               });
                             }}
                             className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"

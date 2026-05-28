@@ -401,7 +401,7 @@ export interface Agent {
 export interface ModelProfile {
   id: string;
   name: string;
-  provider: "openai" | "anthropic" | "google" | "custom";
+  provider: "openai" | "anthropic" | "google" | "openrouter" | "custom";
   model: string;
   baseUrl?: string;
   apiKey?: string;

@@ -193,7 +193,7 @@ const ai = new GoogleGenAI({
   httpOptions: { headers: { "User-Agent": "aistudio-build" } },
 });
 
-type ModelProvider = "openai" | "anthropic" | "google" | "custom";
+type ModelProvider = "openai" | "anthropic" | "google" | "openrouter" | "custom";
 
 type ModelProfile = {
   id?: string;
@@ -209,6 +209,9 @@ function providerApiKey(profile: ModelProfile) {
   if (profile.apiKey) return profile.apiKey;
   if (profile.provider === "openai" || profile.provider === "custom") {
     return process.env.OPENAI_API_KEY || "";
+  }
+  if (profile.provider === "openrouter") {
+    return process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || "";
   }
   if (profile.provider === "anthropic") return process.env.ANTHROPIC_API_KEY || "";
   return process.env.GEMINI_API_KEY || "";
@@ -279,7 +282,9 @@ async function generateWithModelProfile(
     return data.content?.map((part: any) => part.text).filter(Boolean).join("\n") || "";
   }
 
-  const baseUrl = profile.baseUrl || "https://api.openai.com/v1";
+  const baseUrl =
+    profile.baseUrl ||
+    (profile.provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1");
   const endpoint = baseUrl.replace(/\/$/, "").endsWith("/chat/completions")
     ? baseUrl.replace(/\/$/, "")
     : `${baseUrl.replace(/\/$/, "")}/chat/completions`;
@@ -288,6 +293,9 @@ async function generateWithModelProfile(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${profile.apiKey}`,
+      ...(profile.provider === "openrouter"
+        ? { "HTTP-Referer": "https://agentcrm.local", "X-Title": "AgentCRM" }
+        : {}),
     },
     body: JSON.stringify({
       model: profile.model,

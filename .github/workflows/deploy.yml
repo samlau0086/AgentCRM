@@ -81,6 +81,11 @@ jobs:
               echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
             fi
 
+            if [ -n "${{ secrets.OPENROUTER_API_KEY }}" ]; then
+              sed -i '/^OPENROUTER_API_KEY=/d' .env
+              echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" >> .env
+            fi
+
             if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
               sed -i '/^ANTHROPIC_API_KEY=/d' .env
               echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
