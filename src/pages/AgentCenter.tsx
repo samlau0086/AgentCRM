@@ -40,6 +40,15 @@ export default function AgentCenter() {
     { id: "media", zh: "媒体素材库", en: "Media Library" },
     { id: "approvals", zh: "人工审批", en: "Human Approvals" },
   ];
+  const leadPlatformOptions = [
+    { id: "Outscraper", name: "Outscraper" },
+    { id: "Apify", name: "Apify" },
+    { id: "PhantomBuster", name: "PhantomBuster" },
+    { id: "Scrap.io", name: "Scrap.io" },
+    { id: "HasData", name: "HasData" },
+    { id: "Decodo", name: "Decodo" },
+    { id: "Clay.com", name: "Clay.com" },
+  ];
   const copy = language === "zh" ? {
     subtitle: "监控智能体工作负载，并管理自动化执行与人工审批。",
     harnessTab: "执行护栏与审批",
@@ -78,6 +87,7 @@ export default function AgentCenter() {
     tools: "可用工具",
     toolsHelp: "只允许该智能体使用已勾选的业务工具。",
     supportedIntegrations: "支持的集成（获客线索采集）",
+    integrationsHelp: "选择该智能体允许使用的获客平台。平台 API Key 仍在设置的系统集成里配置。",
     agentStatus: "智能体状态",
     currently: "当前状态：",
     disableAgent: "停用智能体",
@@ -141,6 +151,7 @@ export default function AgentCenter() {
     tools: "Available Tools",
     toolsHelp: "This agent can only use the business tools selected here.",
     supportedIntegrations: "Supported Integrations (Scraping Leads)",
+    integrationsHelp: "Choose which lead-generation platforms this agent can use. Platform API keys are still configured in Settings integrations.",
     agentStatus: "Agent Status",
     currently: "Currently: ",
     disableAgent: "Disable Agent",
@@ -361,9 +372,10 @@ export default function AgentCenter() {
     const data = Object.fromEntries(formData);
     const modelProfileId = (data.modelProfileId as string) || modelProfiles[0]?.id || "default_google";
     const selectedTools = formData.getAll("tools").map(String);
+    const selectedIntegrations = formData.getAll("integrations").map(String);
 
     if (editingAgent) {
-      updateAgent(editingAgent.id, { ...(Object.fromEntries(formData) as any), modelProfileId, tools: selectedTools });
+      updateAgent(editingAgent.id, { ...(Object.fromEntries(formData) as any), modelProfileId, tools: selectedTools, integrations: selectedIntegrations });
     } else {
       addAgent({
         name: data.name as string,
@@ -372,6 +384,7 @@ export default function AgentCenter() {
         harness: data.harness as "Auto" | "Human-in-the-loop",
         modelProfileId,
         tools: selectedTools,
+        integrations: selectedIntegrations,
       });
     }
     setAgents(getAgents());
@@ -797,20 +810,31 @@ export default function AgentCenter() {
                 </p>
               </div>
 
-              {editingAgent?.integrations && editingAgent.integrations.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                    {copy.supportedIntegrations}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {editingAgent.integrations.map(integration => (
-                      <span key={integration} className="px-2.5 py-1 text-xs font-medium bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-md">
-                        {integration}
-                      </span>
-                    ))}
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  {copy.supportedIntegrations}
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {leadPlatformOptions.map((platform) => (
+                    <label
+                      key={platform.id}
+                      className="flex items-center gap-2 px-3 py-2 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-500/20 rounded-lg text-sm text-slate-700 dark:text-slate-300"
+                    >
+                      <input
+                        type="checkbox"
+                        name="integrations"
+                        value={platform.name}
+                        defaultChecked={(editingAgent?.integrations || []).includes(platform.name)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>{platform.name}</span>
+                    </label>
+                  ))}
                 </div>
-              )}
+                <p className="text-xs text-slate-500 mt-2">
+                  {copy.integrationsHelp}
+                </p>
+              </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
