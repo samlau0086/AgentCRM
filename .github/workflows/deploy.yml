@@ -65,6 +65,26 @@ jobs:
               sed -i '/^JWT_SECRET=/d' .env
               echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
             fi
+
+            if [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
+              sed -i '/^GEMINI_API_KEY=/d' .env
+              echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+            fi
+
+            if [ -n "${{ secrets.GEMINI_MODEL }}" ]; then
+              sed -i '/^GEMINI_MODEL=/d' .env
+              echo "GEMINI_MODEL=${{ secrets.GEMINI_MODEL }}" >> .env
+            fi
+
+            if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+              sed -i '/^OPENAI_API_KEY=/d' .env
+              echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+            fi
+
+            if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+              sed -i '/^ANTHROPIC_API_KEY=/d' .env
+              echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
+            fi
             
             # 安装依赖
             npm install

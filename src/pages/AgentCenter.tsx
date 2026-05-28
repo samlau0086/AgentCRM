@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
-import { getAgents, addAgent, updateAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, saveAgentApprovals, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
+import { getAgents, addAgent, updateAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
 
 export default function AgentCenter() {
   const { t, language } = useLanguage();
@@ -31,6 +31,7 @@ export default function AgentCenter() {
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [approvals, setApprovals] = useState<AgentApproval[]>([]);
+  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [activeTab, setActiveTab] = useState<'agents' | 'harness'>('harness');
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export default function AgentCenter() {
     setRuns(getAgentRuns());
     setSteps(getAgentSteps());
     setApprovals(getAgentApprovals());
+    setModelProfiles(getModelProfiles());
   }, []);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -54,13 +56,20 @@ export default function AgentCenter() {
 
   const handleTestAgent = async (agentId: string, wfName: string) => {
     let runFailed = false;
+    let runErrorMessage: string | undefined;
+    let runOutput: any;
     const agent = agents.find((a) => a.id === agentId);
+    const modelProfile = modelProfiles.find((profile) => profile.id === agent?.modelProfileId) || modelProfiles[0];
+    if (!modelProfile) {
+      alert("Please create a model profile in Settings before running agents.");
+      return;
+    }
     const run = addAgentRun({
       agentId,
       taskType: `Test: ${wfName}`,
       status: "Running",
       currentStep: "Initializing",
-      inputJson: { workflowName: wfName, language },
+      inputJson: { workflowName: wfName, language, modelProfileId: modelProfile.id },
     });
     setRuns(getAgentRuns());
     setShowTestModal(true);
@@ -75,12 +84,17 @@ export default function AgentCenter() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentId,
+          agentRole: agent?.role,
           context: `Workflow Name: ${wfName}. The user requested an execution test using the currently configured CRM and integration data.`,
           systemLanguage: language,
+          modelProfile,
         }),
       });
-      const data = await res.json();
-      if (data.logs) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Agent workflow request failed with HTTP ${res.status}.`);
+      }
+      if (Array.isArray(data.logs) && data.logs.length > 0) {
         data.logs.forEach((log: string, index: number) => {
           addAgentStep({
             runId: run.id,
@@ -91,14 +105,15 @@ export default function AgentCenter() {
             status: "Success",
           });
         });
+        runOutput = { logs: data.logs, model: data.model, provider: data.provider, modelProfileId: modelProfile.id };
         if (agent?.harness === "Human-in-the-loop") {
           addAgentApproval({
             runId: run.id,
-            actionType: "send_email",
+            actionType: "review_agent_test_result",
             proposedPayload: {
-              to: "john@acme.com",
-              subject: `Follow-up from ${agent.name}`,
-              body: data.logs.join("\n"),
+              agentId,
+              workflowName: wfName,
+              logs: data.logs,
             },
             status: "Pending",
           });
@@ -109,18 +124,20 @@ export default function AgentCenter() {
           "Test run completed successfully.",
         ]);
       } else {
-        setTestLogs((prev) => [...prev, "Failed to execute workflow."]);
+        throw new Error(data.error || "Agent engine returned no execution logs.");
       }
     } catch (err) {
       runFailed = true;
+      const message = err instanceof Error ? err.message : "Unknown agent execution error.";
+      runErrorMessage = message;
       addAgentStep({
         runId: run.id,
         stepType: "Tool",
         toolName: "trigger_agent",
-        outputJson: { error: "Network error triggering agent." },
+        outputJson: { error: message },
         status: "Failed",
       });
-      setTestLogs((prev) => [...prev, "Network error triggering agent."]);
+      setTestLogs((prev) => [...prev, message]);
     } finally {
       const updatedRuns = getAgentRuns().map((item) =>
         item.id === run.id
@@ -128,11 +145,12 @@ export default function AgentCenter() {
               ...item,
               status: runFailed ? ("Failed" as const) : ("Completed" as const),
               currentStep: runFailed ? "Failed" : "Completed",
-              errorMessage: runFailed ? "Network error triggering agent." : undefined,
+              outputJson: runOutput,
+              errorMessage: runErrorMessage,
             }
           : item,
       );
-      localStorage.setItem("crm_agent_runs", JSON.stringify(updatedRuns));
+      saveAgentRuns(updatedRuns);
       setRuns(updatedRuns);
       setSteps(getAgentSteps());
       setApprovals(getAgentApprovals());
@@ -149,15 +167,17 @@ export default function AgentCenter() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const data = Object.fromEntries(formData);
+    const modelProfileId = (data.modelProfileId as string) || modelProfiles[0]?.id || "default_google";
 
     if (editingAgent) {
-      updateAgent(editingAgent.id, Object.fromEntries(formData) as any);
+      updateAgent(editingAgent.id, { ...(Object.fromEntries(formData) as any), modelProfileId });
     } else {
       addAgent({
         name: data.name as string,
         role: data.role as string,
         status: "Idle",
         harness: data.harness as "Auto" | "Human-in-the-loop",
+        modelProfileId,
       });
     }
     setAgents(getAgents());
@@ -529,6 +549,26 @@ export default function AgentCenter() {
                 <p className="text-xs text-slate-500 mt-2">
                   Determines whether this agent can immediately send messages or
                   if drafts must be approved.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Model Profile
+                </label>
+                <select
+                  name="modelProfileId"
+                  defaultValue={editingAgent?.modelProfileId || modelProfiles[0]?.id || "default_google"}
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
+                >
+                  {modelProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name} ({profile.provider} / {profile.model})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-2">
+                  Configure profiles in Settings, then assign one to each agent here.
                 </p>
               </div>
 

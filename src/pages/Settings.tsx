@@ -4,6 +4,7 @@ import { useTheme } from '../theme';
 import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { cn } from '../Layout';
 import { ReceiveProfile, SendProfile, EmailMapping, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings } from '../services/emailSync';
+import { ModelProfile, getModelProfiles, saveModelProfiles } from '../services/db';
 
 type Tab = 'general' | 'agents' | 'integrations';
 
@@ -36,11 +37,6 @@ const modelsByProvider: Record<string, string[]> = {
   google: ['gemini-1.5-pro', 'gemini-1.5-flash']
 };
 
-const embeddingsByProvider: Record<string, string[]> = {
-  openai: ['text-embedding-3-small', 'text-embedding-3-large'],
-  google: ['text-embedding-004']
-};
-
 const leadGenerationPlatforms: LeadPlatform[] = [
   { id: 'outscraper', name: 'Outscraper', desc: 'Google Maps scraping', defaultBaseUrl: 'https://api.app.outscraper.com', helpText: 'Use an OutScraper API key with Google Maps Search or Places endpoints.' },
   { id: 'apify', name: 'Apify', desc: 'Web scraping & automation', defaultBaseUrl: 'https://api.apify.com/v2', helpText: 'Use an Apify token to run actors for prospect discovery and enrichment.' },
@@ -56,16 +52,10 @@ export default function Settings() {
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<Tab>('general');
 
-  const [agentConfigs, setAgentConfigs] = useState({
-    orchestrator: { provider: 'openai', model: 'gpt-4o', customBaseUrl: '', temperature: 0.2, systemPrompt: 'You are the core orchestrator. Route requests to specialized agents and summarize results.' },
-    sdr: { provider: 'anthropic', model: 'claude-3-5-sonnet', customBaseUrl: '', temperature: 0.6, systemPrompt: 'You are a proactive Sales Development Representative. Identify high-intent leads and schedule meetings.' },
-    support: { provider: 'google', model: 'gemini-1.5-flash', customBaseUrl: '', temperature: 0.1, systemPrompt: 'You are a helpful Support Agent. Resolve customer inquiries quickly and politely using the provided documentation.' },
-    rag: { provider: 'openai', model: 'text-embedding-3-small', customBaseUrl: '', temperature: 0, systemPrompt: '' }
-  });
-
   const [receiveProfiles, setReceiveProfiles] = useState<ReceiveProfile[]>([]);
   const [sendProfiles, setSendProfiles] = useState<SendProfile[]>([]);
   const [emailMappings, setEmailMappings] = useState<EmailMapping[]>([]);
+  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
 
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
 
@@ -82,12 +72,6 @@ export default function Settings() {
   });
 
   useEffect(() => {
-    const savedAgentConfigs = localStorage.getItem('agent_configs');
-    if (savedAgentConfigs) {
-      try {
-        setAgentConfigs(prev => ({ ...prev, ...JSON.parse(savedAgentConfigs) }));
-      } catch (e) {}
-    }
     setTimezone(localStorage.getItem('crm_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
     setEmailAlerts(localStorage.getItem('crm_email_alerts') !== 'false');
     setPushAlerts(localStorage.getItem('crm_push_alerts') !== 'false');
@@ -99,6 +83,7 @@ export default function Settings() {
     setReceiveProfiles(getReceiveProfiles());
     setSendProfiles(getSendProfiles());
     setEmailMappings(getEmailMappings());
+    setModelProfiles(getModelProfiles());
     
     fetch('/api/config/vector')
       .then(res => res.json())
@@ -180,6 +165,37 @@ export default function Settings() {
     alert('Saved Email configuration');
   };
 
+  const handleSaveModelProfiles = () => {
+    saveModelProfiles(modelProfiles);
+    alert('Saved Model Profiles');
+  };
+
+  const addModelProfile = () => {
+    setModelProfiles([
+      ...modelProfiles,
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        name: 'New Model Profile',
+        provider: 'google',
+        model: 'gemini-1.5-flash',
+        temperature: 0.4,
+        systemPrompt: 'You are a CRM automation agent. Execute tasks carefully and report concise operational logs.',
+      },
+    ]);
+  };
+
+  const updateModelProfile = (id: string, updates: Partial<ModelProfile>) => {
+    setModelProfiles(modelProfiles.map(profile => profile.id === id ? { ...profile, ...updates } : profile));
+  };
+
+  const deleteModelProfile = (id: string) => {
+    if (modelProfiles.length <= 1) {
+      alert('At least one model profile is required.');
+      return;
+    }
+    setModelProfiles(modelProfiles.filter(profile => profile.id !== id));
+  };
+
   const addReceiveProfile = () => {
     setReceiveProfiles([...receiveProfiles, {
       id: Math.random().toString(36).substr(2, 9),
@@ -213,13 +229,6 @@ export default function Settings() {
       sendProfileId: ''
     }]);
   };
-
-  const agents = [
-    { id: 'orchestrator', label: t('set.agt.orchestrator') },
-    { id: 'sdr', label: t('set.agt.sdr') },
-    { id: 'support', label: t('set.agt.support') },
-    { id: 'rag', label: t('set.agt.rag'), isRag: true }
-  ];
 
   const tabs = [
     { id: 'general', label: t('set.tab.general'), icon: Sliders },
@@ -384,110 +393,111 @@ export default function Settings() {
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200">{t('set.tab.agents')}</h2>
                 <button 
-                  onClick={() => {
-                    localStorage.setItem('agent_configs', JSON.stringify(agentConfigs));
-                    alert('Saved Agent Configurations');
-                  }}
+                  onClick={handleSaveModelProfiles}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded transition-colors shadow-sm"
                 >
                   {t('set.gen.save') || 'Save Changes'}
                 </button>
               </div>
               <div className="bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 rounded-2xl p-6 space-y-6">
-                
-                <div>
-                  <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-4">{t('set.agt.model')}</h3>
-                  <div className="space-y-4">
-                    {agents.map(agent => {
-                      const config = agentConfigs[agent.id as keyof typeof agentConfigs];
-                      const availableModels = agent.isRag 
-                        ? (embeddingsByProvider[config.provider] || [])
-                        : (modelsByProvider[config.provider] || []);
-
-                      return (
-                        <div key={agent.id} className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-start bg-slate-50 dark:bg-black/20 p-4 rounded-xl border border-slate-200 dark:border-white/5">
-                          <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-2">
-                            {agent.label}
-                          </div>
-                          <div>
-                            <select 
-                              value={config.provider}
-                              onChange={e => {
-                                const newProvider = e.target.value;
-                                const defaultModel = newProvider === 'custom' ? '' : ((agent.isRag ? embeddingsByProvider[newProvider] : modelsByProvider[newProvider])?.[0] || '');
-                                setAgentConfigs({...agentConfigs, [agent.id]: { ...config, provider: newProvider, model: defaultModel }})
-                              }}
-                              className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
-                            >
-                              {providers.filter(p => !agent.isRag || p.id === 'custom' || embeddingsByProvider[p.id]).map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            {config.provider === 'custom' ? (
-                              <div className="flex flex-col gap-2">
-                                <input 
-                                  placeholder="Model Name (e.g. llama-3-70b)"
-                                  value={config.model}
-                                  onChange={e => setAgentConfigs({...agentConfigs, [agent.id]: { ...config, model: e.target.value }})}
-                                  className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
-                                />
-                                <input 
-                                  placeholder="Base URL (e.g. https://api.groq...)"
-                                  value={config.customBaseUrl || ''}
-                                  onChange={e => setAgentConfigs({...agentConfigs, [agent.id]: { ...config, customBaseUrl: e.target.value }})}
-                                  className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
-                                />
-                                <input 
-                                  type="password"
-                                  placeholder="API Key (Optional)"
-                                  value={(config as any).customApiKey || ''}
-                                  onChange={e => setAgentConfigs({...agentConfigs, [agent.id]: { ...config, customApiKey: e.target.value }})}
-                                  className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
-                                />
-                              </div>
-                            ) : (
-                              <select 
-                                value={config.model}
-                                onChange={e => setAgentConfigs({...agentConfigs, [agent.id]: { ...config, model: e.target.value }})}
-                                className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
-                              >
-                                {availableModels.map(m => (
-                                  <option key={m} value={m}>{m}</option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                          {!agent.isRag && (
-                            <div className="md:col-span-3 mt-2 space-y-4 border-t border-slate-200 dark:border-white/5 pt-4">
-                              <div>
-                                <div className="flex justify-between items-center mb-2">
-                                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">{t('set.agt.temperature')}</label>
-                                  <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{(config as any).temperature}</span>
-                                </div>
-                                <input 
-                                  type="range" min="0" max="1" step="0.1" 
-                                  value={(config as any).temperature} 
-                                  onChange={e => setAgentConfigs({...agentConfigs, [agent.id]: { ...config, temperature: parseFloat(e.target.value) }})}
-                                  className="w-full" 
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs font-medium text-slate-700 dark:text-slate-300 block mb-2">{t('set.agt.systemPrompt')}</label>
-                                <textarea 
-                                  rows={3}
-                                  value={(config as any).systemPrompt}
-                                  onChange={e => setAgentConfigs({...agentConfigs, [agent.id]: { ...config, systemPrompt: e.target.value }})}
-                                  className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-xs focus:border-blue-500 outline-none font-mono resize-none"
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Model Profiles</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Create reusable model connections. Agents choose one of these profiles in Agent Center.</p>
                   </div>
+                  <button onClick={addModelProfile} className="px-3 py-2 text-xs font-semibold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/10 flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Add Profile
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {modelProfiles.map(profile => {
+                    const presetModels = modelsByProvider[profile.provider] || [];
+                    return (
+                      <div key={profile.id} className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/5 rounded-xl p-4 space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                          <input
+                            value={profile.name}
+                            onChange={e => updateModelProfile(profile.id, { name: e.target.value })}
+                            placeholder="Profile name"
+                            className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
+                          />
+                          <select
+                            value={profile.provider}
+                            onChange={e => {
+                              const provider = e.target.value as ModelProfile['provider'];
+                              updateModelProfile(profile.id, {
+                                provider,
+                                model: provider === 'custom' ? '' : (modelsByProvider[provider]?.[0] || ''),
+                              });
+                            }}
+                            className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
+                          >
+                            {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                          {profile.provider === 'custom' ? (
+                            <input
+                              value={profile.model}
+                              onChange={e => updateModelProfile(profile.id, { model: e.target.value })}
+                              placeholder="Model name"
+                              className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
+                            />
+                          ) : (
+                            <select
+                              value={profile.model}
+                              onChange={e => updateModelProfile(profile.id, { model: e.target.value })}
+                              className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
+                            >
+                              {presetModels.map(model => <option key={model} value={model}>{model}</option>)}
+                            </select>
+                          )}
+                          <button
+                            onClick={() => deleteModelProfile(profile.id)}
+                            className="px-3 py-2 text-xs font-semibold text-red-600 border border-red-200 dark:border-red-500/30 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 flex items-center justify-center gap-1"
+                          >
+                            <Trash2 className="w-3 h-3" /> Delete
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <input
+                            value={profile.baseUrl || ''}
+                            onChange={e => updateModelProfile(profile.id, { baseUrl: e.target.value })}
+                            placeholder="Base URL (optional for provider defaults)"
+                            className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
+                          />
+                          <input
+                            type="password"
+                            value={profile.apiKey || ''}
+                            onChange={e => updateModelProfile(profile.id, { apiKey: e.target.value })}
+                            placeholder="API Key (optional if configured on server)"
+                            className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex justify-between items-center mb-2">
+                            <label className="text-xs font-medium text-slate-700 dark:text-slate-300">{t('set.agt.temperature')}</label>
+                            <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{profile.temperature ?? 0.4}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.1"
+                            value={profile.temperature ?? 0.4}
+                            onChange={e => updateModelProfile(profile.id, { temperature: parseFloat(e.target.value) })}
+                            className="w-full"
+                          />
+                        </div>
+                        <textarea
+                          rows={3}
+                          value={profile.systemPrompt || ''}
+                          onChange={e => updateModelProfile(profile.id, { systemPrompt: e.target.value })}
+                          placeholder="System prompt used by agents that select this profile"
+                          className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-xs focus:border-blue-500 outline-none font-mono resize-none"
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
 
               </div>

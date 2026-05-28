@@ -392,7 +392,44 @@ export interface Agent {
   status: "Active" | "Idle" | "Disabled";
   tasks: number;
   harness: "Auto" | "Human-in-the-loop";
+  modelProfileId?: string;
   integrations?: string[];
+}
+
+export interface ModelProfile {
+  id: string;
+  name: string;
+  provider: "openai" | "anthropic" | "google" | "custom";
+  model: string;
+  baseUrl?: string;
+  apiKey?: string;
+  temperature?: number;
+  systemPrompt?: string;
+}
+
+export function getModelProfiles(): ModelProfile[] {
+  try {
+    const data = localStorage.getItem("crm_model_profiles");
+    if (data) return JSON.parse(data);
+  } catch (e) {}
+
+  const initial: ModelProfile[] = [
+    {
+      id: "default_google",
+      name: "Default Google Gemini",
+      provider: "google",
+      model: "gemini-1.5-flash",
+      temperature: 0.4,
+      systemPrompt: "You are a CRM automation agent. Execute tasks carefully and report concise operational logs.",
+    },
+  ];
+  saveModelProfiles(initial);
+  return initial;
+}
+
+export function saveModelProfiles(profiles: ModelProfile[]) {
+  localStorage.setItem("crm_model_profiles", JSON.stringify(profiles));
+  notifyDataChanged("crm_model_profiles");
 }
 
 export interface AgentRun {
@@ -443,6 +480,7 @@ export function getAgentRuns(): AgentRun[] {
 
 export function saveAgentRuns(runs: AgentRun[]) {
   localStorage.setItem("crm_agent_runs", JSON.stringify(runs));
+  notifyDataChanged("crm_agent_runs");
 }
 
 export function addAgentRun(run: Omit<AgentRun, "id" | "createdAt">) {
@@ -469,6 +507,7 @@ export function getAgentSteps(): AgentStep[] {
 
 export function saveAgentSteps(steps: AgentStep[]) {
   localStorage.setItem("crm_agent_steps", JSON.stringify(steps));
+  notifyDataChanged("crm_agent_steps");
 }
 
 export function addAgentStep(step: Omit<AgentStep, "id" | "createdAt">) {
@@ -522,6 +561,7 @@ export function getAgents(): Agent[] {
           status: "Active",
           tasks: 0,
           harness: "Human-in-the-loop",
+          modelProfileId: "default_google",
           integrations: [
             "Outscraper",
             "Apify",
@@ -534,7 +574,14 @@ export function getAgents(): Agent[] {
         });
         saveAgents(parsed);
       }
-      return parsed;
+      const normalized = parsed.map((agent: Agent) => ({
+        ...agent,
+        modelProfileId: agent.modelProfileId || "default_google",
+      }));
+      if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
+        saveAgents(normalized);
+      }
+      return normalized;
     }
   } catch (e) {}
 
@@ -545,6 +592,7 @@ export function getAgents(): Agent[] {
 
 export function saveAgents(agents: Agent[]) {
   localStorage.setItem("crm_agents", JSON.stringify(agents));
+  notifyDataChanged("crm_agents");
 }
 
 export function addAgent(agent: Omit<Agent, "id" | "tasks">) {

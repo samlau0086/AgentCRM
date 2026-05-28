@@ -56,10 +56,13 @@ PORT=3000
 DATABASE_URL=postgresql://...
 PG_VECTOR_URL=postgresql://...
 GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-1.5-flash
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
 JWT_SECRET=...
 ```
 
-If `GEMINI_API_KEY` is missing, AI endpoints return a configuration error instead of generated content.
+Agent execution uses the model profile selected on each agent. A profile can store its own API key in Settings, or it can use the matching server secret such as `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. `GEMINI_MODEL` is optional; the server defaults to `gemini-1.5-flash`.
 
 ---
 
@@ -113,6 +116,9 @@ PORT=3000
 DATABASE_URL=postgresql://...
 PG_VECTOR_URL=postgresql://...
 GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-1.5-flash
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
 JWT_SECRET=...
 ```
 
@@ -143,6 +149,10 @@ You need a VPS with the following installed and configured:
 * `APP_NAME`: The name you want to use for the PM2 process (e.g., `crm-app`)
 * `APP_PORT`: The port your app should run on under the VPS (e.g., `3005`)
 * `DATABASE_URL`: Required for authentication and persistent CRM data.
+* `GEMINI_API_KEY`: Required for Agent execution and AI generation endpoints.
+* `GEMINI_MODEL`: Optional Gemini model override. Defaults to `gemini-1.5-flash`.
+* `OPENAI_API_KEY`: Optional server-side fallback for OpenAI/custom-compatible model profiles.
+* `ANTHROPIC_API_KEY`: Optional server-side fallback for Anthropic model profiles.
 * `JWT_SECRET`: (Optional) Secret key for JWT encryption.
 
 ### How it Works
@@ -151,10 +161,10 @@ Once the secrets are configured, any code push to the `main` branch will trigger
 1. SSH into your VPS.
 2. Navigate to your `PROJECT_PATH` (creates it and clones the repo if it doesn't exist).
 3. Pull the latest code from `main`.
-4. Update the `.env` file with the `APP_PORT`, `DATABASE_URL`, and `JWT_SECRET` (if configured in GitHub Secrets).
+4. Update the `.env` file with the `APP_PORT`, `DATABASE_URL`, model-provider keys, and `JWT_SECRET` (if configured in GitHub Secrets).
 5. Install npm dependencies (`npm install`).
 6. Build the full-stack project (`npm run build`).
 7. Reload or start the PM2 process for your application.
 
 ### Important Note about Database
-The deployment script now automatically reads `DATABASE_URL` and `JWT_SECRET` from your GitHub Secrets and sets them in the `.env` file on your VPS. Just ensure they are correctly added into your GitHub Secrets settings as described above.
+The deployment script now automatically reads `DATABASE_URL`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `JWT_SECRET` from your GitHub Secrets and sets them in the `.env` file on your VPS. Just ensure they are correctly added into your GitHub Secrets settings as described above.

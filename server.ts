@@ -14,6 +14,7 @@ import { GoogleGenAI } from "@google/genai";
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "change_me_in_env";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const useSecureCookies = process.env.NODE_ENV === "production";
 const hasDatabase = Boolean(process.env.DATABASE_URL || process.env.PG_VECTOR_URL);
 const hasVectorDatabase = Boolean(process.env.PG_VECTOR_URL);
@@ -65,6 +66,15 @@ function requireGemini(res: express.Response) {
     return false;
   }
   return true;
+}
+
+function parseAiJson(text: string | undefined) {
+  const raw = String(text || "").trim();
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  return JSON.parse(cleaned || "{}");
 }
 
 async function withDb<T>(fn: (client: pg.PoolClient) => Promise<T>) {
@@ -182,6 +192,119 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || "",
   httpOptions: { headers: { "User-Agent": "aistudio-build" } },
 });
+
+type ModelProvider = "openai" | "anthropic" | "google" | "custom";
+
+type ModelProfile = {
+  id?: string;
+  name?: string;
+  provider?: ModelProvider;
+  model?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  temperature?: number;
+  systemPrompt?: string;
+};
+
+function providerApiKey(profile: ModelProfile) {
+  if (profile.apiKey) return profile.apiKey;
+  if (profile.provider === "openai" || profile.provider === "custom") {
+    return process.env.OPENAI_API_KEY || "";
+  }
+  if (profile.provider === "anthropic") return process.env.ANTHROPIC_API_KEY || "";
+  return process.env.GEMINI_API_KEY || "";
+}
+
+function requireModelProfile(profile: ModelProfile, res: express.Response) {
+  const provider = profile.provider || "google";
+  const model = profile.model || (provider === "google" ? GEMINI_MODEL : "");
+  const apiKey = providerApiKey({ ...profile, provider });
+
+  if (!model) {
+    res.status(400).json({ error: "Selected model profile does not include a model name." });
+    return null;
+  }
+  if (!apiKey) {
+    res.status(503).json({
+      error: `API key is not configured for model profile "${profile.name || model}". Add it in Settings or set the matching server environment secret.`,
+    });
+    return null;
+  }
+
+  return { ...profile, provider, model, apiKey };
+}
+
+async function generateWithModelProfile(
+  profile: Required<Pick<ModelProfile, "provider" | "model" | "apiKey">> & ModelProfile,
+  prompt: string,
+) {
+  const temperature = profile.temperature ?? 0.4;
+  const systemPrompt =
+    profile.systemPrompt ||
+    "You are a CRM automation agent. Execute tasks carefully and report concise operational logs.";
+
+  if (profile.provider === "google") {
+    const profileAi = new GoogleGenAI({
+      apiKey: profile.apiKey,
+      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+    });
+    const response = await profileAi.models.generateContent({
+      model: profile.model,
+      contents: `${systemPrompt}\n\n${prompt}`,
+      config: { responseMimeType: "application/json", temperature },
+    });
+    return response.text || "";
+  }
+
+  if (profile.provider === "anthropic") {
+    const response = await fetch(profile.baseUrl || "https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": profile.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: profile.model,
+        max_tokens: 1000,
+        temperature,
+        system: systemPrompt,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error?.message || `Anthropic request failed with HTTP ${response.status}.`);
+    }
+    return data.content?.map((part: any) => part.text).filter(Boolean).join("\n") || "";
+  }
+
+  const baseUrl = profile.baseUrl || "https://api.openai.com/v1";
+  const endpoint = baseUrl.replace(/\/$/, "").endsWith("/chat/completions")
+    ? baseUrl.replace(/\/$/, "")
+    : `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${profile.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: profile.model,
+      temperature,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt },
+      ],
+    }),
+  });
+  const data: any = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error?.message || `OpenAI-compatible request failed with HTTP ${response.status}.`);
+  }
+  return data.choices?.[0]?.message?.content || "";
+}
 
 app.post("/api/login", async (req, res) => {
   if (!requireDatabase(res)) return;
@@ -444,7 +567,7 @@ app.post("/api/ai/draft-reply", async (req, res) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: GEMINI_MODEL,
       contents: `Draft a professional support reply to the following customer message summary: "${message}". The determined intent of the message is: ${intent}. Keep it concise, helpful, and under 3 paragraphs. Do not include placeholders like [Your Name]. PLEASE REPLY IN THIS LANGUAGE: ${preferredLanguage}`,
       config: { temperature: 0.7 },
     });
@@ -455,19 +578,43 @@ app.post("/api/ai/draft-reply", async (req, res) => {
 });
 
 app.post("/api/ai/trigger-agent", async (req, res) => {
-  if (!requireGemini(res)) return;
-  const { agentId, context, systemLanguage = "en" } = req.body;
+  const { agentId, agentRole = "", context, systemLanguage = "en", modelProfile = {} } = req.body;
+  const profile = requireModelProfile(modelProfile, res);
+  if (!profile) return;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: `You are an autonomous agent system executing a workflow for agent ID ${agentId}. Based on this context: "${context}", generate a 4-step execution log. Return JSON like {"logs":["step 1","step 2"]}. Write logs in this language: ${systemLanguage}.`,
-      config: { responseMimeType: "application/json" },
+    const prompt = `You are executing a CRM agent workflow.
+Agent ID: ${agentId}
+Agent instructions: ${agentRole || "Use the configured profile system prompt."}
+Context: ${context}
+
+Generate a 4-step execution log. Return strict JSON like {"logs":["step 1","step 2"]}. Write logs in this language: ${systemLanguage}.`;
+    const text = await generateWithModelProfile(profile, prompt);
+    const data = parseAiJson(text);
+    const logs = Array.isArray(data.logs)
+      ? data.logs.map((log: unknown) => String(log)).filter(Boolean)
+      : [];
+    if (logs.length === 0) {
+      return res.status(502).json({
+        error: "Agent engine returned no execution logs.",
+        model: profile.model,
+        provider: profile.provider,
+      });
+    }
+    res.json({
+      success: true,
+      logs,
+      model: profile.model,
+      provider: profile.provider,
+      modelProfileId: profile.id,
     });
-    const data = JSON.parse(response.text || '{"logs":[]}');
-    res.json({ success: true, logs: data.logs || [] });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error("Agent execution error:", err);
+    res.status(500).json({
+      error: `Agent execution failed: ${err.message}`,
+      model: profile.model,
+      provider: profile.provider,
+    });
   }
 });
 
@@ -522,7 +669,7 @@ app.post("/api/ai/draft-proposal", async (req, res) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: GEMINI_MODEL,
       contents: `Draft a professional sales proposal for ${customerName}. Their current intent is: ${intent}. Offer a 5% discount on bulk orders to close the deal. Keep it concise, helpful, and under 3 paragraphs. PLEASE REPLY IN THIS LANGUAGE: ${preferredLanguage}`,
       config: { temperature: 0.7 },
     });
