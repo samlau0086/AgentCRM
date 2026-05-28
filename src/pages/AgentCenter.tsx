@@ -378,6 +378,7 @@ export default function AgentCenter() {
   const handleEdit = (agent: Agent) => {
     setEditingAgent(agent);
     setIsModalOpen(true);
+    setActiveTab("agents");
   };
 
   const handleTestAgent = async (agentId: string, wfName: string) => {
@@ -628,6 +629,7 @@ export default function AgentCenter() {
   const handleAdd = () => {
     setEditingAgent(null);
     setIsModalOpen(true);
+    setActiveTab("agents");
   };
 
   const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
@@ -785,7 +787,10 @@ export default function AgentCenter() {
           </div>
           <button
             onClick={handleAdd}
-            className="bg-blue-600 hover:bg-blue-500 text-white shadow-sm px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors border border-transparent"
+            className={cn(
+              "bg-blue-600 hover:bg-blue-500 text-white shadow-sm px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors border border-transparent",
+              activeTab !== "agents" && "hidden",
+            )}
           >
             <Plus className="w-4 h-4" />
             {copy.createAgent}
@@ -956,6 +961,203 @@ export default function AgentCenter() {
                 </div>
               ))}
             </div>
+          </div>
+          <div className="bg-white dark:bg-white/5 shadow-sm border border-slate-200 dark:border-white/10 rounded-2xl flex flex-col min-h-[520px] overflow-hidden">
+            {isModalOpen ? (
+              <>
+                <div className="flex justify-between items-center p-6 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-black/20">
+                  <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
+                    {editingAgent ? copy.configureAgent : copy.createAgent}
+                  </h2>
+                  <button
+                    onClick={() => setIsModalOpen(false)}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors p-1"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <form key={editingAgent?.id || "new-agent"} onSubmit={handleSave} className="p-6 space-y-5 overflow-y-auto">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                      {copy.agentName}
+                    </label>
+                    <input
+                      required
+                      name="name"
+                      defaultValue={editingAgent?.name}
+                      className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
+                      placeholder={copy.agentNamePlaceholder}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                      {copy.prompt}
+                    </label>
+                    <textarea
+                      required
+                      name="role"
+                      rows={4}
+                      defaultValue={editingAgent?.role}
+                      className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors resize-none"
+                      placeholder={copy.promptPlaceholder}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                      {copy.harness}
+                    </label>
+                    <select
+                      name="harness"
+                      defaultValue={editingAgent?.harness || "Auto"}
+                      className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
+                    >
+                      <option value="Auto">{copy.autoExecute}</option>
+                      <option value="Human-in-the-loop">{copy.humanLoop}</option>
+                    </select>
+                    <p className="text-xs text-slate-500 mt-2">{copy.harnessHelp}</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                      {copy.modelProfile}
+                    </label>
+                    <select
+                      name="modelProfileId"
+                      defaultValue={editingAgent?.modelProfileId || modelProfiles[0]?.id || "default_google"}
+                      className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
+                    >
+                      {modelProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name} ({profile.provider} / {profile.model})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500 mt-2">{copy.modelProfileHelp}</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                      {copy.supportedIntegrations}
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {leadPlatformOptions.map((platform) => (
+                        <label key={platform.id} className="flex items-center gap-2 px-3 py-2 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-500/20 rounded-lg text-sm text-slate-700 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            name="integrations"
+                            value={platform.name}
+                            defaultChecked={(editingAgent?.integrations || []).includes(platform.name)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span>{platform.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2">{copy.integrationsHelp}</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                      {copy.tools}
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {availableTools.map((tool) => (
+                        <label key={tool.id} className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-700 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            name="tools"
+                            value={tool.id}
+                            defaultChecked={(editingAgent?.tools || []).includes(tool.id)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span>{businessToolLabel(tool.id)}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2">{copy.toolsHelp}</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                      {copy.workflows}
+                    </label>
+                    <div className="grid grid-cols-1 gap-2">
+                      {agentWorkflowDefinitions.map((workflow) => (
+                        <label key={workflow.id} className="flex items-start gap-2 px-3 py-2 bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-700 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            name="workflowIds"
+                            value={workflow.id}
+                            defaultChecked={(editingAgent?.workflowIds || []).includes(workflow.id)}
+                            className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-xs font-semibold">{workflow.name}</span>
+                            <span className="block text-[10px] text-slate-500">{workflow.description}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2">{copy.workflowsHelp}</p>
+                  </div>
+
+                  {editingAgent && (
+                    <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/5 flex justify-between items-center">
+                      <div>
+                        <p className="text-sm font-medium text-slate-800 dark:text-white">{copy.agentStatus}</p>
+                        <p className="text-xs text-slate-500">{copy.currently}{statusLabel(editingAgent.status)}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleStatus(editingAgent.id, editingAgent.status)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors border",
+                          editingAgent.status === "Active"
+                            ? "bg-slate-200 dark:bg-white/10 border-slate-300 dark:border-white/10 text-slate-700 dark:text-slate-300"
+                            : "bg-emerald-100 dark:bg-emerald-900/40 border-emerald-200 dark:border-emerald-500/20 text-emerald-700 dark:text-emerald-400",
+                        )}
+                      >
+                        <Power className="w-3.5 h-3.5" />
+                        {editingAgent.status === "Active" ? copy.disableAgent : copy.activateAgent}
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="pt-4 flex justify-end gap-3 border-t border-slate-200 dark:border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(false)}
+                      className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-slate-200 dark:hover:border-white/10"
+                    >
+                      {copy.cancel}
+                    </button>
+                    {editingAgent && (
+                      <button
+                        type="button"
+                        onClick={() => setDeletingAgentId(editingAgent.id)}
+                        className="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-500/20"
+                      >
+                        {copy.deleteAgent}
+                      </button>
+                    )}
+                    <button type="submit" className="px-5 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors shadow-sm flex items-center gap-2">
+                      <Save className="w-4 h-4" />
+                      {editingAgent ? copy.saveChanges : copy.createAgent}
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+                <Settings className="w-10 h-10 text-slate-300 dark:text-slate-600 mb-3" />
+                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{copy.configureAgent}</h3>
+                <p className="text-xs text-slate-500 mt-1 max-w-xs">
+                  {language === "zh" ? "选择左侧智能体进行配置，或创建新的智能体。" : "Select an agent on the left to configure it, or create a new one."}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1128,230 +1330,6 @@ export default function AgentCenter() {
         </div>
       )}
 
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 flex flex-col">
-            <div className="flex justify-between items-center p-6 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-black/20">
-              <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                {editingAgent ? copy.configureAgent : copy.createAgent}
-              </h2>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors p-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSave} className="p-6 space-y-5">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  {copy.agentName}
-                </label>
-                <input
-                  required
-                  name="name"
-                  defaultValue={editingAgent?.name}
-                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
-                  placeholder={copy.agentNamePlaceholder}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  {copy.prompt}
-                </label>
-                <textarea
-                  required
-                  name="role"
-                  rows={4}
-                  defaultValue={editingAgent?.role}
-                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-3 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors resize-none"
-                  placeholder={copy.promptPlaceholder}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  {copy.harness}
-                </label>
-                <select
-                  name="harness"
-                  defaultValue={editingAgent?.harness || "Auto"}
-                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
-                >
-                  <option value="Auto">
-                    {copy.autoExecute}
-                  </option>
-                  <option value="Human-in-the-loop">
-                    {copy.humanLoop}
-                  </option>
-                </select>
-                <p className="text-xs text-slate-500 mt-2">
-                  {copy.harnessHelp}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  {copy.modelProfile}
-                </label>
-                <select
-                  name="modelProfileId"
-                  defaultValue={editingAgent?.modelProfileId || modelProfiles[0]?.id || "default_google"}
-                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none transition-colors"
-                >
-                  {modelProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.name} ({profile.provider} / {profile.model})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-500 mt-2">
-                  {copy.modelProfileHelp}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  {copy.supportedIntegrations}
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {leadPlatformOptions.map((platform) => (
-                    <label
-                      key={platform.id}
-                      className="flex items-center gap-2 px-3 py-2 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-500/20 rounded-lg text-sm text-slate-700 dark:text-slate-300"
-                    >
-                      <input
-                        type="checkbox"
-                        name="integrations"
-                        value={platform.name}
-                        defaultChecked={(editingAgent?.integrations || []).includes(platform.name)}
-                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span>{platform.name}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-500 mt-2">
-                  {copy.integrationsHelp}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  {copy.tools}
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {availableTools.map((tool) => (
-                    <label
-                      key={tool.id}
-                      className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-700 dark:text-slate-300"
-                    >
-                      <input
-                        type="checkbox"
-                        name="tools"
-                        value={tool.id}
-                        defaultChecked={(editingAgent?.tools || []).includes(tool.id)}
-                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span>{businessToolLabel(tool.id)}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-500 mt-2">
-                  {copy.toolsHelp}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  {copy.workflows}
-                </label>
-                <div className="grid grid-cols-1 gap-2">
-                  {agentWorkflowDefinitions.map((workflow) => (
-                    <label
-                      key={workflow.id}
-                      className="flex items-start gap-2 px-3 py-2 bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-700 dark:text-slate-300"
-                    >
-                      <input
-                        type="checkbox"
-                        name="workflowIds"
-                        value={workflow.id}
-                        defaultChecked={(editingAgent?.workflowIds || []).includes(workflow.id)}
-                        className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="min-w-0">
-                        <span className="block text-xs font-semibold">{workflow.name}</span>
-                        <span className="block text-[10px] text-slate-500">{workflow.description}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-500 mt-2">
-                  {copy.workflowsHelp}
-                </p>
-              </div>
-
-              {editingAgent && (
-                <div className="p-4 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/5 flex justify-between items-center">
-                  <div>
-                    <p className="text-sm font-medium text-slate-800 dark:text-white">
-                      {copy.agentStatus}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {copy.currently}{statusLabel(editingAgent.status)}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      toggleStatus(editingAgent.id, editingAgent.status)
-                    }
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors border",
-                      editingAgent.status === "Active"
-                        ? "bg-slate-200 dark:bg-white/10 border-slate-300 dark:border-white/10 text-slate-700 dark:text-slate-300"
-                        : "bg-emerald-100 dark:bg-emerald-900/40 border-emerald-200 dark:border-emerald-500/20 text-emerald-700 dark:text-emerald-400",
-                    )}
-                  >
-                    <Power className="w-3.5 h-3.5" />
-                    {editingAgent.status === "Active"
-                      ? copy.disableAgent
-                      : copy.activateAgent}
-                  </button>
-                </div>
-              )}
-
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-200 dark:border-white/5">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-slate-200 dark:hover:border-white/10"
-                >
-                  {copy.cancel}
-                </button>
-                {editingAgent && (
-                  <button
-                    type="button"
-                    onClick={() => setDeletingAgentId(editingAgent.id)}
-                    className="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-500/20"
-                  >
-                    {copy.deleteAgent}
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors shadow-sm flex items-center gap-2"
-                >
-                  <Save className="w-4 h-4" />
-                  {editingAgent ? copy.saveChanges : copy.createAgent}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
       <ConfirmModal
         isOpen={deletingAgentId !== null}
         title={copy.deleteAgentTitle}
