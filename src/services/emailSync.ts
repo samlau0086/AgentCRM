@@ -15,6 +15,8 @@ export interface ReceiveProfile {
   name: string;
   imapHost: string;
   imapPort: string;
+  imapSecurity?: 'ssl' | 'starttls' | 'none';
+  imapRejectUnauthorized?: boolean;
   imapUser: string;
   imapPass: string;
 }
@@ -25,6 +27,8 @@ export interface SendProfile {
   sendProvider: 'smtp' | 'resend';
   smtpHost: string;
   smtpPort: string;
+  smtpSecurity?: 'ssl' | 'starttls' | 'none';
+  smtpRejectUnauthorized?: boolean;
   smtpUser: string;
   smtpPass: string;
   resendApiKey: string;

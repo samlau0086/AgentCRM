@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLanguage } from '../i18n';
 import { useTheme } from '../theme';
-import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, ToggleLeft, ToggleRight, Loader2, PlugZap } from 'lucide-react';
 import { cn } from '../Layout';
 import { ReceiveProfile, SendProfile, EmailMapping, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings } from '../services/emailSync';
 import { Agent, ModelProfile, getAgents, getModelProfiles, saveModelProfiles, updateAgent } from '../services/db';
@@ -81,6 +81,7 @@ export default function Settings() {
   const [pushAlerts, setPushAlerts] = useState(true);
   const [leadPlatformConfigs, setLeadPlatformConfigs] = useState<Record<string, LeadPlatformConfig>>({});
   const [editingLeadPlatform, setEditingLeadPlatform] = useState<LeadPlatform | null>(null);
+  const [testingEmailKey, setTestingEmailKey] = useState<string | null>(null);
   const [leadPlatformDraft, setLeadPlatformDraft] = useState<LeadPlatformConfig>({
     enabled: false,
     apiKey: '',
@@ -203,6 +204,44 @@ export default function Settings() {
     notify('Saved Email configuration', 'success', 'Email settings saved');
   };
 
+  const testReceiveProfile = async (profile: ReceiveProfile) => {
+    const key = `imap:${profile.id}`;
+    setTestingEmailKey(key);
+    try {
+      const res = await fetch('/api/email/test-imap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `IMAP test failed with HTTP ${res.status}.`);
+      notify(data.message || 'IMAP connection test passed.', 'success', 'IMAP connected');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'IMAP connection test failed.', 'error', 'IMAP test failed');
+    } finally {
+      setTestingEmailKey(null);
+    }
+  };
+
+  const testSendProfile = async (profile: SendProfile) => {
+    const key = `smtp:${profile.id}`;
+    setTestingEmailKey(key);
+    try {
+      const res = await fetch('/api/email/test-smtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `SMTP test failed with HTTP ${res.status}.`);
+      notify(data.message || 'SMTP connection test passed.', 'success', 'SMTP connected');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'SMTP connection test failed.', 'error', 'SMTP test failed');
+    } finally {
+      setTestingEmailKey(null);
+    }
+  };
+
   const handleSaveModelProfiles = () => {
     saveModelProfiles(modelProfiles);
     notify('Saved Model Profiles', 'success', 'Model profiles saved');
@@ -244,6 +283,8 @@ export default function Settings() {
       name: 'New IMAP Profile',
       imapHost: '',
       imapPort: '993',
+      imapSecurity: 'ssl',
+      imapRejectUnauthorized: true,
       imapUser: '',
       imapPass: ''
     }]);
@@ -256,6 +297,8 @@ export default function Settings() {
       sendProvider: 'smtp',
       smtpHost: '',
       smtpPort: '465',
+      smtpSecurity: 'ssl',
+      smtpRejectUnauthorized: true,
       smtpUser: '',
       smtpPass: '',
       resendApiKey: '',
@@ -597,9 +640,9 @@ export default function Settings() {
                 </div>
                 {receiveProfiles.length === 0 && <p className="text-xs text-slate-400 italic">No receive profiles configured.</p>}
                 {receiveProfiles.map(profile => (
-                  <div key={profile.id} className="p-4 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg relative">
+                  <div key={profile.id} className="p-4 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg relative space-y-4">
                     <button onClick={() => setReceiveProfiles(receiveProfiles.filter(p => p.id !== profile.id))} className="absolute top-3 right-3 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 pr-8">
                       <div>
                         <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Profile Name</label>
                         <input value={profile.name} onChange={e => setReceiveProfiles(receiveProfiles.map(p => p.id === profile.id ? { ...p, name: e.target.value } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
@@ -613,6 +656,14 @@ export default function Settings() {
                         <input value={profile.imapPort} onChange={e => setReceiveProfiles(receiveProfiles.map(p => p.id === profile.id ? { ...p, imapPort: e.target.value } : p))} placeholder="993" className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
                       </div>
                       <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Security</label>
+                        <select value={profile.imapSecurity || 'ssl'} onChange={e => setReceiveProfiles(receiveProfiles.map(p => p.id === profile.id ? { ...p, imapSecurity: e.target.value as ReceiveProfile['imapSecurity'] } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500">
+                          <option value="ssl">SSL / TLS</option>
+                          <option value="starttls">STARTTLS</option>
+                          <option value="none">None</option>
+                        </select>
+                      </div>
+                      <div>
                         <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Username</label>
                         <input value={profile.imapUser} onChange={e => setReceiveProfiles(receiveProfiles.map(p => p.id === profile.id ? { ...p, imapUser: e.target.value } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
                       </div>
@@ -620,6 +671,26 @@ export default function Settings() {
                         <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Password</label>
                         <input type="password" value={profile.imapPass} onChange={e => setReceiveProfiles(receiveProfiles.map(p => p.id === profile.id ? { ...p, imapPass: e.target.value } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
                       </div>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-white/5">
+                      <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                        <input
+                          type="checkbox"
+                          checked={profile.imapRejectUnauthorized !== false}
+                          onChange={e => setReceiveProfiles(receiveProfiles.map(p => p.id === profile.id ? { ...p, imapRejectUnauthorized: e.target.checked } : p))}
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        Verify TLS certificate
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => testReceiveProfile(profile)}
+                        disabled={testingEmailKey === `imap:${profile.id}`}
+                        className="flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:text-blue-400 dark:hover:bg-blue-500/10"
+                      >
+                        {testingEmailKey === `imap:${profile.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+                        Test IMAP
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -657,7 +728,8 @@ export default function Settings() {
                     </div>
 
                     {profile.sendProvider === 'smtp' ? (
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-100 dark:border-white/5">
+                      <div className="mt-4 space-y-4 border-t border-slate-100 pt-4 dark:border-white/5">
+                      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                         <div>
                           <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">SMTP Host</label>
                           <input value={profile.smtpHost} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, smtpHost: e.target.value } : p))} placeholder="smtp.gmail.com" className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
@@ -667,6 +739,14 @@ export default function Settings() {
                           <input value={profile.smtpPort} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, smtpPort: e.target.value } : p))} placeholder="465" className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
                         </div>
                         <div>
+                          <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Security</label>
+                          <select value={profile.smtpSecurity || 'ssl'} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, smtpSecurity: e.target.value as SendProfile['smtpSecurity'] } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500">
+                            <option value="ssl">SSL / TLS</option>
+                            <option value="starttls">STARTTLS</option>
+                            <option value="none">None</option>
+                          </select>
+                        </div>
+                        <div>
                           <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Username</label>
                           <input value={profile.smtpUser} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, smtpUser: e.target.value } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
                         </div>
@@ -674,6 +754,27 @@ export default function Settings() {
                           <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Password</label>
                           <input type="password" value={profile.smtpPass} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, smtpPass: e.target.value } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
                         </div>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                          <input
+                            type="checkbox"
+                            checked={profile.smtpRejectUnauthorized !== false}
+                            onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, smtpRejectUnauthorized: e.target.checked } : p))}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          Verify TLS certificate
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => testSendProfile(profile)}
+                          disabled={testingEmailKey === `smtp:${profile.id}`}
+                          className="flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:text-blue-400 dark:hover:bg-blue-500/10"
+                        >
+                          {testingEmailKey === `smtp:${profile.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+                          Test SMTP
+                        </button>
+                      </div>
                       </div>
                     ) : (
                       <div className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5">

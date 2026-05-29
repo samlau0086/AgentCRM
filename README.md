@@ -44,6 +44,7 @@ charlie@acmecorp.com / password
 - **Media Library**: Upload images, videos, and files with drag-and-drop.
 - **Users**: Manage roles, permissions, account status, and safe user deletion.
 - **Settings**: Configure theme, language, timezone, notifications, model profiles, Email/WhatsApp integrations, vector database, and Lead Generation Platform API keys.
+- **Email Integration**: IMAP receive profiles and SMTP send profiles support SSL/TLS, STARTTLS, plain connections, TLS certificate verification, and real server-side connection tests.
 
 ### AI Agents
 
@@ -151,6 +152,7 @@ charlie@acmecorp.com / password
 - **媒体库**：拖拽上传图片、视频和文件。
 - **用户管理**：管理用户角色、权限、账号状态和安全删除。
 - **系统设置**：配置主题、语言、时区、通知、模型 Profile、Email/WhatsApp 集成、向量数据库和获客平台 API Key。
+- **邮箱集成**：IMAP 收信配置和 SMTP 发信配置支持 SSL/TLS、STARTTLS、无加密连接、TLS 证书校验，以及服务端真实连接测试。
 
 ### 智能体配置
 

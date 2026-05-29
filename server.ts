@@ -3,6 +3,8 @@ dotenv.config();
 
 import express from "express";
 import path from "path";
+import net from "net";
+import tls from "tls";
 import { createServer as createViteServer } from "vite";
 import cookieParser from "cookie-parser";
 import bcrypt from "bcrypt";
@@ -544,6 +546,238 @@ crudRoutes("quotes", "/api/crm/quotes");
 crudRoutes("inbox_messages", "/api/communication/inbox");
 crudRoutes("agent_pending_actions", "/api/agent/actions/pending");
 crudRoutes("knowledge_documents", "/api/knowledge");
+
+type MailSecurity = "ssl" | "starttls" | "none";
+
+type MailSocket = net.Socket | tls.TLSSocket;
+
+function escapeImapString(value: string) {
+  return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function connectMailSocket(options: {
+  host: string;
+  port: number;
+  secure: boolean;
+  rejectUnauthorized: boolean;
+}): Promise<MailSocket> {
+  return new Promise((resolve, reject) => {
+    const socket = options.secure
+      ? tls.connect({
+          host: options.host,
+          port: options.port,
+          servername: options.host,
+          rejectUnauthorized: options.rejectUnauthorized,
+        })
+      : net.connect({ host: options.host, port: options.port });
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("Connection timed out."));
+    }, 15000);
+    socket.once(options.secure ? "secureConnect" : "connect", () => {
+      clearTimeout(timeout);
+      socket.setTimeout(15000);
+      resolve(socket);
+    });
+    socket.once("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      reject(new Error("Connection timed out."));
+    });
+  });
+}
+
+function createLineReader(socket: MailSocket) {
+  let buffer = "";
+  const pending: Array<(line: string) => void> = [];
+  socket.on("data", (chunk) => {
+    buffer += chunk.toString("utf8");
+    while (pending.length > 0) {
+      const newlineIndex = buffer.indexOf("\n");
+      if (newlineIndex === -1) break;
+      const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
+      buffer = buffer.slice(newlineIndex + 1);
+      pending.shift()?.(line);
+    }
+  });
+  return () =>
+    new Promise<string>((resolve, reject) => {
+      const newlineIndex = buffer.indexOf("\n");
+      if (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
+        buffer = buffer.slice(newlineIndex + 1);
+        resolve(line);
+        return;
+      }
+      const timer = setTimeout(() => {
+        reject(new Error("Timed out waiting for server response."));
+      }, 15000);
+      pending.push((line) => {
+        clearTimeout(timer);
+        resolve(line);
+      });
+    });
+}
+
+function writeLine(socket: MailSocket, line: string) {
+  socket.write(`${line}\r\n`);
+}
+
+async function readSmtpResponse(readLine: () => Promise<string>) {
+  const lines: string[] = [];
+  let line = await readLine();
+  lines.push(line);
+  while (/^\d{3}-/.test(line)) {
+    line = await readLine();
+    lines.push(line);
+  }
+  return lines;
+}
+
+async function upgradeToTls(socket: MailSocket, host: string, rejectUnauthorized: boolean) {
+  return new Promise<tls.TLSSocket>((resolve, reject) => {
+    const secureSocket = tls.connect({
+      socket,
+      servername: host,
+      rejectUnauthorized,
+    });
+    secureSocket.once("secureConnect", () => resolve(secureSocket));
+    secureSocket.once("error", reject);
+  });
+}
+
+function assertMailConfig(host: string, port: unknown, user?: string, pass?: string) {
+  if (!host?.trim()) throw new Error("Host is required.");
+  const parsedPort = Number(port);
+  if (!Number.isInteger(parsedPort) || parsedPort <= 0 || parsedPort > 65535) {
+    throw new Error("A valid port is required.");
+  }
+  if (!user?.trim()) throw new Error("Username is required.");
+  if (!pass) throw new Error("Password is required.");
+  return parsedPort;
+}
+
+app.post("/api/email/test-imap", async (req, res) => {
+  const {
+    imapHost,
+    imapPort,
+    imapSecurity = "ssl",
+    imapRejectUnauthorized = true,
+    imapUser,
+    imapPass,
+  } = req.body as {
+    imapHost?: string;
+    imapPort?: string;
+    imapSecurity?: MailSecurity;
+    imapRejectUnauthorized?: boolean;
+    imapUser?: string;
+    imapPass?: string;
+  };
+
+  let socket: MailSocket | undefined;
+  try {
+    const port = assertMailConfig(imapHost || "", imapPort, imapUser, imapPass);
+    socket = await connectMailSocket({
+      host: imapHost!,
+      port,
+      secure: imapSecurity === "ssl",
+      rejectUnauthorized: imapRejectUnauthorized !== false,
+    });
+    let readLine = createLineReader(socket);
+    const greeting = await readLine();
+    if (!/^\* OK/i.test(greeting)) throw new Error(`Unexpected IMAP greeting: ${greeting}`);
+
+    if (imapSecurity === "starttls") {
+      writeLine(socket, "a001 STARTTLS");
+      const startTlsLine = await readLine();
+      if (!/^a001 OK/i.test(startTlsLine)) throw new Error(`IMAP STARTTLS failed: ${startTlsLine}`);
+      socket = await upgradeToTls(socket, imapHost!, imapRejectUnauthorized !== false);
+      readLine = createLineReader(socket);
+    }
+
+    writeLine(socket, `a002 LOGIN ${escapeImapString(imapUser!)} ${escapeImapString(imapPass!)}`);
+    let loginLine = await readLine();
+    while (!/^a002 /i.test(loginLine)) loginLine = await readLine();
+    if (!/^a002 OK/i.test(loginLine)) throw new Error(`IMAP login failed: ${loginLine}`);
+    writeLine(socket, "a003 LOGOUT");
+    res.json({ success: true, message: `Connected to ${imapHost}:${port} and authenticated with IMAP.` });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "IMAP connection test failed." });
+  } finally {
+    socket?.destroy();
+  }
+});
+
+app.post("/api/email/test-smtp", async (req, res) => {
+  const {
+    smtpHost,
+    smtpPort,
+    smtpSecurity = "ssl",
+    smtpRejectUnauthorized = true,
+    smtpUser,
+    smtpPass,
+  } = req.body as {
+    smtpHost?: string;
+    smtpPort?: string;
+    smtpSecurity?: MailSecurity;
+    smtpRejectUnauthorized?: boolean;
+    smtpUser?: string;
+    smtpPass?: string;
+  };
+
+  let socket: MailSocket | undefined;
+  try {
+    const port = assertMailConfig(smtpHost || "", smtpPort, smtpUser, smtpPass);
+    socket = await connectMailSocket({
+      host: smtpHost!,
+      port,
+      secure: smtpSecurity === "ssl",
+      rejectUnauthorized: smtpRejectUnauthorized !== false,
+    });
+    let readLine = createLineReader(socket);
+    let response = await readSmtpResponse(readLine);
+    if (!/^220/.test(response[0])) throw new Error(`Unexpected SMTP greeting: ${response.join(" ")}`);
+
+    writeLine(socket, "EHLO agentcrm.local");
+    response = await readSmtpResponse(readLine);
+    if (!/^250/.test(response[0])) throw new Error(`SMTP EHLO failed: ${response.join(" ")}`);
+
+    if (smtpSecurity === "starttls") {
+      writeLine(socket, "STARTTLS");
+      response = await readSmtpResponse(readLine);
+      if (!/^220/.test(response[0])) throw new Error(`SMTP STARTTLS failed: ${response.join(" ")}`);
+      socket = await upgradeToTls(socket, smtpHost!, smtpRejectUnauthorized !== false);
+      readLine = createLineReader(socket);
+      writeLine(socket, "EHLO agentcrm.local");
+      response = await readSmtpResponse(readLine);
+      if (!/^250/.test(response[0])) throw new Error(`SMTP EHLO after STARTTLS failed: ${response.join(" ")}`);
+    }
+
+    writeLine(socket, "AUTH LOGIN");
+    response = await readSmtpResponse(readLine);
+    if (/^334/.test(response[0])) {
+      writeLine(socket, Buffer.from(smtpUser!).toString("base64"));
+      response = await readSmtpResponse(readLine);
+      if (!/^334/.test(response[0])) throw new Error(`SMTP username was not accepted: ${response.join(" ")}`);
+      writeLine(socket, Buffer.from(smtpPass!).toString("base64"));
+      response = await readSmtpResponse(readLine);
+    } else {
+      const authPlain = Buffer.from(`\0${smtpUser!}\0${smtpPass!}`).toString("base64");
+      writeLine(socket, `AUTH PLAIN ${authPlain}`);
+      response = await readSmtpResponse(readLine);
+    }
+    if (!/^235/.test(response[0])) throw new Error(`SMTP authentication failed: ${response.join(" ")}`);
+    writeLine(socket, "QUIT");
+    res.json({ success: true, message: `Connected to ${smtpHost}:${port} and authenticated with SMTP.` });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "SMTP connection test failed." });
+  } finally {
+    socket?.destroy();
+  }
+});
 
 type LeadPlatformRunConfig = {
   enabled?: boolean;
