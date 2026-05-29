@@ -95,6 +95,7 @@ export default function Settings() {
   const [leadPlatformConfigs, setLeadPlatformConfigs] = useState<Record<string, LeadPlatformConfig>>({});
   const [editingLeadPlatform, setEditingLeadPlatform] = useState<LeadPlatform | null>(null);
   const [testingEmailKey, setTestingEmailKey] = useState<string | null>(null);
+  const [isTestingWaHub, setIsTestingWaHub] = useState(false);
   const [leadPlatformDraft, setLeadPlatformDraft] = useState<LeadPlatformConfig>({
     enabled: false,
     apiKey: '',
@@ -252,6 +253,33 @@ export default function Settings() {
       notify(err instanceof Error ? err.message : 'SMTP connection test failed.', 'error', 'SMTP test failed');
     } finally {
       setTestingEmailKey(null);
+    }
+  };
+
+  const testWaHubConnection = async () => {
+    const url = ((document.getElementById('hub_url') as HTMLInputElement | null)?.value || '').replace(/\/+$/, '');
+    const token = (document.getElementById('hub_token') as HTMLInputElement | null)?.value || '';
+    if (!url || !token) {
+      notify('Please enter Hub URL and API Token first.', 'warning', 'WhatsApp Hub configuration required');
+      return;
+    }
+
+    setIsTestingWaHub(true);
+    try {
+      const res = await fetch(`${url}/api/clients`, {
+        headers: { 'x-hub-token': token },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || data.message || `Hub returned HTTP ${res.status}.`);
+      }
+      const clients = Array.isArray(data.clients) ? data.clients : [];
+      const onlineCount = clients.filter((client: any) => client.status === 'online').length;
+      notify(`Connected to WhatsApp Hub. ${clients.length} client(s), ${onlineCount} online.`, 'success', 'WhatsApp Hub connected');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to connect to WhatsApp Hub.', 'error', 'WhatsApp Hub test failed');
+    } finally {
+      setIsTestingWaHub(false);
     }
   };
 
@@ -877,16 +905,27 @@ export default function Settings() {
                     <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200">{t('set.int.waHub')}</h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('set.int.waHubDesc')}</p>
                   </div>
-                  <button 
-                    onClick={() => {
-                      localStorage.setItem('wa_hub_url', (document.getElementById('hub_url') as HTMLInputElement).value);
-                      localStorage.setItem('wa_hub_token', (document.getElementById('hub_token') as HTMLInputElement).value);
-                      notify('Saved WhatsApp Actor Hub configuration', 'success', 'WhatsApp settings saved');
-                    }}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded transition-colors shadow-sm"
-                  >
-                    {t('set.gen.save')}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={testWaHubConnection}
+                      disabled={isTestingWaHub}
+                      className="flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:text-blue-400 dark:hover:bg-blue-500/10"
+                    >
+                      {isTestingWaHub ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+                      Test
+                    </button>
+                    <button
+                      onClick={() => {
+                        localStorage.setItem('wa_hub_url', (document.getElementById('hub_url') as HTMLInputElement).value);
+                        localStorage.setItem('wa_hub_token', (document.getElementById('hub_token') as HTMLInputElement).value);
+                        notify('Saved WhatsApp Actor Hub configuration', 'success', 'WhatsApp settings saved');
+                      }}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded transition-colors shadow-sm"
+                    >
+                      {t('set.gen.save')}
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
