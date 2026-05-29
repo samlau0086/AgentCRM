@@ -271,15 +271,16 @@ export default function Inbox() {
     setComposeSignatureHtml(signature?.html || "");
   };
 
-  const startReply = (message: MessagePreview) => {
+  const startReply = (message: MessagePreview, initialBody = "") => {
+    const recipient = message.direction === "outbound" || message.intent === "Outbound" ? message.target : message.sender;
     setComposeMode("reply");
     setComposeOriginalMessage(message);
-    setComposeTo(message.sender ? [message.sender] : []);
+    setComposeTo(recipient ? [recipient] : []);
     setComposeCc([]);
     setComposeBcc([]);
     setComposeSubject(message.subject.toLowerCase().startsWith("re:") ? message.subject : `Re: ${message.subject}`);
-    setComposeBody("");
-    applySignatureForRecipient(message.sender);
+    setComposeBody(initialBody);
+    applySignatureForRecipient(recipient);
     setActiveTab("compose");
   };
 
@@ -860,6 +861,7 @@ export default function Inbox() {
       setDrafts((prev) => ({ ...prev, [msgId]: reply }));
       if (activeMessageIdRef.current === msgId) {
         setReplyText(reply);
+        startReply(activeMessage, editorHtml(reply));
       }
     } catch (err) {
       console.error(err);
