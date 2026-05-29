@@ -730,7 +730,47 @@ app.post("/api/email/test-imap", async (req, res) => {
 
 function parseEmailAddress(value = "") {
   const match = value.match(/<([^>]+)>/);
-  return (match?.[1] || value).trim();
+  return (match?.[1] || decodeMimeHeader(value)).trim();
+}
+
+function decodeHeaderBuffer(buffer: Buffer, charset: string) {
+  const normalized = charset.toLowerCase().replace(/_/g, "-");
+  if (normalized === "utf-8" || normalized === "utf8") return buffer.toString("utf8");
+  if (normalized === "us-ascii" || normalized === "ascii") return buffer.toString("ascii");
+  if (normalized === "iso-8859-1" || normalized === "latin1") return buffer.toString("latin1");
+  try {
+    return new TextDecoder(normalized).decode(buffer);
+  } catch {
+    return buffer.toString("utf8");
+  }
+}
+
+function decodeQuotedPrintableWord(value: string) {
+  const bytes: number[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === "=" && /^[0-9a-f]{2}$/i.test(value.slice(index + 1, index + 3))) {
+      bytes.push(parseInt(value.slice(index + 1, index + 3), 16));
+      index += 2;
+      continue;
+    }
+    bytes.push(value[index] === "_" ? 32 : value.charCodeAt(index));
+  }
+  return Buffer.from(bytes);
+}
+
+function decodeMimeHeader(value = "") {
+  return value
+    .replace(/(\?=)\s+(=\?)/g, "$1$2")
+    .replace(/=\?([^?]+)\?([bq])\?([^?]*)\?=/gi, (_, charset: string, encoding: string, encoded: string) => {
+      try {
+        const buffer = encoding.toLowerCase() === "b"
+          ? Buffer.from(encoded, "base64")
+          : decodeQuotedPrintableWord(encoded);
+        return decodeHeaderBuffer(buffer, charset);
+      } catch {
+        return _;
+      }
+    });
 }
 
 function parseHeaderBlock(lines: string[]) {
@@ -745,7 +785,7 @@ function parseHeaderBlock(lines: string[]) {
     const separator = line.indexOf(":");
     if (separator > 0) {
       current = line.slice(0, separator).toLowerCase();
-      headers[current] = line.slice(separator + 1).trim();
+      headers[current] = decodeMimeHeader(line.slice(separator + 1).trim());
     }
   }
   return headers;

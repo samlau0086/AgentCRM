@@ -202,6 +202,29 @@ export default function Inbox() {
 
       const existing = getInboxMessages();
       const existingIds = new Set(existing.map((m) => m.id));
+      const emailById = new Map(emails.map((email) => [email.id, email]));
+      let updatedCount = 0;
+      const refreshedExisting = existing.map((message) => {
+        const email = emailById.get(message.id);
+        if (!email) return message;
+        if (message.subject !== email.subject || message.summary !== email.summary || message.sender !== email.sender) {
+          updatedCount += 1;
+        }
+        return {
+          ...message,
+          ...email,
+          thread: message.thread?.length
+            ? message.thread.map((item, index) => index === 0 ? { ...item, content: email.summary, time: email.date } : item)
+            : [
+                {
+                  id: `t_${email.id}`,
+                  sender: "user",
+                  content: email.summary,
+                  time: email.date,
+                },
+              ],
+        };
+      });
       const emailPreviews: MessagePreview[] = emails
         .filter((email) => !existingIds.has(email.id))
         .map((email) => ({
@@ -239,9 +262,9 @@ export default function Inbox() {
           ],
         }));
 
-      const merged = [...emailPreviews, ...waPreviews, ...existing];
+      const merged = [...emailPreviews, ...waPreviews, ...refreshedExisting];
       addedCount = emailPreviews.length + waPreviews.length;
-      if (addedCount > 0) {
+      if (addedCount > 0 || updatedCount > 0) {
         saveInboxMessages(merged);
       }
       const hydratedMessages = getInboxMessages();
