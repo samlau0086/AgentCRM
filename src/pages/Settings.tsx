@@ -6,6 +6,7 @@ import { cn } from '../Layout';
 import { ReceiveProfile, SendProfile, EmailMapping, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings } from '../services/emailSync';
 import { Agent, ModelProfile, getAgents, getModelProfiles, saveModelProfiles, updateAgent } from '../services/db';
 import { notify } from '../services/notifications';
+import PasswordInput from '../components/PasswordInput';
 
 type Tab = 'general' | 'agents' | 'integrations';
 
@@ -551,13 +552,14 @@ export default function Settings() {
                             placeholder="Base URL (optional for provider defaults)"
                             className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
                           />
-                          <input
-                            type="password"
-                            value={profile.apiKey || ''}
-                            onChange={e => updateModelProfile(profile.id, { apiKey: e.target.value })}
-                            placeholder="API Key (optional if configured on server)"
-                            className="bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
-                          />
+                          <div className="relative">
+                            <PasswordInput
+                              value={profile.apiKey || ''}
+                              onChange={e => updateModelProfile(profile.id, { apiKey: e.target.value })}
+                              placeholder="API Key (optional if configured on server)"
+                              className="w-full bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2.5 text-xs focus:border-blue-500 outline-none"
+                            />
+                          </div>
                         </div>
                         <div>
                           <div className="flex justify-between items-center mb-2">
@@ -669,7 +671,9 @@ export default function Settings() {
                       </div>
                       <div>
                         <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Password</label>
-                        <input type="password" value={profile.imapPass} onChange={e => setReceiveProfiles(receiveProfiles.map(p => p.id === profile.id ? { ...p, imapPass: e.target.value } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
+                        <div className="relative">
+                          <PasswordInput value={profile.imapPass} onChange={e => setReceiveProfiles(receiveProfiles.map(p => p.id === profile.id ? { ...p, imapPass: e.target.value } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
+                        </div>
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-white/5">
@@ -752,7 +756,9 @@ export default function Settings() {
                         </div>
                         <div>
                           <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Password</label>
-                          <input type="password" value={profile.smtpPass} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, smtpPass: e.target.value } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
+                          <div className="relative">
+                            <PasswordInput value={profile.smtpPass} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, smtpPass: e.target.value } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
+                          </div>
                         </div>
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -779,7 +785,9 @@ export default function Settings() {
                     ) : (
                       <div className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5">
                         <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Resend API Key</label>
-                        <input type="password" value={profile.resendApiKey} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, resendApiKey: e.target.value } : p))} placeholder="re_123456789" className="w-full max-w-md bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
+                        <div className="relative max-w-md">
+                          <PasswordInput value={profile.resendApiKey} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, resendApiKey: e.target.value } : p))} placeholder="re_123456789" className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -864,13 +872,14 @@ export default function Settings() {
                   </div>
                   <div>
                     <label className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-1 block">API Token</label>
-                    <input 
+                    <div className="relative">
+                    <PasswordInput
                       id="hub_token"
-                      type="password"
                       defaultValue={localStorage.getItem('wa_hub_token') || ''}
                       placeholder="Enter access token"
                       className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm focus:border-blue-500 outline-none" 
                     />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1016,13 +1025,14 @@ export default function Settings() {
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">API Key</label>
-                <input
-                  type="password"
-                  value={leadPlatformDraft.apiKey}
-                  onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, apiKey: e.target.value })}
-                  placeholder={`Enter ${editingLeadPlatform.name} API key`}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
-                />
+                <div className="relative">
+                  <PasswordInput
+                    value={leadPlatformDraft.apiKey}
+                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, apiKey: e.target.value })}
+                    placeholder={`Enter ${editingLeadPlatform.name} API key`}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

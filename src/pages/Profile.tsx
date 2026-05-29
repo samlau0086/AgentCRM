@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { getCurrentUser, setCurrentUser, SystemUser } from "../services/db";
 import { User, Lock, Mail, Shield, Save, Loader2 } from "lucide-react";
 import { cn } from "../Layout";
+import PasswordInput from "../components/PasswordInput";
 
 export default function Profile() {
   const [user, setUser] = useState<SystemUser | null>(null);
@@ -34,7 +35,6 @@ export default function Profile() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Save to local storage for current session
         setCurrentUser(data.user);
         setUser(data.user);
         setMessage({ text: "Profile updated successfully!", type: "success" });
@@ -50,7 +50,7 @@ export default function Profile() {
           type: "error",
         });
       }
-    } catch (err) {
+    } catch {
       setMessage({ text: "Network error. Please try again.", type: "error" });
     } finally {
       setIsLoading(false);
@@ -161,12 +161,11 @@ export default function Profile() {
                   </label>
                   <div className="relative">
                     <Lock className="absolute left-3.5 top-3 w-5 h-5 text-slate-400" />
-                    <input
-                      type="password"
+                    <PasswordInput
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
+                      placeholder="Enter a new password"
+                      className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl pl-11 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
                     />
                   </div>
                   <p className="text-xs text-slate-500 mt-2">

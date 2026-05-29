@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Mail, Lock, Loader2, ArrowRight } from "lucide-react";
 import { setCurrentUser } from "../services/db";
+import PasswordInput from "../components/PasswordInput";
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [email, setEmail] = useState("admin@acmecorp.com");
@@ -77,12 +78,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
               </label>
               <div className="relative">
                 <Lock className="absolute left-3.5 top-3 w-5 h-5 text-slate-400" />
-                <input
-                  type="password"
+                <PasswordInput
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
-                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl pl-11 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                   required
                 />
               </div>
