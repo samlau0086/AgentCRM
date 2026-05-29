@@ -15,6 +15,7 @@ import {
   Clock,
   Calendar,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
@@ -177,6 +178,89 @@ export default function Inbox() {
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(
     null,
   );
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const syncInboxMessages = async (silent = false) => {
+    if (!silent) setIsSyncing(true);
+    const failures: string[] = [];
+    let addedCount = 0;
+
+    try {
+      const [emailResult, waResult] = await Promise.allSettled([
+        fetchEmails(),
+        fetchMessages(50),
+      ]);
+      const emails = emailResult.status === "fulfilled" ? emailResult.value : [];
+      const waMessages = waResult.status === "fulfilled" ? waResult.value : [];
+
+      if (emailResult.status === "rejected") {
+        failures.push(`Email: ${emailResult.reason?.message || "sync failed"}`);
+      }
+      if (waResult.status === "rejected") {
+        failures.push(`WhatsApp: ${waResult.reason?.message || "sync failed"}`);
+      }
+
+      const existing = getInboxMessages();
+      const existingIds = new Set(existing.map((m) => m.id));
+      const emailPreviews: MessagePreview[] = emails
+        .filter((email) => !existingIds.has(email.id))
+        .map((email) => ({
+          ...email,
+          thread: [
+            {
+              id: `t_${email.id}`,
+              sender: "user",
+              content: email.summary,
+              time: email.date,
+            },
+          ],
+        }));
+      emailPreviews.forEach((message) => existingIds.add(message.id));
+
+      const waPreviews: MessagePreview[] = waMessages
+        .filter((msg) => !existingIds.has(msg.id))
+        .map((msg) => ({
+          id: msg.id,
+          sender: msg.sender,
+          target: msg.recipient,
+          intent: "WhatsApp",
+          subject: "WhatsApp conversation",
+          summary: msg.body,
+          channel: "WhatsApp",
+          date: new Date(msg.created_at).toLocaleString(),
+          read: msg.direction === "outbound",
+          thread: [
+            {
+              id: `t_${msg.id}`,
+              sender: msg.direction === "outbound" ? "agent" : "user",
+              content: msg.body,
+              time: new Date(msg.created_at).toLocaleTimeString(),
+            },
+          ],
+        }));
+
+      const merged = [...emailPreviews, ...waPreviews, ...existing];
+      addedCount = emailPreviews.length + waPreviews.length;
+      if (addedCount > 0) {
+        saveInboxMessages(merged);
+      }
+      const hydratedMessages = getInboxMessages();
+      setMessages(hydratedMessages);
+      if (!activeMessageIdRef.current && hydratedMessages.length > 0) {
+        setActiveMessageId(hydratedMessages[0].id);
+      }
+
+      if (!silent) {
+        if (failures.length > 0) {
+          notify(`${failures.join(" | ")}. Imported ${addedCount} new message(s).`, "warning", "Sync completed with warnings");
+        } else {
+          notify(`Imported ${addedCount} new message(s).`, "success", "Inbox synced");
+        }
+      }
+    } finally {
+      if (!silent) setIsSyncing(false);
+    }
+  };
 
   useEffect(() => {
     fetchClients()
@@ -195,56 +279,7 @@ export default function Inbox() {
     }
 
     setCustomers(getCustomers());
-
-    Promise.all([fetchEmails(), fetchMessages(50)])
-      .then(([emails, waMessages]) => {
-        const existing = getInboxMessages();
-        const existingIds = new Set(existing.map((m) => m.id));
-        const emailPreviews: MessagePreview[] = emails
-          .filter((email) => !existingIds.has(email.id))
-          .map((email) => ({
-            ...email,
-            thread: [
-              {
-                id: `t_${email.id}`,
-                sender: "user",
-                content: email.summary,
-                time: email.date,
-              },
-            ],
-          }));
-        const waPreviews: MessagePreview[] = waMessages
-          .filter((msg) => !existingIds.has(msg.id))
-          .map((msg) => ({
-            id: msg.id,
-            sender: msg.sender,
-            target: msg.recipient,
-            intent: "WhatsApp",
-            subject: "WhatsApp conversation",
-            summary: msg.body,
-            channel: "WhatsApp",
-            date: new Date(msg.created_at).toLocaleString(),
-            read: msg.direction === "outbound",
-            thread: [
-              {
-                id: `t_${msg.id}`,
-                sender: msg.direction === "outbound" ? "agent" : "user",
-                content: msg.body,
-                time: new Date(msg.created_at).toLocaleTimeString(),
-              },
-            ],
-          }));
-        const merged = [...emailPreviews, ...waPreviews, ...existing];
-        if (merged.length !== existing.length) {
-          saveInboxMessages(merged);
-          const hydratedMessages = getInboxMessages();
-          setMessages(hydratedMessages);
-          if (!activeMessageIdRef.current && hydratedMessages.length > 0) {
-            setActiveMessageId(hydratedMessages[0].id);
-          }
-        }
-      })
-      .catch(console.error);
+    syncInboxMessages(true).catch(console.error);
   }, []);
 
   const activeMessage =
@@ -460,6 +495,16 @@ export default function Inbox() {
             <h1 className="text-xl font-semibold text-slate-900 dark:text-white">
               {t("inbox.title")}
             </h1>
+            <button
+              type="button"
+              onClick={() => syncInboxMessages(false)}
+              disabled={isSyncing}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+              title={language === "zh" ? "同步邮件和 WhatsApp 消息" : "Sync Email and WhatsApp messages"}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", isSyncing && "animate-spin")} />
+              {language === "zh" ? "同步" : "Sync"}
+            </button>
           </div>
           <div className="flex bg-slate-200/50 dark:bg-white/5 p-1 rounded-lg mb-4">
             <button

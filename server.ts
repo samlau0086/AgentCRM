@@ -711,6 +711,132 @@ app.post("/api/email/test-imap", async (req, res) => {
   }
 });
 
+function parseEmailAddress(value = "") {
+  const match = value.match(/<([^>]+)>/);
+  return (match?.[1] || value).trim();
+}
+
+function parseHeaderBlock(lines: string[]) {
+  const headers: Record<string, string> = {};
+  let current = "";
+  for (const line of lines) {
+    if (!line.trim() || line === ")" || line.startsWith("* ") || /^[a-z]\d+\s/i.test(line)) continue;
+    if (/^\s/.test(line) && current) {
+      headers[current] = `${headers[current]} ${line.trim()}`;
+      continue;
+    }
+    const separator = line.indexOf(":");
+    if (separator > 0) {
+      current = line.slice(0, separator).toLowerCase();
+      headers[current] = line.slice(separator + 1).trim();
+    }
+  }
+  return headers;
+}
+
+async function openImapSession(profile: any) {
+  const port = assertMailConfig(profile.imapHost || "", profile.imapPort, profile.imapUser, profile.imapPass);
+  let socket = await connectMailSocket({
+    host: profile.imapHost,
+    port,
+    secure: profile.imapSecurity === "ssl",
+    rejectUnauthorized: profile.imapRejectUnauthorized !== false,
+  });
+  let readLine = createLineReader(socket);
+  const greeting = await readLine();
+  if (!/^\* OK/i.test(greeting)) throw new Error(`Unexpected IMAP greeting from ${profile.name || profile.imapHost}: ${greeting}`);
+
+  if (profile.imapSecurity === "starttls") {
+    writeLine(socket, "a001 STARTTLS");
+    const startTlsLine = await readLine();
+    if (!/^a001 OK/i.test(startTlsLine)) throw new Error(`IMAP STARTTLS failed: ${startTlsLine}`);
+    socket = await upgradeToTls(socket, profile.imapHost, profile.imapRejectUnauthorized !== false);
+    readLine = createLineReader(socket);
+  }
+
+  writeLine(socket, `a002 LOGIN ${escapeImapString(profile.imapUser)} ${escapeImapString(profile.imapPass)}`);
+  let loginLine = await readLine();
+  while (!/^a002 /i.test(loginLine)) loginLine = await readLine();
+  if (!/^a002 OK/i.test(loginLine)) throw new Error(`IMAP login failed for ${profile.name || profile.imapHost}: ${loginLine}`);
+  return { socket, readLine };
+}
+
+app.post("/api/email/sync-imap", async (req, res) => {
+  const { mappings = [], receiveProfiles = [], limit = 25 } = req.body as {
+    mappings?: Array<{ id: string; name: string; receiveProfileId: string }>;
+    receiveProfiles?: any[];
+    limit?: number;
+  };
+  const emails: any[] = [];
+  const errors: string[] = [];
+  const maxPerAccount = Math.max(1, Math.min(Number(limit || 25), 100));
+
+  for (const mapping of mappings) {
+    const profile = receiveProfiles.find((item) => item.id === mapping.receiveProfileId);
+    if (!profile?.imapHost || !profile?.imapUser) continue;
+    let socket: MailSocket | undefined;
+    try {
+      const session = await openImapSession(profile);
+      socket = session.socket;
+      const readLine = session.readLine;
+
+      writeLine(socket, "a003 SELECT INBOX");
+      let line = await readLine();
+      while (!/^a003 /i.test(line)) line = await readLine();
+      if (!/^a003 OK/i.test(line)) throw new Error(`Cannot select INBOX: ${line}`);
+
+      writeLine(socket, "a004 SEARCH ALL");
+      const searchLines: string[] = [];
+      line = await readLine();
+      while (!/^a004 /i.test(line)) {
+        searchLines.push(line);
+        line = await readLine();
+      }
+      const ids = searchLines
+        .flatMap((item) => item.replace(/^\* SEARCH\s*/i, "").split(/\s+/))
+        .map((item) => Number(item))
+        .filter(Boolean)
+        .slice(-maxPerAccount);
+
+      for (const id of ids) {
+        writeLine(socket, `a005 FETCH ${id} (BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE)])`);
+        const fetchLines: string[] = [];
+        line = await readLine();
+        while (!/^a005 /i.test(line)) {
+          fetchLines.push(line);
+          line = await readLine();
+        }
+        const headers = parseHeaderBlock(fetchLines);
+        const sender = parseEmailAddress(headers.from || profile.imapUser);
+        const target = parseEmailAddress(headers.to || profile.imapUser);
+        const subject = headers.subject || "(No subject)";
+        const date = headers.date ? new Date(headers.date) : new Date();
+        emails.push({
+          id: `email_${profile.id}_${id}`,
+          sender,
+          target,
+          intent: "Email",
+          subject,
+          summary: subject,
+          channel: "Email",
+          date: Number.isNaN(date.getTime()) ? new Date().toLocaleString() : date.toLocaleString(),
+          read: false,
+        });
+      }
+      writeLine(socket, "a006 LOGOUT");
+    } catch (err: any) {
+      errors.push(`${profile?.name || profile?.imapHost || "IMAP"}: ${err.message}`);
+    } finally {
+      socket?.destroy();
+    }
+  }
+
+  if (emails.length === 0 && errors.length > 0) {
+    return res.status(400).json({ error: errors.join(" | "), emails: [] });
+  }
+  res.json({ success: true, emails, errors });
+});
+
 app.post("/api/email/test-smtp", async (req, res) => {
   const {
     smtpHost,

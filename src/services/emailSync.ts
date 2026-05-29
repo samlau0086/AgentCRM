@@ -86,18 +86,16 @@ export async function fetchEmails(): Promise<EmailMessage[]> {
     return [];
   }
 
-  const allEmails: EmailMessage[] = [];
-  
-  for (const mapping of mappings) {
-    const profile = receiveProfiles.find(p => p.id === mapping.receiveProfileId);
-    if (profile && profile.imapHost && profile.imapUser) {
-      throw new Error(
-        `Real IMAP sync is not connected in this browser build for ${profile.name}. Configure a backend email sync worker before fetching mail.`,
-      );
-    }
+  const response = await fetch('/api/email/sync-imap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mappings, receiveProfiles, limit: 25 }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `IMAP sync failed with HTTP ${response.status}.`);
   }
-
-  return allEmails;
+  return Array.isArray(data.emails) ? data.emails : [];
 }
 
 export async function sendEmail(targetMappingId: string, to: string, subject: string, body: string) {
