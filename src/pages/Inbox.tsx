@@ -303,6 +303,15 @@ export default function Inbox() {
     }
   };
 
+  const handleSelectMessage = (message: MessagePreview) => {
+    if (!message.read) {
+      markMessageRead(message.id);
+      setMessages(getInboxMessages());
+    }
+    setActiveMessageId(message.id);
+    setActiveTab("inbox");
+  };
+
   const [messages, setMessages] = useState<MessagePreview[]>([]);
   const [activeMessageId, setActiveMessageId] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -892,13 +901,7 @@ export default function Inbox() {
           {filteredMessages.map((msg) => (
             <div
               key={msg.id}
-              onClick={() => {
-                if (!msg.read) {
-                  markMessageRead(msg.id);
-                  setMessages(getInboxMessages());
-                }
-                setActiveMessageId(msg.id);
-              }}
+              onClick={() => handleSelectMessage(msg)}
               className={cn(
                 "p-5 border-b border-slate-200 dark:border-white/5 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/[0.04] transition-colors relative",
                 activeMessageId === msg.id &&
