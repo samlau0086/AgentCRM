@@ -552,7 +552,7 @@ type MailSecurity = "ssl" | "starttls" | "none";
 type MailSocket = net.Socket | tls.TLSSocket;
 
 const MAIL_CONNECT_TIMEOUT_MS = 30000;
-const MAIL_RESPONSE_TIMEOUT_MS = 30000;
+const MAIL_RESPONSE_TIMEOUT_MS = 60000;
 
 function escapeImapString(value: string) {
   return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -595,7 +595,7 @@ function connectMailSocket(options: {
 
 function createLineReader(socket: MailSocket) {
   let buffer = "";
-  const pending: Array<(line: string) => void> = [];
+  const pending: Array<{ resolve: (line: string) => void }> = [];
   socket.on("data", (chunk) => {
     buffer += chunk.toString("utf8");
     while (pending.length > 0) {
@@ -603,10 +603,10 @@ function createLineReader(socket: MailSocket) {
       if (newlineIndex === -1) break;
       const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
       buffer = buffer.slice(newlineIndex + 1);
-      pending.shift()?.(line);
+      pending.shift()?.resolve(line);
     }
   });
-  return () =>
+  return (stage = "server response") =>
     new Promise<string>((resolve, reject) => {
       const newlineIndex = buffer.indexOf("\n");
       if (newlineIndex !== -1) {
@@ -615,13 +615,18 @@ function createLineReader(socket: MailSocket) {
         resolve(line);
         return;
       }
+      const pendingItem = {
+        resolve: (line: string) => {
+          clearTimeout(timer);
+          resolve(line);
+        },
+      };
       const timer = setTimeout(() => {
-        reject(new Error("Timed out waiting for server response."));
+        const index = pending.indexOf(pendingItem);
+        if (index >= 0) pending.splice(index, 1);
+        reject(new Error(`Timed out waiting for ${stage}.`));
       }, MAIL_RESPONSE_TIMEOUT_MS);
-      pending.push((line) => {
-        clearTimeout(timer);
-        resolve(line);
-      });
+      pending.push(pendingItem);
     });
 }
 
@@ -737,6 +742,21 @@ function parseHeaderBlock(lines: string[]) {
   return headers;
 }
 
+function parseFetchedHeaderBlocks(lines: string[]) {
+  const blocks: string[][] = [];
+  let current: string[] = [];
+  for (const line of lines) {
+    if (/^\* \d+ FETCH/i.test(line)) {
+      if (current.length > 0) blocks.push(current);
+      current = [line];
+      continue;
+    }
+    if (current.length > 0) current.push(line);
+  }
+  if (current.length > 0) blocks.push(current);
+  return blocks;
+}
+
 async function openImapSession(profile: any) {
   const port = assertMailConfig(profile.imapHost || "", profile.imapPort, profile.imapUser, profile.imapPass);
   let socket = await connectMailSocket({
@@ -746,20 +766,20 @@ async function openImapSession(profile: any) {
     rejectUnauthorized: profile.imapRejectUnauthorized !== false,
   });
   let readLine = createLineReader(socket);
-  const greeting = await readLine();
+  const greeting = await readLine("IMAP greeting");
   if (!/^\* OK/i.test(greeting)) throw new Error(`Unexpected IMAP greeting from ${profile.name || profile.imapHost}: ${greeting}`);
 
   if (profile.imapSecurity === "starttls") {
     writeLine(socket, "a001 STARTTLS");
-    const startTlsLine = await readLine();
+    const startTlsLine = await readLine("IMAP STARTTLS response");
     if (!/^a001 OK/i.test(startTlsLine)) throw new Error(`IMAP STARTTLS failed: ${startTlsLine}`);
     socket = await upgradeToTls(socket, profile.imapHost, profile.imapRejectUnauthorized !== false);
     readLine = createLineReader(socket);
   }
 
   writeLine(socket, `a002 LOGIN ${escapeImapString(profile.imapUser)} ${escapeImapString(profile.imapPass)}`);
-  let loginLine = await readLine();
-  while (!/^a002 /i.test(loginLine)) loginLine = await readLine();
+  let loginLine = await readLine("IMAP login response");
+  while (!/^a002 /i.test(loginLine)) loginLine = await readLine("IMAP login response");
   if (!/^a002 OK/i.test(loginLine)) throw new Error(`IMAP login failed for ${profile.name || profile.imapHost}: ${loginLine}`);
   return { socket, readLine };
 }
@@ -785,10 +805,10 @@ app.post("/api/email/sync-imap", async (req, res) => {
 
       writeLine(socket, "a003 SELECT INBOX");
       const selectLines: string[] = [];
-      let line = await readLine();
+      let line = await readLine("INBOX selection response");
       while (!/^a003 /i.test(line)) {
         selectLines.push(line);
-        line = await readLine();
+        line = await readLine("INBOX selection response");
       }
       if (!/^a003 OK/i.test(line)) throw new Error(`Cannot select INBOX: ${line}`);
 
@@ -800,20 +820,20 @@ app.post("/api/email/sync-imap", async (req, res) => {
       }
 
       const startSeq = Math.max(1, existsCount - maxPerAccount + 1);
-      const ids = Array.from({ length: existsCount - startSeq + 1 }, (_, index) => startSeq + index);
+      writeLine(socket, `a004 FETCH ${startSeq}:${existsCount} (UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE)])`);
+      const fetchLines: string[] = [];
+      line = await readLine("latest email header response");
+      while (!/^a004 /i.test(line)) {
+        fetchLines.push(line);
+        line = await readLine("latest email header response");
+      }
+      if (!/^a004 OK/i.test(line)) throw new Error(`Cannot fetch latest email headers: ${line}`);
 
-      for (let index = 0; index < ids.length; index += 1) {
-        const id = ids[index];
-        const tag = `a${String(500 + index).padStart(3, "0")}`;
-        writeLine(socket, `${tag} FETCH ${id} (UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE)])`);
-        const fetchLines: string[] = [];
-        line = await readLine();
-        while (!new RegExp(`^${tag} `, "i").test(line)) {
-          fetchLines.push(line);
-          line = await readLine();
-        }
-        const headers = parseHeaderBlock(fetchLines);
-        const uid = fetchLines.join("\n").match(/UID (\d+)/i)?.[1] || String(id);
+      for (const block of parseFetchedHeaderBlocks(fetchLines)) {
+        const headers = parseHeaderBlock(block);
+        const blockText = block.join("\n");
+        const sequence = blockText.match(/^\* (\d+) FETCH/im)?.[1];
+        const uid = blockText.match(/UID (\d+)/i)?.[1] || sequence || `${Date.now()}`;
         const sender = parseEmailAddress(headers.from || profile.imapUser);
         const target = parseEmailAddress(headers.to || profile.imapUser);
         const subject = headers.subject || "(No subject)";
