@@ -553,7 +553,7 @@ type MailSocket = net.Socket | tls.TLSSocket;
 
 const MAIL_CONNECT_TIMEOUT_MS = 8000;
 const MAIL_RESPONSE_TIMEOUT_MS = 8000;
-const IMAP_SYNC_VERSION = "imap-sync-v7-multipart-body";
+const IMAP_SYNC_VERSION = "imap-sync-v8-header-body-sections";
 
 function escapeImapString(value: string) {
   return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -790,8 +790,10 @@ function decodeMimeHeader(value = "") {
 function parseHeaderBlock(lines: string[]) {
   const headers: Record<string, string> = {};
   let current = "";
-  for (const line of lines) {
-    if (/BODY\[(?:TEXT|1(?:\.TEXT)?)\]/i.test(line)) break;
+  const headerStartIndex = lines.findIndex((line) => /BODY\[(?:HEADER|RFC822\.HEADER)/i.test(line));
+  const headerLines = headerStartIndex >= 0 ? lines.slice(headerStartIndex + 1) : lines;
+  for (const line of headerLines) {
+    if (/BODY\[(?:TEXT|1(?:\.TEXT)?)\]/i.test(line) || line === ")") break;
     if (!line.trim() || line === ")" || line.startsWith("* ") || /^[a-z]\d+\s/i.test(line)) continue;
     if (/^\s/.test(line) && current) {
       headers[current] = `${headers[current]} ${line.trim()}`;
@@ -888,7 +890,9 @@ function decodeEmailBody(headers: Record<string, string>, lines: string[]) {
   const rawBody = lines.join("\n").trim();
   if (!rawBody) return "";
   const contentType = headers["content-type"] || "";
-  const boundary = contentType.match(/boundary="?([^";]+)"?/i)?.[1];
+  const boundary =
+    contentType.match(/boundary="?([^";]+)"?/i)?.[1] ||
+    rawBody.match(/^--([^\r\n-][^\r\n]*)/m)?.[1]?.trim();
 
   if (boundary) {
     const parts = rawBody
@@ -901,11 +905,12 @@ function decodeEmailBody(headers: Record<string, string>, lines: string[]) {
       parsedParts.find((part) => /text\/html/i.test(part.headers["content-type"] || "")) ||
       parsedParts.find((part) => part.body.trim());
     if (preferredPart) {
-      return cleanEmailPreview(decodeBodyText(
+      const decoded = cleanEmailPreview(decodeBodyText(
         preferredPart.body,
         preferredPart.headers["content-type"] || "",
         preferredPart.headers["content-transfer-encoding"] || "",
       ));
+      if (decoded) return decoded;
     }
   }
 
@@ -995,7 +1000,7 @@ app.post("/api/email/sync-imap", async (req, res) => {
       }
 
       const startSeq = Math.max(1, existsCount - maxPerAccount + 1);
-      writeLine(socket, `a004 FETCH ${startSeq}:${existsCount} (UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE CONTENT-TYPE CONTENT-TRANSFER-ENCODING)] BODY.PEEK[TEXT]<0.20000>)`);
+      writeLine(socket, `a004 FETCH ${startSeq}:${existsCount} (UID BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.20000>)`);
       const fetchLines: string[] = [];
       line = await readLine("latest email header response");
       while (!/^a004 /i.test(line)) {
