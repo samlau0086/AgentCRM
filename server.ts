@@ -678,6 +678,115 @@ function assertMailConfig(host: string, port: unknown, user?: string, pass?: str
   return parsedPort;
 }
 
+function encodeMimeHeader(value: string) {
+  const text = String(value || "");
+  return /[^\x20-\x7e]/.test(text)
+    ? `=?UTF-8?B?${Buffer.from(text, "utf8").toString("base64")}?=`
+    : text.replace(/\r?\n/g, " ");
+}
+
+function normalizeEmailRecipients(value: unknown) {
+  const raw = Array.isArray(value) ? value.join(",") : String(value || "");
+  const recipients = raw
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => item.match(/<([^>]+)>/)?.[1]?.trim() || item);
+  return Array.from(new Set(recipients));
+}
+
+function extractEmailAddress(value: string) {
+  return value.match(/<([^>]+)>/)?.[1]?.trim() || value.trim();
+}
+
+function formatFromHeader(value: string) {
+  const trimmed = value.trim();
+  const address = extractEmailAddress(trimmed);
+  const name = trimmed.includes("<") ? trimmed.replace(/<[^>]+>/, "").trim().replace(/^"|"$/g, "") : "";
+  return name ? `${encodeMimeHeader(name)} <${address}>` : address;
+}
+
+function dotStuffSmtpData(value: string) {
+  return String(value || "")
+    .replace(/\r?\n/g, "\r\n")
+    .split("\r\n")
+    .map((line) => (line.startsWith(".") ? `.${line}` : line))
+    .join("\r\n");
+}
+
+function stripHtmlForEmail(value: string) {
+  return String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
+
+async function authenticateSmtp(
+  socket: MailSocket,
+  readLine: () => Promise<string>,
+  smtpUser: string,
+  smtpPass: string,
+) {
+  writeLine(socket, "AUTH LOGIN");
+  let response = await readSmtpResponse(readLine);
+  if (/^334/.test(response[0])) {
+    writeLine(socket, Buffer.from(smtpUser).toString("base64"));
+    response = await readSmtpResponse(readLine);
+    if (!/^334/.test(response[0])) throw new Error(`SMTP username was not accepted: ${response.join(" ")}`);
+    writeLine(socket, Buffer.from(smtpPass).toString("base64"));
+    response = await readSmtpResponse(readLine);
+  } else {
+    const authPlain = Buffer.from(`\0${smtpUser}\0${smtpPass}`).toString("base64");
+    writeLine(socket, `AUTH PLAIN ${authPlain}`);
+    response = await readSmtpResponse(readLine);
+  }
+  if (!/^235/.test(response[0])) throw new Error(`SMTP authentication failed: ${response.join(" ")}`);
+}
+
+async function openSmtpSession(profile: {
+  smtpHost: string;
+  smtpPort: string;
+  smtpSecurity?: MailSecurity;
+  smtpRejectUnauthorized?: boolean;
+  smtpUser: string;
+  smtpPass: string;
+}) {
+  const port = assertMailConfig(profile.smtpHost || "", profile.smtpPort, profile.smtpUser, profile.smtpPass);
+  const security = normalizeMailSecurity(profile.smtpSecurity, port);
+  let socket = await connectMailSocket({
+    host: profile.smtpHost,
+    port,
+    secure: security === "ssl",
+    rejectUnauthorized: profile.smtpRejectUnauthorized !== false,
+  });
+  let readLine = createLineReader(socket);
+  let response = await readSmtpResponse(readLine);
+  if (!/^220/.test(response[0])) throw new Error(`Unexpected SMTP greeting: ${response.join(" ")}`);
+
+  writeLine(socket, "EHLO agentcrm.local");
+  response = await readSmtpResponse(readLine);
+  if (!/^250/.test(response[0])) throw new Error(`SMTP EHLO failed: ${response.join(" ")}`);
+
+  if (security === "starttls") {
+    writeLine(socket, "STARTTLS");
+    response = await readSmtpResponse(readLine);
+    if (!/^220/.test(response[0])) throw new Error(`SMTP STARTTLS failed: ${response.join(" ")}`);
+    socket = await upgradeToTls(socket, profile.smtpHost, profile.smtpRejectUnauthorized !== false);
+    readLine = createLineReader(socket);
+    writeLine(socket, "EHLO agentcrm.local");
+    response = await readSmtpResponse(readLine);
+    if (!/^250/.test(response[0])) throw new Error(`SMTP EHLO after STARTTLS failed: ${response.join(" ")}`);
+  }
+
+  await authenticateSmtp(socket, readLine, profile.smtpUser, profile.smtpPass);
+  return { socket, readLine };
+}
+
 app.post("/api/email/test-imap", async (req, res) => {
   const {
     imapHost,
@@ -1080,49 +1189,127 @@ app.post("/api/email/test-smtp", async (req, res) => {
   let socket: MailSocket | undefined;
   try {
     const port = assertMailConfig(smtpHost || "", smtpPort, smtpUser, smtpPass);
-    socket = await connectMailSocket({
-      host: smtpHost!,
-      port,
-      secure: smtpSecurity === "ssl",
-      rejectUnauthorized: smtpRejectUnauthorized !== false,
+    const session = await openSmtpSession({
+      smtpHost: smtpHost!,
+      smtpPort: String(port),
+      smtpSecurity,
+      smtpRejectUnauthorized,
+      smtpUser: smtpUser!,
+      smtpPass: smtpPass!,
     });
-    let readLine = createLineReader(socket);
-    let response = await readSmtpResponse(readLine);
-    if (!/^220/.test(response[0])) throw new Error(`Unexpected SMTP greeting: ${response.join(" ")}`);
-
-    writeLine(socket, "EHLO agentcrm.local");
-    response = await readSmtpResponse(readLine);
-    if (!/^250/.test(response[0])) throw new Error(`SMTP EHLO failed: ${response.join(" ")}`);
-
-    if (smtpSecurity === "starttls") {
-      writeLine(socket, "STARTTLS");
-      response = await readSmtpResponse(readLine);
-      if (!/^220/.test(response[0])) throw new Error(`SMTP STARTTLS failed: ${response.join(" ")}`);
-      socket = await upgradeToTls(socket, smtpHost!, smtpRejectUnauthorized !== false);
-      readLine = createLineReader(socket);
-      writeLine(socket, "EHLO agentcrm.local");
-      response = await readSmtpResponse(readLine);
-      if (!/^250/.test(response[0])) throw new Error(`SMTP EHLO after STARTTLS failed: ${response.join(" ")}`);
-    }
-
-    writeLine(socket, "AUTH LOGIN");
-    response = await readSmtpResponse(readLine);
-    if (/^334/.test(response[0])) {
-      writeLine(socket, Buffer.from(smtpUser!).toString("base64"));
-      response = await readSmtpResponse(readLine);
-      if (!/^334/.test(response[0])) throw new Error(`SMTP username was not accepted: ${response.join(" ")}`);
-      writeLine(socket, Buffer.from(smtpPass!).toString("base64"));
-      response = await readSmtpResponse(readLine);
-    } else {
-      const authPlain = Buffer.from(`\0${smtpUser!}\0${smtpPass!}`).toString("base64");
-      writeLine(socket, `AUTH PLAIN ${authPlain}`);
-      response = await readSmtpResponse(readLine);
-    }
-    if (!/^235/.test(response[0])) throw new Error(`SMTP authentication failed: ${response.join(" ")}`);
+    socket = session.socket;
     writeLine(socket, "QUIT");
     res.json({ success: true, message: `Connected to ${smtpHost}:${port} and authenticated with SMTP.` });
   } catch (err: any) {
     res.status(400).json({ error: err.message || "SMTP connection test failed." });
+  } finally {
+    socket?.destroy();
+  }
+});
+
+app.post("/api/email/send-smtp", async (req, res) => {
+  const {
+    profile,
+    to,
+    subject,
+    text,
+    html,
+  } = req.body as {
+    profile?: {
+      smtpHost?: string;
+      smtpPort?: string;
+      smtpSecurity?: MailSecurity;
+      smtpRejectUnauthorized?: boolean;
+      smtpUser?: string;
+      smtpPass?: string;
+      fromAddress?: string;
+    };
+    to?: string | string[];
+    subject?: string;
+    text?: string;
+    html?: string;
+  };
+
+  let socket: MailSocket | undefined;
+  try {
+    if (!profile) throw new Error("SMTP profile is required.");
+    const recipients = normalizeEmailRecipients(to);
+    if (recipients.length === 0) throw new Error("At least one recipient is required.");
+    if (!subject?.trim()) throw new Error("Subject is required.");
+
+    const fromAddress = (profile.fromAddress || profile.smtpUser || "").trim();
+    const envelopeFrom = extractEmailAddress(fromAddress);
+    if (!fromAddress) throw new Error("From address is required.");
+
+    const session = await openSmtpSession({
+      smtpHost: profile.smtpHost || "",
+      smtpPort: profile.smtpPort || "",
+      smtpSecurity: profile.smtpSecurity,
+      smtpRejectUnauthorized: profile.smtpRejectUnauthorized,
+      smtpUser: profile.smtpUser || "",
+      smtpPass: profile.smtpPass || "",
+    });
+    socket = session.socket;
+    const readLine = session.readLine;
+
+    writeLine(socket, `MAIL FROM:<${envelopeFrom}>`);
+    let response = await readSmtpResponse(readLine);
+    if (!/^250/.test(response[0])) throw new Error(`SMTP MAIL FROM failed: ${response.join(" ")}`);
+
+    for (const recipient of recipients) {
+      writeLine(socket, `RCPT TO:<${recipient}>`);
+      response = await readSmtpResponse(readLine);
+      if (!/^(250|251)/.test(response[0])) throw new Error(`SMTP RCPT TO failed for ${recipient}: ${response.join(" ")}`);
+    }
+
+    writeLine(socket, "DATA");
+    response = await readSmtpResponse(readLine);
+    if (!/^354/.test(response[0])) throw new Error(`SMTP DATA failed: ${response.join(" ")}`);
+
+    const messageId = `<${Date.now()}.${Math.random().toString(16).slice(2)}@agentcrm.local>`;
+    const hasHtml = Boolean(html?.trim());
+    const textBody = text?.trim() || stripHtmlForEmail(html || "");
+    const boundary = `agentcrm_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const headers = [
+      `From: ${formatFromHeader(fromAddress)}`,
+      `To: ${recipients.join(", ")}`,
+      `Subject: ${encodeMimeHeader(subject)}`,
+      `Date: ${new Date().toUTCString()}`,
+      `Message-ID: ${messageId}`,
+      "MIME-Version: 1.0",
+    ];
+    const mimeBody = hasHtml
+      ? [
+          `Content-Type: multipart/alternative; boundary="${boundary}"`,
+          "",
+          `--${boundary}`,
+          'Content-Type: text/plain; charset="UTF-8"',
+          "Content-Transfer-Encoding: 8bit",
+          "",
+          textBody,
+          "",
+          `--${boundary}`,
+          'Content-Type: text/html; charset="UTF-8"',
+          "Content-Transfer-Encoding: 8bit",
+          "",
+          html,
+          "",
+          `--${boundary}--`,
+        ]
+      : [
+          'Content-Type: text/plain; charset="UTF-8"',
+          "Content-Transfer-Encoding: 8bit",
+          "",
+          textBody,
+        ];
+    socket.write(`${dotStuffSmtpData([...headers, ...mimeBody].join("\r\n"))}\r\n.\r\n`);
+    response = await readSmtpResponse(readLine);
+    if (!/^250/.test(response[0])) throw new Error(`SMTP message was not accepted: ${response.join(" ")}`);
+
+    writeLine(socket, "QUIT");
+    res.json({ success: true, provider: "smtp", recipients, messageId });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "SMTP send failed." });
   } finally {
     socket?.destroy();
   }

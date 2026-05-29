@@ -178,7 +178,25 @@ export async function sendEmail(targetMappingId: string, to: string, subject: st
       throw new Error(errorText || 'Failed to send email through Resend.');
     }
     return { ok: true, provider: 'resend', result: await response.json() };
-  } else {
-    throw new Error('SMTP sending requires a backend mail transport. Use Resend or add a server-side SMTP endpoint.');
   }
+
+  if (!profile.smtpHost || !profile.smtpPort || !profile.smtpUser || !profile.smtpPass) {
+    throw new Error('SMTP host, port, username, and password are required.');
+  }
+  const response = await fetch('/api/email/send-smtp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      profile,
+      to,
+      subject,
+      text: body,
+      ...(htmlBody ? { html: htmlBody } : {}),
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || `SMTP send failed with HTTP ${response.status}.`);
+  }
+  return { ok: true, provider: 'smtp', result };
 }
