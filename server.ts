@@ -546,6 +546,8 @@ crudRoutes("quotes", "/api/crm/quotes");
 crudRoutes("inbox_messages", "/api/communication/inbox");
 crudRoutes("agent_pending_actions", "/api/agent/actions/pending");
 crudRoutes("knowledge_documents", "/api/knowledge");
+crudRoutes("email_signatures", "/api/email/signatures");
+crudRoutes("email_mappings", "/api/email/mappings");
 
 type MailSecurity = "ssl" | "starttls" | "none";
 

@@ -16,11 +16,19 @@ import {
   Calendar,
   Trash2,
   RefreshCw,
+  Bold,
+  Italic,
+  Underline,
+  List,
+  ListOrdered,
+  RemoveFormatting,
+  Reply,
+  Forward,
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
 import { fetchClients, fetchMessages, sendMessage, WaClient } from "../services/waHub";
-import { fetchEmails, sendEmail } from "../services/emailSync";
+import { fetchEmails, sendEmail, getEmailMappings, getEmailSignatures } from "../services/emailSync";
 import {
   getInboxMessages,
   addDraftToThread,
@@ -64,6 +72,7 @@ interface SenderAnalysisPreference {
 
 const INBOX_INSIGHTS_KEY = "crm_inbox_ai_insights";
 const SENDER_ANALYSIS_PREFS_KEY = "crm_inbox_sender_analysis_prefs";
+const LAST_SIGNATURE_BY_RECIPIENT_KEY = "crm_last_email_signature_by_recipient";
 
 function loadJsonMap<T>(key: string): Record<string, T> {
   try {
@@ -76,6 +85,43 @@ function loadJsonMap<T>(key: string): Record<string, T> {
 
 function senderPreferenceKey(sender = "") {
   return sender.trim().toLowerCase() || "unknown";
+}
+
+function stripHtml(value = "") {
+  const element = document.createElement("div");
+  element.innerHTML = value;
+  return (element.textContent || element.innerText || "").replace(/\u00a0/g, " ").trim();
+}
+
+function escapeHtml(value = "") {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function editorHtml(value = "") {
+  return /<\/?[a-z][\s\S]*>/i.test(value)
+    ? value
+    : value
+        .split(/\n{2,}/)
+        .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>") || "<br>"}</p>`)
+        .join("");
+}
+
+function quotedOriginalHtml(message?: MessagePreview | null) {
+  if (!message) return "";
+  const first = message.thread?.[0];
+  const body = first?.htmlContent || `<p>${escapeHtml(first?.content || message.summary).replace(/\n/g, "<br>")}</p>`;
+  return `<div style="margin-top:16px;padding-top:12px;border-top:1px solid #d1d5db;color:#475569;font-size:13px">
+    <p>On ${escapeHtml(message.date)}, ${escapeHtml(message.sender)} wrote:</p>
+    ${body}
+  </div>`;
+}
+
+function loadLastSignatureByRecipient(): Record<string, string> {
+  return loadJsonMap<string>(LAST_SIGNATURE_BY_RECIPIENT_KEY);
 }
 
 export default function Inbox() {
@@ -104,14 +150,14 @@ export default function Inbox() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleAIGenerateSubject = () => {
-    if (!composeBody.trim()) {
+    if (!stripHtml(composeBody)) {
       notify("Please enter some message content first.", "warning", "Message content required");
       return;
     }
     setComposeSubject(
       `Re: ` +
-        composeBody.substring(0, 30) +
-        (composeBody.length > 30 ? "..." : ""),
+        stripHtml(composeBody).substring(0, 30) +
+        (stripHtml(composeBody).length > 30 ? "..." : ""),
     );
   };
 
@@ -123,7 +169,7 @@ export default function Inbox() {
       return;
     }
     setComposeBody(
-      `Hi ${composeTo.length > 0 ? composeTo[0].split("<")[0].trim() : "there"},\n\nRegarding: ${composeSubject || "our recent discussion"}\n${composeBody ? "\n" + composeBody + "\n" : ""}\nPlease let me know if you need any further information.\n\nBest regards,\nSales Team\n`,
+      `Hi ${composeTo.length > 0 ? composeTo[0].split("<")[0].trim() : "there"},\n\nRegarding: ${composeSubject || "our recent discussion"}\n${stripHtml(composeBody) ? "\n" + stripHtml(composeBody) + "\n" : ""}\nPlease let me know if you need any further information.\n\nBest regards,\nSales Team\n`,
     );
   };
 
@@ -145,6 +191,12 @@ export default function Inbox() {
     setComposeBcc([]);
     setComposeSubject("");
     setComposeBody("");
+    setComposeMode("new");
+    setComposeOriginalMessage(null);
+    const mappingSignatureId = getEmailMappings()[0]?.signatureId || "";
+    const signature = getEmailSignatures().find((item) => item.id === mappingSignatureId);
+    setComposeSignatureId(mappingSignatureId);
+    setComposeSignatureHtml(signature?.html || "");
     setComposeAttachments([]);
     setComposeScheduleDate("");
     setComposeScheduleTime("");
@@ -152,7 +204,8 @@ export default function Inbox() {
   };
 
   const handleComposeSend = async () => {
-    if (!composeTo.length || !composeSubject.trim() || !composeBody.trim()) {
+    const composePlainText = stripHtml(composeBody);
+    if (!composeTo.length || !composeSubject.trim() || !composePlainText) {
       notify("Please add at least one recipient, a subject, and a message.", "warning", "Missing email details");
       return;
     }
@@ -167,19 +220,28 @@ export default function Inbox() {
 
     setIsSending(true);
     try {
-      await sendEmail("default", composeTo.join(", "), composeSubject, composeBody);
+      const signatureHtml = composeSignatureHtml || "";
+      const originalHtml = composeOriginalMessage ? quotedOriginalHtml(composeOriginalMessage) : "";
+      const finalHtml = `${composeBody}${signatureHtml ? `<div class="email-signature">${signatureHtml}</div>` : ""}${originalHtml}`;
+      const finalText = stripHtml(finalHtml);
+      await sendEmail("default", composeTo.join(", "), composeSubject, finalText, finalHtml);
+      if (composeTo[0] && composeSignatureId) {
+        const next = { ...loadLastSignatureByRecipient(), [composeTo[0].trim().toLowerCase()]: composeSignatureId };
+        localStorage.setItem(LAST_SIGNATURE_BY_RECIPIENT_KEY, JSON.stringify(next));
+      }
       addOutboundMessage({
         sender: "agent@example.com",
         target: composeTo.join(", "),
         intent: "Outbound",
         subject: composeSubject,
-        summary: composeBody.slice(0, 140),
+        summary: finalText.slice(0, 140),
         channel: "Email",
         thread: [
           {
             id: `t_${Date.now()}`,
             sender: "agent",
-            content: composeBody,
+            content: finalText,
+            htmlContent: finalHtml,
             time: new Date().toLocaleTimeString(),
           },
         ],
@@ -195,6 +257,43 @@ export default function Inbox() {
     }
   };
 
+  const applySignatureForRecipient = (recipient: string) => {
+    const signatures = getEmailSignatures();
+    const lastSignatureId = loadLastSignatureByRecipient()[recipient.trim().toLowerCase()];
+    const fallbackSignatureId = getEmailMappings()[0]?.signatureId || "";
+    const signatureId = lastSignatureId || fallbackSignatureId;
+    const signature = signatures.find((item) => item.id === signatureId);
+    setComposeSignatureId(signatureId || "");
+    setComposeSignatureHtml(signature?.html || "");
+  };
+
+  const startReply = (message: MessagePreview) => {
+    setComposeMode("reply");
+    setComposeOriginalMessage(message);
+    setComposeTo(message.sender ? [message.sender] : []);
+    setComposeCc([]);
+    setComposeBcc([]);
+    setComposeSubject(message.subject.toLowerCase().startsWith("re:") ? message.subject : `Re: ${message.subject}`);
+    setComposeBody("");
+    applySignatureForRecipient(message.sender);
+    setActiveTab("compose");
+  };
+
+  const startForward = (message: MessagePreview) => {
+    setComposeMode("forward");
+    setComposeOriginalMessage(message);
+    setComposeTo([]);
+    setComposeCc([]);
+    setComposeBcc([]);
+    setComposeSubject(message.subject.toLowerCase().startsWith("fwd:") ? message.subject : `Fwd: ${message.subject}`);
+    setComposeBody("");
+    const fallbackSignatureId = getEmailMappings()[0]?.signatureId || "";
+    const signature = getEmailSignatures().find((item) => item.id === fallbackSignatureId);
+    setComposeSignatureId(fallbackSignatureId);
+    setComposeSignatureHtml(signature?.html || "");
+    setActiveTab("compose");
+  };
+
   const [messages, setMessages] = useState<MessagePreview[]>([]);
   const [activeMessageId, setActiveMessageId] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -206,6 +305,10 @@ export default function Inbox() {
   const [composeBcc, setComposeBcc] = useState<string[]>([]);
   const [composeSubject, setComposeSubject] = useState("");
   const [composeBody, setComposeBody] = useState("");
+  const [composeMode, setComposeMode] = useState<"new" | "reply" | "forward">("new");
+  const [composeOriginalMessage, setComposeOriginalMessage] = useState<MessagePreview | null>(null);
+  const [composeSignatureId, setComposeSignatureId] = useState("");
+  const [composeSignatureHtml, setComposeSignatureHtml] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
   const [composeAttachments, setComposeAttachments] = useState<
@@ -349,6 +452,22 @@ export default function Inbox() {
     }
 
     setCustomers(getCustomers());
+    fetch('/api/email/signatures')
+      .then((res) => res.ok ? res.json() : [])
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          localStorage.setItem('email_signatures', JSON.stringify(data));
+        }
+      })
+      .catch(console.error);
+    fetch('/api/email/mappings')
+      .then((res) => res.ok ? res.json() : [])
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          localStorage.setItem('email_mappings', JSON.stringify(data));
+        }
+      })
+      .catch(console.error);
     syncInboxMessages(true).catch(console.error);
   }, []);
 
@@ -359,13 +478,7 @@ export default function Inbox() {
   useEffect(() => {
     setReplyText(drafts[activeMessageId] || "");
     if (activeMessage && activeMessage.channel === "Email") {
-      const emailToUse = activeMessage.userId
-        ? customers
-            .find((c) => c.id === activeMessage.userId)
-            ?.contacts?.find((c) => c.type === "Email")?.value ||
-          activeMessage.target
-        : activeMessage.target;
-      setReplyTo(emailToUse ? [emailToUse] : []);
+      setReplyTo(activeMessage.sender ? [activeMessage.sender] : []);
       setReplyCc([]);
       setReplyBcc([]);
       setReplyShowCc(false);
@@ -526,7 +639,8 @@ export default function Inbox() {
   };
 
   const handleSend = async () => {
-    if (!replyText.trim() || !activeMessage) return;
+    const replyPlainText = stripHtml(replyText);
+    if (!replyPlainText || !activeMessage) return;
     setIsSending(true);
 
     const isScheduled =
@@ -539,17 +653,18 @@ export default function Inbox() {
       }
 
       if (activeMessage.channel === "WhatsApp") {
-        await sendMessage(activeMessage.target, replyText, selectedClientId);
+        await sendMessage(activeMessage.target, replyPlainText, selectedClientId);
       } else {
         await sendEmail(
           "default",
           replyTo.length > 0 ? replyTo.join(", ") : activeMessage.sender,
           `Re: ${activeMessage.subject}`,
+          replyPlainText,
           replyText,
         );
       }
 
-      addDraftToThread(activeMessage.id, replyText);
+      addDraftToThread(activeMessage.id, replyPlainText);
       setMessages(getInboxMessages());
 
       setReplyText("");
@@ -739,7 +854,10 @@ export default function Inbox() {
               {t("inbox.tab.inbox")}
             </button>
             <button
-              onClick={() => setActiveTab("compose")}
+              onClick={() => {
+                resetCompose();
+                setActiveTab("compose");
+              }}
               className={cn(
                 "flex-1 py-1.5 text-sm font-medium rounded-md transition-all",
                 activeTab === "compose"
@@ -876,7 +994,7 @@ export default function Inbox() {
         {activeTab === "compose" ? (
           <div className="flex-1 flex flex-col p-6 overflow-y-auto">
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-6">
-              Compose Mail
+              {composeMode === "reply" ? "Reply Mail" : composeMode === "forward" ? "Forward Mail" : "Compose Mail"}
             </h2>
             <div className="space-y-4">
               <div className="flex flex-col gap-3">
@@ -887,7 +1005,10 @@ export default function Inbox() {
                   <div className="flex-1">
                     <TaggedEmailInput
                       value={composeTo}
-                      onChange={setComposeTo}
+                      onChange={(next) => {
+                        setComposeTo(next);
+                        if (next[0] && next[0] !== composeTo[0]) applySignatureForRecipient(next[0]);
+                      }}
                       customers={customers}
                       placeholder="Type @name or email..."
                     />
@@ -950,6 +1071,21 @@ export default function Inbox() {
                   </div>
                 )}
               </div>
+              {composeOriginalMessage && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                  <div className="mb-2 font-semibold text-slate-800 dark:text-slate-100">Original email</div>
+                  <div className="mb-1">From: {composeOriginalMessage.sender}</div>
+                  <div className="mb-1">To: {composeOriginalMessage.target}</div>
+                  <div className="mb-3">Subject: {composeOriginalMessage.subject}</div>
+                  <div className="max-h-56 overflow-y-auto rounded-lg bg-white p-3 dark:bg-black/20">
+                    {composeOriginalMessage.thread?.[0]?.htmlContent ? (
+                      <iframe title="original-email" sandbox="" srcDoc={composeOriginalMessage.thread[0].htmlContent} className="h-48 w-full rounded bg-white" />
+                    ) : (
+                      <p className="whitespace-pre-wrap">{composeOriginalMessage.thread?.[0]?.content || composeOriginalMessage.summary}</p>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="flex items-center gap-4">
                 <label className="w-16 shrink-0 text-sm font-medium text-slate-700 dark:text-slate-300">
                   Subject
@@ -972,20 +1108,49 @@ export default function Inbox() {
                 </div>
                 <div className="w-[52px]"></div>
               </div>
+              <div className="flex items-start gap-4">
+                <label className="w-16 shrink-0 mt-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Signature
+                </label>
+                <div className="flex-1 grid grid-cols-1 gap-3">
+                  <select
+                    value={composeSignatureId}
+                    onChange={(e) => {
+                      const signatureId = e.target.value;
+                      const signature = getEmailSignatures().find((item) => item.id === signatureId);
+                      setComposeSignatureId(signatureId);
+                      setComposeSignatureHtml(signature?.html || "");
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
+                  >
+                    <option value="">No signature</option>
+                    {getEmailSignatures().map((signature) => (
+                      <option key={signature.id} value={signature.id}>{signature.name}</option>
+                    ))}
+                  </select>
+                  <RichTextEditor
+                    value={composeSignatureHtml}
+                    onChange={setComposeSignatureHtml}
+                    placeholder="Edit signature for this email..."
+                    className="min-h-[120px]"
+                  />
+                </div>
+                <div className="w-[52px]"></div>
+              </div>
               <div className="flex-1 flex flex-col min-h-[300px] mt-4 relative">
                 <button
                   onClick={handleAIGenerateBody}
                   title="Generate Content"
-                  className="absolute top-3 right-3 p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors z-10 shadow-sm border border-blue-200 dark:border-blue-800"
+                  className="absolute top-12 right-3 p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors z-10 shadow-sm border border-blue-200 dark:border-blue-800"
                 >
                   <Sparkles className="w-4 h-4" />
                 </button>
-                <textarea
+                <RichTextEditor
                   value={composeBody}
-                  onChange={(e) => setComposeBody(e.target.value)}
-                  className="flex-1 w-full px-4 py-3 pb-16 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-900 dark:text-white focus:border-blue-500 outline-none resize-none"
+                  onChange={setComposeBody}
                   placeholder="Type your message here..."
-                ></textarea>
+                  className="flex-1 min-h-[300px]"
+                />
 
                 {/* Attachments Area */}
                 {composeAttachments.length > 0 && (
@@ -1074,7 +1239,7 @@ export default function Inbox() {
                   </button>
                   <button
                     onClick={handleComposeSend}
-                    disabled={isSending || !composeTo.length || !composeSubject.trim() || !composeBody.trim()}
+                    disabled={isSending || !composeTo.length || !composeSubject.trim() || !stripHtml(composeBody)}
                     className="px-6 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50"
                   >
                     <Send className="w-4 h-4" />
@@ -1184,6 +1349,22 @@ export default function Inbox() {
                   aria-label="Delete message"
                 >
                   <Trash2 className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startReply(activeMessage)}
+                  className="px-3 py-2 border rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm transition-colors bg-white border-slate-200 text-slate-600 hover:text-blue-600 hover:bg-blue-50 dark:bg-white/5 dark:border-white/10 dark:text-slate-300 dark:hover:text-blue-400 dark:hover:bg-blue-500/10"
+                  title="Reply"
+                >
+                  <Reply className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startForward(activeMessage)}
+                  className="px-3 py-2 border rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm transition-colors bg-white border-slate-200 text-slate-600 hover:text-blue-600 hover:bg-blue-50 dark:bg-white/5 dark:border-white/10 dark:text-slate-300 dark:hover:text-blue-400 dark:hover:bg-blue-500/10"
+                  title="Forward"
+                >
+                  <Forward className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setIsCommentsOpen(!isCommentsOpen)}
@@ -1414,7 +1595,7 @@ export default function Inbox() {
                 </div>
 
                 {/* Reply Area */}
-                <div className="p-4 md:p-6 border-t border-slate-200 dark:border-white/10 shrink-0 bg-slate-50 dark:bg-black/20">
+                {false && <div className="p-4 md:p-6 border-t border-slate-200 dark:border-white/10 shrink-0 bg-slate-50 dark:bg-black/20">
                   <div className="bg-white dark:bg-white/5 shadow-sm border border-slate-200 dark:border-white/10 rounded-xl overflow-hidden focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.3)] transition-all">
                     {activeMessage.channel === "Email" && (
                       <div className="border-b border-slate-200 dark:border-white/10 p-3 bg-slate-50/50 dark:bg-black/40 flex flex-col gap-2">
@@ -1503,15 +1684,13 @@ export default function Inbox() {
                           );
                         }}
                         title="AI Assist Generate Reply"
-                        className="absolute right-3 top-3 p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors z-10 shadow-sm border border-blue-200 dark:border-blue-800"
+                        className="absolute right-3 top-12 p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors z-10 shadow-sm border border-blue-200 dark:border-blue-800"
                       >
                         <Sparkles className="w-4 h-4" />
                       </button>
-                      <textarea
-                        rows={4}
+                      <RichTextEditor
                         value={replyText}
-                        onChange={(e) => {
-                          const text = e.target.value;
+                        onChange={(text) => {
                           setReplyText(text);
                           if (activeMessage) {
                             setDrafts((prev) => ({
@@ -1520,8 +1699,9 @@ export default function Inbox() {
                             }));
                           }
                         }}
-                        className="w-full p-4 pr-14 text-sm bg-transparent outline-none resize-none placeholder-slate-400 dark:placeholder-slate-500 text-slate-800 dark:text-slate-200"
                         placeholder={t("inbox.placeholder")}
+                        className="min-h-[170px] border-0 bg-transparent"
+                        editorClassName="pr-14"
                       />
                     </div>
                     <div className="bg-slate-50/50 dark:bg-black/40 p-3 px-4 flex justify-between items-center border-t border-slate-200 dark:border-white/5">
@@ -1575,7 +1755,7 @@ export default function Inbox() {
                       </div>
                       <button
                         onClick={handleSend}
-                        disabled={isSending || !replyText.trim()}
+                        disabled={isSending || !stripHtml(replyText)}
                         className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2"
                       >
                         {isSending ? (
@@ -1591,7 +1771,7 @@ export default function Inbox() {
                       </button>
                     </div>
                   </div>
-                </div>
+                </div>}
               </div>
 
               {/* Internal Comments Sidebar */}
@@ -1761,6 +1941,99 @@ function TaggedEmailInput({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function RichTextEditor({
+  value,
+  onChange,
+  placeholder,
+  className,
+  editorClassName,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  className?: string;
+  editorClassName?: string;
+}) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const lastHtmlRef = useRef("");
+  const isEmpty = !stripHtml(value);
+
+  useEffect(() => {
+    const nextHtml = editorHtml(value);
+    if (editorRef.current && lastHtmlRef.current !== nextHtml) {
+      editorRef.current.innerHTML = nextHtml;
+      lastHtmlRef.current = nextHtml;
+    }
+  }, [value]);
+
+  const applyCommand = (command: string, commandValue?: string) => {
+    editorRef.current?.focus();
+    document.execCommand(command, false, commandValue);
+    const html = editorRef.current?.innerHTML || "";
+    lastHtmlRef.current = html;
+    onChange(html);
+  };
+
+  const handleInput = () => {
+    const html = editorRef.current?.innerHTML || "";
+    lastHtmlRef.current = html;
+    onChange(html);
+  };
+
+  const tools = [
+    { command: "bold", icon: Bold, label: "Bold" },
+    { command: "italic", icon: Italic, label: "Italic" },
+    { command: "underline", icon: Underline, label: "Underline" },
+    { command: "insertUnorderedList", icon: List, label: "Bulleted list" },
+    { command: "insertOrderedList", icon: ListOrdered, label: "Numbered list" },
+    { command: "removeFormat", icon: RemoveFormatting, label: "Clear formatting" },
+  ];
+
+  return (
+    <div className={cn("flex flex-col rounded-lg border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/5", className)}>
+      <div className="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5 dark:border-white/10">
+        {tools.map((tool) => {
+          const Icon = tool.icon;
+          return (
+            <button
+              key={tool.command}
+              type="button"
+              title={tool.label}
+              aria-label={tool.label}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                applyCommand(tool.command);
+              }}
+              className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-white hover:text-blue-600 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-blue-300"
+            >
+              <Icon className="h-4 w-4" />
+            </button>
+          );
+        })}
+      </div>
+      <div className="relative min-h-0 flex-1">
+        {isEmpty && placeholder && (
+          <div className="pointer-events-none absolute left-4 top-3 text-sm text-slate-400 dark:text-slate-500">
+            {placeholder}
+          </div>
+        )}
+        <div
+          ref={editorRef}
+          contentEditable
+          role="textbox"
+          aria-multiline="true"
+          onInput={handleInput}
+          className={cn(
+            "min-h-[140px] h-full w-full overflow-y-auto px-4 py-3 text-sm leading-relaxed text-slate-900 outline-none dark:text-white",
+            "prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-ol:my-2",
+            editorClassName,
+          )}
+        />
+      </div>
     </div>
   );
 }

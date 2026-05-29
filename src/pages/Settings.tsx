@@ -3,7 +3,7 @@ import { useLanguage } from '../i18n';
 import { useTheme } from '../theme';
 import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, ToggleLeft, ToggleRight, Loader2, PlugZap } from 'lucide-react';
 import { cn } from '../Layout';
-import { ReceiveProfile, SendProfile, EmailMapping, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings } from '../services/emailSync';
+import { ReceiveProfile, SendProfile, EmailMapping, EmailSignature, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings, getEmailSignatures, saveEmailSignatures } from '../services/emailSync';
 import { Agent, ModelProfile, getAgents, getModelProfiles, saveModelProfiles, updateAgent } from '../services/db';
 import { notify } from '../services/notifications';
 import PasswordInput from '../components/PasswordInput';
@@ -84,6 +84,7 @@ export default function Settings() {
   const [receiveProfiles, setReceiveProfiles] = useState<ReceiveProfile[]>([]);
   const [sendProfiles, setSendProfiles] = useState<SendProfile[]>([]);
   const [emailMappings, setEmailMappings] = useState<EmailMapping[]>([]);
+  const [emailSignatures, setEmailSignatures] = useState<EmailSignature[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
 
@@ -125,6 +126,25 @@ export default function Settings() {
     setReceiveProfiles(getReceiveProfiles());
     setSendProfiles(getSendProfiles());
     setEmailMappings(getEmailMappings());
+    setEmailSignatures(getEmailSignatures());
+    fetch('/api/email/signatures')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setEmailSignatures(data);
+          saveEmailSignatures(data);
+        }
+      })
+      .catch(console.error);
+    fetch('/api/email/mappings')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setEmailMappings(data);
+          saveEmailMappings(data);
+        }
+      })
+      .catch(console.error);
     setModelProfiles(getModelProfiles());
     setAgents(getAgents());
     
@@ -211,10 +231,23 @@ export default function Settings() {
     }
   };
 
-  const handleSaveEmailConfig = () => {
+  const handleSaveEmailConfig = async () => {
     saveReceiveProfiles(receiveProfiles);
     saveSendProfiles(sendProfiles);
     saveEmailMappings(emailMappings);
+    saveEmailSignatures(emailSignatures);
+    await Promise.allSettled([
+      ...emailSignatures.map(signature => fetch(`/api/email/signatures/${encodeURIComponent(signature.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(signature),
+      })),
+      ...emailMappings.map(mapping => fetch(`/api/email/mappings/${encodeURIComponent(mapping.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mapping),
+      })),
+    ]);
     notify('Saved Email configuration', 'success', 'Email settings saved');
   };
 
@@ -368,7 +401,16 @@ export default function Settings() {
       id: Math.random().toString(36).substr(2, 9),
       name: 'New Account',
       receiveProfileId: '',
-      sendProfileId: ''
+      sendProfileId: '',
+      signatureId: ''
+    }]);
+  };
+
+  const addEmailSignature = () => {
+    setEmailSignatures([...emailSignatures, {
+      id: Math.random().toString(36).substr(2, 9),
+      name: 'New Signature',
+      html: '<p>Best regards,<br>Your Name</p>',
     }]);
   };
 
@@ -850,6 +892,32 @@ export default function Settings() {
                 ))}
               </div>
 
+              {/* Email Signatures Section */}
+              <div className="space-y-4 border border-slate-200 dark:border-white/10 rounded-xl p-4 bg-slate-50 dark:bg-black/10">
+                <div className="flex justify-between items-center mb-2">
+                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Email Signatures</h4>
+                  <button onClick={addEmailSignature} className="text-xs font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:text-blue-500">
+                    <Plus className="w-3 h-3" /> Add Signature
+                  </button>
+                </div>
+                {emailSignatures.length === 0 && <p className="text-xs text-slate-400 italic">No signatures configured.</p>}
+                {emailSignatures.map(signature => (
+                  <div key={signature.id} className="p-4 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg relative space-y-3">
+                    <button onClick={() => setEmailSignatures(emailSignatures.filter(item => item.id !== signature.id))} className="absolute top-3 right-3 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                    <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-4 pr-8">
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Signature Name</label>
+                        <input value={signature.name} onChange={e => setEmailSignatures(emailSignatures.map(item => item.id === signature.id ? { ...item, name: e.target.value } : item))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Signature HTML</label>
+                        <textarea value={signature.html} onChange={e => setEmailSignatures(emailSignatures.map(item => item.id === signature.id ? { ...item, html: e.target.value } : item))} rows={3} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               {/* Account Mappings Section */}
               <div className="space-y-4 border border-slate-200 dark:border-white/10 rounded-xl p-4 bg-slate-50 dark:bg-black/10">
                 <div className="flex justify-between items-center mb-2">
@@ -860,7 +928,7 @@ export default function Settings() {
                 </div>
                 {emailMappings.length === 0 && <p className="text-xs text-slate-400 italic">No accounts configured.</p>}
                 {emailMappings.map(mapping => (
-                  <div key={mapping.id} className="p-4 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg relative flex items-end gap-4">
+                  <div key={mapping.id} className="p-4 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg relative grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                     <button onClick={() => setEmailMappings(emailMappings.filter(m => m.id !== mapping.id))} className="absolute top-3 right-3 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
                     
                     <div className="flex-1">
@@ -881,7 +949,13 @@ export default function Settings() {
                         {sendProfiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     </div>
-                    <div className="w-4"></div>{/* Spacer for trash button */}
+                    <div className="flex-1">
+                      <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Default Signature</label>
+                      <select value={mapping.signatureId || ''} onChange={e => setEmailMappings(emailMappings.map(m => m.id === mapping.id ? { ...m, signatureId: e.target.value } : m))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500">
+                        <option value="">-- No Signature --</option>
+                        {emailSignatures.map(signature => <option key={signature.id} value={signature.id}>{signature.name}</option>)}
+                      </select>
+                    </div>
                   </div>
                 ))}
               </div>

@@ -41,6 +41,13 @@ export interface EmailMapping {
   name: string;
   receiveProfileId: string;
   sendProfileId: string;
+  signatureId?: string;
+}
+
+export interface EmailSignature {
+  id: string;
+  name: string;
+  html: string;
 }
 
 export function getReceiveProfiles(): ReceiveProfile[] {
@@ -97,6 +104,18 @@ export function saveEmailMappings(mappings: EmailMapping[]) {
   localStorage.setItem('email_mappings', JSON.stringify(mappings));
 }
 
+export function getEmailSignatures(): EmailSignature[] {
+  try {
+    const data = localStorage.getItem('email_signatures');
+    if (data) return JSON.parse(data);
+  } catch (e) {}
+  return [];
+}
+
+export function saveEmailSignatures(signatures: EmailSignature[]) {
+  localStorage.setItem('email_signatures', JSON.stringify(signatures));
+}
+
 export async function fetchEmails(): Promise<EmailMessage[]> {
   const mappings = getEmailMappings();
   const receiveProfiles = getReceiveProfiles();
@@ -121,7 +140,7 @@ export async function fetchEmails(): Promise<EmailMessage[]> {
   return Array.isArray(data.emails) ? data.emails : [];
 }
 
-export async function sendEmail(targetMappingId: string, to: string, subject: string, body: string) {
+export async function sendEmail(targetMappingId: string, to: string, subject: string, body: string, htmlBody?: string) {
   const mappings = getEmailMappings();
   const sendProfiles = getSendProfiles();
   const mapping = mappings.find(m => m.id === targetMappingId) || mappings[0];
@@ -151,6 +170,7 @@ export async function sendEmail(targetMappingId: string, to: string, subject: st
         to: [to],
         subject,
         text: body,
+        ...(htmlBody ? { html: htmlBody } : {}),
       }),
     });
     if (!response.ok) {
