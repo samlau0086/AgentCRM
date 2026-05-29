@@ -36,10 +36,22 @@ import {
   getCurrentUser,
   addOutboundMessage,
   deleteInboxMessage,
+  getModelProfiles,
 } from "../services/db";
 import { CommentSection } from "../components/CommentSection";
 import ConfirmModal from "../components/ConfirmModal";
 import { notify } from "../services/notifications";
+
+interface InboxInsight {
+  intent: string;
+  priority: "low" | "medium" | "high";
+  risk: string;
+  customerNeed: string;
+  recommendedActions: string[];
+  replyGuidance: string[];
+  model?: string;
+  provider?: string;
+}
 
 export default function Inbox() {
   const { t, language } = useLanguage();
@@ -179,6 +191,9 @@ export default function Inbox() {
     null,
   );
   const [isSyncing, setIsSyncing] = useState(false);
+  const [inboxInsights, setInboxInsights] = useState<Record<string, InboxInsight>>({});
+  const [insightErrors, setInsightErrors] = useState<Record<string, string>>({});
+  const [analyzingMessageId, setAnalyzingMessageId] = useState<string | null>(null);
 
   const syncInboxMessages = async (silent = false) => {
     if (!silent) setIsSyncing(true);
@@ -341,6 +356,48 @@ export default function Inbox() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [activeMessage?.thread]);
+
+  useEffect(() => {
+    if (!activeMessage) return;
+    const latest = activeMessage.thread[activeMessage.thread.length - 1];
+    if (!latest || latest.sender !== "user" || inboxInsights[activeMessage.id] || analyzingMessageId === activeMessage.id) return;
+
+    const analyze = async () => {
+      setAnalyzingMessageId(activeMessage.id);
+      setInsightErrors((prev) => {
+        const next = { ...prev };
+        delete next[activeMessage.id];
+        return next;
+      });
+      try {
+        const modelProfile = getModelProfiles()[0];
+        const res = await fetch("/api/ai/inbox-insights", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: activeMessage.subject,
+            sender: activeMessage.sender,
+            channel: activeMessage.channel,
+            message: activeMessage.summary,
+            systemLanguage: language,
+            modelProfile,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `AI analysis failed with HTTP ${res.status}.`);
+        setInboxInsights((prev) => ({ ...prev, [activeMessage.id]: data }));
+      } catch (err) {
+        setInsightErrors((prev) => ({
+          ...prev,
+          [activeMessage.id]: err instanceof Error ? err.message : "AI analysis failed.",
+        }));
+      } finally {
+        setAnalyzingMessageId((current) => current === activeMessage.id ? null : current);
+      }
+    };
+
+    analyze();
+  }, [activeMessage?.id, activeMessage?.summary, activeMessage?.subject, language]);
 
   const setScheduleDefaults = () => {
     setReplyScheduleDate("");
@@ -616,11 +673,12 @@ export default function Inbox() {
               </div>
               <h3
                 className={cn(
-                  "text-sm line-clamp-1 mb-1.5",
+                  "text-sm mb-1.5 whitespace-normal break-words",
                   !msg.read
                     ? "font-semibold text-slate-800 dark:text-slate-200"
                     : "text-slate-700 dark:text-slate-300",
                 )}
+                title={msg.subject}
               >
                 {msg.subject}
               </h3>
@@ -893,8 +951,8 @@ export default function Inbox() {
             {/* Detail Header */}
             <div className="p-6 border-b border-slate-200 dark:border-white/10 flex justify-between items-start shrink-0 bg-slate-50/50 dark:bg-black/20">
               <div className="min-w-0 flex-1 pr-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <h2 className="text-xl font-semibold text-slate-900 dark:text-white tracking-tight truncate">
+                <div className="flex items-start gap-3 mb-2">
+                  <h2 className="text-xl font-semibold text-slate-900 dark:text-white tracking-tight whitespace-normal break-words leading-snug" title={activeMessage.subject}>
                     {activeMessage.subject}
                   </h2>
                   <span className="px-2 py-1 bg-white dark:bg-white/10 shadow-sm border border-slate-200 dark:border-white/20 text-slate-700 dark:text-slate-300 rounded text-[10px] font-mono tracking-widest uppercase shrink-0">
@@ -1109,29 +1167,59 @@ export default function Inbox() {
                       <div className="bg-blue-50/80 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/20 rounded-xl p-5 shadow-sm">
                         <h3 className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest flex items-center gap-2 mb-3">
                           <Bot className="w-4 h-4 text-blue-500" />
-                          {t("inbox.aiInsights")} & Options
+                          {t("inbox.aiInsights")}
                         </h3>
-                        <ul className="space-y-2 text-sm text-slate-700 dark:text-slate-300">
-                          <li className="flex gap-2">
-                            <CornerDownRight className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                            <span>
-                              Intent analyzed as{" "}
-                              <strong className="font-semibold text-blue-600 dark:text-blue-300">
-                                {activeMessage.intent}
-                              </strong>
-                            </span>
-                          </li>
-                          <li className="flex gap-2">
-                            <CornerDownRight className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                            <span>
-                              Relevant snippet found in{" "}
-                              <strong className="font-mono text-xs">
-                                Pricing.pdf
-                              </strong>
-                              .
-                            </span>
-                          </li>
-                        </ul>
+                        {analyzingMessageId === activeMessage.id ? (
+                          <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                            <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                            {language === "zh" ? "正在分析当前消息..." : "Analyzing this message..."}
+                          </div>
+                        ) : insightErrors[activeMessage.id] ? (
+                          <div className="text-sm text-red-600 dark:text-red-300">
+                            {insightErrors[activeMessage.id]}
+                          </div>
+                        ) : inboxInsights[activeMessage.id] ? (
+                          <div className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                              <div className="rounded-lg bg-white/70 dark:bg-white/5 border border-blue-100 dark:border-blue-500/10 p-3">
+                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">{language === "zh" ? "意图" : "Intent"}</div>
+                                <div className="font-semibold text-blue-700 dark:text-blue-300">{inboxInsights[activeMessage.id].intent}</div>
+                              </div>
+                              <div className="rounded-lg bg-white/70 dark:bg-white/5 border border-blue-100 dark:border-blue-500/10 p-3">
+                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">{language === "zh" ? "优先级" : "Priority"}</div>
+                                <div className="font-semibold text-slate-800 dark:text-slate-100">{inboxInsights[activeMessage.id].priority}</div>
+                              </div>
+                              <div className="rounded-lg bg-white/70 dark:bg-white/5 border border-blue-100 dark:border-blue-500/10 p-3">
+                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">{language === "zh" ? "风险" : "Risk"}</div>
+                                <div className="font-semibold text-slate-800 dark:text-slate-100">{inboxInsights[activeMessage.id].risk}</div>
+                              </div>
+                            </div>
+                            <p>{inboxInsights[activeMessage.id].customerNeed}</p>
+                            <ul className="space-y-2">
+                              {inboxInsights[activeMessage.id].recommendedActions.map((action, index) => (
+                                <li key={index} className="flex gap-2">
+                                  <CornerDownRight className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                                  <span>{action}</span>
+                                </li>
+                              ))}
+                            </ul>
+                            {inboxInsights[activeMessage.id].replyGuidance.length > 0 && (
+                              <div className="pt-3 border-t border-blue-200 dark:border-blue-500/10">
+                                <div className="text-xs font-semibold text-slate-500 mb-2">{language === "zh" ? "回复要点" : "Reply Guidance"}</div>
+                                <ul className="space-y-1">
+                                  {inboxInsights[activeMessage.id].replyGuidance.map((point, index) => (
+                                    <li key={index}>- {point}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {inboxInsights[activeMessage.id].model && (
+                              <div className="text-[10px] text-slate-400">
+                                {inboxInsights[activeMessage.id].provider} / {inboxInsights[activeMessage.id].model}
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
                         <div className="mt-4 pt-4 border-t border-blue-200 dark:border-blue-500/10">
                           <button
                             onClick={handleDraftAIReply}

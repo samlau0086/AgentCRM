@@ -1408,6 +1408,58 @@ app.post("/api/ai/draft-reply", async (req, res) => {
   }
 });
 
+app.post("/api/ai/inbox-insights", async (req, res) => {
+  const {
+    subject = "",
+    sender = "",
+    channel = "Email",
+    message = "",
+    systemLanguage = "en",
+    modelProfile = {},
+  } = req.body;
+  const profile = requireModelProfile(modelProfile, res);
+  if (!profile) return;
+
+  try {
+    const prompt = `Analyze this CRM inbox conversation using the actual message content.
+
+Channel: ${channel}
+Sender: ${sender}
+Subject: ${subject}
+Message:
+${String(message).slice(0, 6000)}
+
+Return strict JSON only:
+{
+  "intent": "short intent label",
+  "priority": "low|medium|high",
+  "risk": "short risk assessment",
+  "customerNeed": "what the sender appears to need",
+  "recommendedActions": ["action 1", "action 2", "action 3"],
+  "replyGuidance": ["point 1", "point 2"]
+}
+Write all human-facing values in this language: ${systemLanguage}. Do not invent files, prices, policies, or CRM facts that are not present in the message.`;
+    const text = await generateWithModelProfile(
+      profile,
+      "You are an inbox triage and CRM support assistant. Analyze messages and recommend practical next actions based only on the provided content.",
+      prompt,
+    );
+    const data = parseAiJson(text);
+    res.json({
+      intent: String(data.intent || "General inquiry"),
+      priority: ["low", "medium", "high"].includes(String(data.priority)) ? data.priority : "medium",
+      risk: String(data.risk || "No clear risk detected."),
+      customerNeed: String(data.customerNeed || "Review the message and respond appropriately."),
+      recommendedActions: Array.isArray(data.recommendedActions) ? data.recommendedActions.map(String).slice(0, 4) : [],
+      replyGuidance: Array.isArray(data.replyGuidance) ? data.replyGuidance.map(String).slice(0, 4) : [],
+      model: profile.model,
+      provider: profile.provider,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: `Inbox AI analysis failed: ${err.message}` });
+  }
+});
+
 app.post("/api/ai/trigger-agent", async (req, res) => {
   const { agentId, agentRole = "", allowedTools = [], context, operationGuard = {}, systemLanguage = "en", modelProfile = {} } = req.body;
   const profile = requireModelProfile(modelProfile, res);
