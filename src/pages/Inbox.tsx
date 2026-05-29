@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import {
+  Inbox as InboxTray,
   Mail,
   MessageCircle,
   Search,
@@ -24,6 +25,7 @@ import {
   RemoveFormatting,
   Reply,
   Forward,
+  SquarePen,
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
@@ -229,7 +231,7 @@ export default function Inbox() {
         const next = { ...loadLastSignatureByRecipient(), [composeTo[0].trim().toLowerCase()]: composeSignatureId };
         localStorage.setItem(LAST_SIGNATURE_BY_RECIPIENT_KEY, JSON.stringify(next));
       }
-      addOutboundMessage({
+      const sentMessage = addOutboundMessage({
         sender: "agent@example.com",
         target: composeTo.join(", "),
         intent: "Outbound",
@@ -249,6 +251,8 @@ export default function Inbox() {
       });
       setMessages(getInboxMessages());
       resetCompose();
+      setSelectedMailbox("sent");
+      setActiveMessageId(sentMessage.id);
       setActiveTab("inbox");
     } catch (e: any) {
       notify(`Error sending: ${e.message}`, "error", "Send failed");
@@ -316,6 +320,7 @@ export default function Inbox() {
   const [activeMessageId, setActiveMessageId] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedMailbox, setSelectedMailbox] = useState<"inbox" | "sent">("inbox");
 
   const [activeTab, setActiveTab] = useState<"inbox" | "compose">("inbox");
   const [composeTo, setComposeTo] = useState<string[]>([]);
@@ -396,6 +401,7 @@ export default function Inbox() {
         .filter((email) => !existingIds.has(email.id))
         .map((email) => ({
           ...email,
+          direction: "inbound",
           thread: [
             {
               id: `t_${email.id}`,
@@ -419,6 +425,7 @@ export default function Inbox() {
           summary: msg.body,
           channel: "WhatsApp",
           date: new Date(msg.created_at).toLocaleString(),
+          direction: msg.direction === "outbound" ? "outbound" : "inbound",
           read: msg.direction === "outbound",
           thread: [
             {
@@ -528,6 +535,7 @@ export default function Inbox() {
 
   useEffect(() => {
     if (!activeMessage) return;
+    if (activeMessage.direction === "outbound" || activeMessage.intent === "Outbound") return;
     const key = senderPreferenceKey(activeMessage.sender);
     if (senderAnalysisPrefs[key] || checkedSenderPrefKeys.has(key) || loadingSenderPrefKey === key) return;
     const loadSenderPreference = async () => {
@@ -592,6 +600,8 @@ export default function Inbox() {
   useEffect(() => {
     if (
       !activeMessage ||
+      activeMessage.direction === "outbound" ||
+      activeMessage.intent === "Outbound" ||
       inboxInsights[activeMessage.id] ||
       checkedInsightIds.has(activeMessage.id) ||
       loadingInsightId === activeMessage.id
@@ -672,6 +682,22 @@ export default function Inbox() {
 
       if (activeMessage.channel === "WhatsApp") {
         await sendMessage(activeMessage.target, replyPlainText, selectedClientId);
+        addOutboundMessage({
+          sender: "agent",
+          target: activeMessage.target,
+          intent: "Outbound",
+          subject: activeMessage.subject,
+          summary: replyPlainText.slice(0, 140),
+          channel: "WhatsApp",
+          thread: [
+            {
+              id: `t_${Date.now()}`,
+              sender: "agent",
+              content: replyPlainText,
+              time: new Date().toLocaleTimeString(),
+            },
+          ],
+        });
       } else {
         await sendEmail(
           "default",
@@ -680,6 +706,23 @@ export default function Inbox() {
           replyPlainText,
           replyText,
         );
+        addOutboundMessage({
+          sender: "agent@example.com",
+          target: replyTo.length > 0 ? replyTo.join(", ") : activeMessage.sender,
+          intent: "Outbound",
+          subject: `Re: ${activeMessage.subject}`,
+          summary: replyPlainText.slice(0, 140),
+          channel: "Email",
+          thread: [
+            {
+              id: `t_${Date.now()}`,
+              sender: "agent",
+              content: replyPlainText,
+              htmlContent: replyText,
+              time: new Date().toLocaleTimeString(),
+            },
+          ],
+        });
       }
 
       addDraftToThread(activeMessage.id, replyPlainText);
@@ -830,14 +873,33 @@ export default function Inbox() {
     }
   };
 
-  const filteredMessages = messages.filter((msg) => {
+  const mailboxMessages = messages.filter((msg) =>
+    selectedMailbox === "sent"
+      ? msg.direction === "outbound" || msg.intent === "Outbound"
+      : msg.direction !== "outbound" && msg.intent !== "Outbound",
+  );
+
+  const filteredMessages = mailboxMessages.filter((msg) => {
     const q = searchQuery.toLowerCase();
     return (
       msg.subject.toLowerCase().includes(q) ||
       msg.summary.toLowerCase().includes(q) ||
+      msg.sender.toLowerCase().includes(q) ||
+      msg.target.toLowerCase().includes(q) ||
       (msg.tags || []).some((t) => t.toLowerCase().includes(q))
     );
   });
+
+  const switchMailbox = (mailbox: "inbox" | "sent") => {
+    setSelectedMailbox(mailbox);
+    setActiveTab("inbox");
+    const nextMessage = messages.find((msg) =>
+      mailbox === "sent"
+        ? msg.direction === "outbound" || msg.intent === "Outbound"
+        : msg.direction !== "outbound" && msg.intent !== "Outbound",
+    );
+    setActiveMessageId(nextMessage?.id || "");
+  };
 
   return (
     <div className="flex h-full flex-col lg:flex-row bg-white dark:bg-black/20">
@@ -848,42 +910,57 @@ export default function Inbox() {
             <h1 className="text-xl font-semibold text-slate-900 dark:text-white">
               {t("inbox.title")}
             </h1>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  resetCompose();
+                  setActiveTab("compose");
+                }}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 dark:border-blue-500/30"
+                title={language === "zh" ? "写邮件" : "Compose email"}
+                aria-label={language === "zh" ? "写邮件" : "Compose email"}
+              >
+                <SquarePen className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => syncInboxMessages(false)}
+                disabled={isSyncing}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                title={language === "zh" ? "同步邮件和 WhatsApp 消息" : "Sync Email and WhatsApp messages"}
+                aria-label={language === "zh" ? "同步邮件和 WhatsApp 消息" : "Sync Email and WhatsApp messages"}
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", isSyncing && "animate-spin")} />
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mb-4">
             <button
               type="button"
-              onClick={() => syncInboxMessages(false)}
-              disabled={isSyncing}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
-              title={language === "zh" ? "同步邮件和 WhatsApp 消息" : "Sync Email and WhatsApp messages"}
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5", isSyncing && "animate-spin")} />
-              {language === "zh" ? "同步" : "Sync"}
-            </button>
-          </div>
-          <div className="flex bg-slate-200/50 dark:bg-white/5 p-1 rounded-lg mb-4">
-            <button
-              onClick={() => setActiveTab("inbox")}
+              onClick={() => switchMailbox("inbox")}
               className={cn(
-                "flex-1 py-1.5 text-sm font-medium rounded-md transition-all",
-                activeTab === "inbox"
-                  ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                "flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
+                selectedMailbox === "inbox"
+                  ? "border-blue-200 bg-white text-blue-600 shadow-sm dark:border-blue-500/30 dark:bg-slate-800 dark:text-blue-400"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white",
               )}
             >
-              {t("inbox.tab.inbox")}
+              <InboxTray className="h-4 w-4" />
+              {language === "zh" ? "收件箱" : "Inbox"}
             </button>
             <button
-              onClick={() => {
-                resetCompose();
-                setActiveTab("compose");
-              }}
+              type="button"
+              onClick={() => switchMailbox("sent")}
               className={cn(
-                "flex-1 py-1.5 text-sm font-medium rounded-md transition-all",
-                activeTab === "compose"
-                  ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                "flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
+                selectedMailbox === "sent"
+                  ? "border-blue-200 bg-white text-blue-600 shadow-sm dark:border-blue-500/30 dark:bg-slate-800 dark:text-blue-400"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white",
               )}
             >
-              {t("inbox.tab.compose")}
+              <Send className="h-4 w-4" />
+              {language === "zh" ? "发件箱" : "Sent"}
             </button>
           </div>
           <div className="relative">
@@ -898,6 +975,21 @@ export default function Inbox() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
+          {filteredMessages.length === 0 && (
+            <div className="flex h-full flex-col items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400">
+              {selectedMailbox === "sent" ? (
+                <>
+                  <Send className="mb-3 h-8 w-8 text-slate-300 dark:text-slate-600" />
+                  <p>{language === "zh" ? "发件箱暂无邮件" : "No sent messages yet"}</p>
+                </>
+              ) : (
+                <>
+                  <InboxTray className="mb-3 h-8 w-8 text-slate-300 dark:text-slate-600" />
+                  <p>{language === "zh" ? "收件箱暂无邮件" : "No inbox messages yet"}</p>
+                </>
+              )}
+            </div>
+          )}
           {filteredMessages.map((msg) => (
             <div
               key={msg.id}
@@ -911,7 +1003,7 @@ export default function Inbox() {
               {activeMessageId === msg.id && (
                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]"></div>
               )}
-              {!msg.read && (
+              {selectedMailbox === "inbox" && !msg.read && (
                 <div className="absolute right-4 top-5 w-2 h-2 rounded-full bg-blue-500"></div>
               )}
               <div className="flex justify-between items-start mb-2">
@@ -929,7 +1021,7 @@ export default function Inbox() {
                         : "font-medium text-slate-600 dark:text-slate-300",
                     )}
                   >
-                    {customers.find((c) =>
+                    {selectedMailbox === "sent" ? `To: ${msg.target}` : customers.find((c) =>
                       c.contacts?.some(
                         (contact) =>
                           contact.value.toLowerCase() ===

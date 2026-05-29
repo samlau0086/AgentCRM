@@ -794,6 +794,7 @@ export interface MessagePreview {
   id: string;
   sender: string;
   target: string;
+  direction?: "inbound" | "outbound";
   customerId?: string;
   userId?: string;
   intent: string;
@@ -876,10 +877,11 @@ export function addDraftToThread(messageId: string, reply: string) {
   }
 }
 
-export function addOutboundMessage(message: Omit<MessagePreview, "id" | "read" | "date">) {
+export function addOutboundMessage(message: Omit<MessagePreview, "id" | "read" | "date" | "direction">) {
   const msgs = getInboxMessages();
   const newMessage: MessagePreview = {
     ...message,
+    direction: "outbound",
     id: `msg_${Math.random().toString(36).substr(2, 9)}`,
     read: true,
     date: new Date().toLocaleString(),
