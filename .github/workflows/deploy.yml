@@ -103,7 +103,7 @@ jobs:
               exit 1
             fi
 
-            if ! grep -R "imap-sync-v8-header-body-sections" dist/server.cjs >/dev/null 2>&1; then
+            if ! grep -R "imap-sync-v9-html-body" dist/server.cjs >/dev/null 2>&1; then
               echo "Current IMAP sync backend version was not found in dist/server.cjs. Aborting deploy."
               exit 1
             fi

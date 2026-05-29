@@ -214,12 +214,13 @@ export default function Inbox() {
           ...message,
           ...email,
           thread: message.thread?.length
-            ? message.thread.map((item, index) => index === 0 ? { ...item, content: email.summary, time: email.date } : item)
+            ? message.thread.map((item, index) => index === 0 ? { ...item, content: email.summary, htmlContent: email.bodyHtml, time: email.date } : item)
             : [
                 {
                   id: `t_${email.id}`,
                   sender: "user",
                   content: email.summary,
+                  htmlContent: email.bodyHtml,
                   time: email.date,
                 },
               ],
@@ -234,6 +235,7 @@ export default function Inbox() {
               id: `t_${email.id}`,
               sender: "user",
               content: email.summary,
+              htmlContent: email.bodyHtml,
               time: email.date,
             },
           ],
@@ -1081,12 +1083,21 @@ export default function Inbox() {
                             : "bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-slate-200 rounded-tl-sm border border-slate-200 dark:border-white/5",
                         )}
                       >
-                        {tMsg.content.split("\n").map((line, i) => (
-                          <span key={i}>
-                            {line}
-                            <br />
-                          </span>
-                        ))}
+                        {tMsg.htmlContent ? (
+                          <iframe
+                            title={`email-${tMsg.id}`}
+                            sandbox=""
+                            srcDoc={tMsg.htmlContent}
+                            className="w-full h-[520px] rounded-lg bg-white border border-slate-200"
+                          />
+                        ) : (
+                          tMsg.content.split("\n").map((line, i) => (
+                            <span key={i}>
+                              {line}
+                              <br />
+                            </span>
+                          ))
+                        )}
                       </div>
                     </div>
                   ))}

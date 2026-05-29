@@ -5,6 +5,7 @@ export interface EmailMessage {
   intent: string;
   subject: string;
   summary: string;
+  bodyHtml?: string;
   channel: 'Email';
   date: string;
   read: boolean;

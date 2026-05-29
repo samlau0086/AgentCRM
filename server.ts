@@ -553,7 +553,7 @@ type MailSocket = net.Socket | tls.TLSSocket;
 
 const MAIL_CONNECT_TIMEOUT_MS = 8000;
 const MAIL_RESPONSE_TIMEOUT_MS = 8000;
-const IMAP_SYNC_VERSION = "imap-sync-v8-header-body-sections";
+const IMAP_SYNC_VERSION = "imap-sync-v9-html-body";
 
 function escapeImapString(value: string) {
   return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -888,7 +888,7 @@ function cleanEmailPreview(text: string) {
 
 function decodeEmailBody(headers: Record<string, string>, lines: string[]) {
   const rawBody = lines.join("\n").trim();
-  if (!rawBody) return "";
+  if (!rawBody) return { text: "", html: "" };
   const contentType = headers["content-type"] || "";
   const boundary =
     contentType.match(/boundary="?([^";]+)"?/i)?.[1] ||
@@ -900,25 +900,37 @@ function decodeEmailBody(headers: Record<string, string>, lines: string[]) {
       .map((part) => part.trim())
       .filter((part) => part && part !== "--");
     const parsedParts = parts.map(splitMimePart);
+    const htmlPart = parsedParts.find((part) => /text\/html/i.test(part.headers["content-type"] || ""));
+    const plainPart = parsedParts.find((part) => /text\/plain/i.test(part.headers["content-type"] || ""));
     const preferredPart =
-      parsedParts.find((part) => /text\/plain/i.test(part.headers["content-type"] || "")) ||
-      parsedParts.find((part) => /text\/html/i.test(part.headers["content-type"] || "")) ||
+      htmlPart ||
+      plainPart ||
       parsedParts.find((part) => part.body.trim());
     if (preferredPart) {
-      const decoded = cleanEmailPreview(decodeBodyText(
+      const decodedBody = decodeBodyText(
         preferredPart.body,
         preferredPart.headers["content-type"] || "",
         preferredPart.headers["content-transfer-encoding"] || "",
-      ));
-      if (decoded) return decoded;
+      );
+      const text = cleanEmailPreview(decodedBody);
+      if (text) {
+        return {
+          text,
+          html: htmlPart && preferredPart === htmlPart ? decodedBody : "",
+        };
+      }
     }
   }
 
-  return cleanEmailPreview(decodeBodyText(
+  const decodedBody = decodeBodyText(
     rawBody,
     contentType,
     headers["content-transfer-encoding"] || "",
-  ));
+  );
+  return {
+    text: cleanEmailPreview(decodedBody),
+    html: /text\/html/i.test(contentType) ? decodedBody : "",
+  };
 }
 
 function parseFetchedHeaderBlocks(lines: string[]) {
@@ -1000,7 +1012,7 @@ app.post("/api/email/sync-imap", async (req, res) => {
       }
 
       const startSeq = Math.max(1, existsCount - maxPerAccount + 1);
-      writeLine(socket, `a004 FETCH ${startSeq}:${existsCount} (UID BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.20000>)`);
+      writeLine(socket, `a004 FETCH ${startSeq}:${existsCount} (UID BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.100000>)`);
       const fetchLines: string[] = [];
       line = await readLine("latest email header response");
       while (!/^a004 /i.test(line)) {
@@ -1011,7 +1023,7 @@ app.post("/api/email/sync-imap", async (req, res) => {
 
       for (const block of parseFetchedHeaderBlocks(fetchLines)) {
         const headers = parseHeaderBlock(block);
-        const bodyPreview = decodeEmailBody(headers, extractFetchedBodyLines(block));
+        const bodyContent = decodeEmailBody(headers, extractFetchedBodyLines(block));
         const blockText = block.join("\n");
         const sequence = blockText.match(/^\* (\d+) FETCH/im)?.[1];
         const uid = blockText.match(/UID (\d+)/i)?.[1] || sequence || `${Date.now()}`;
@@ -1025,7 +1037,8 @@ app.post("/api/email/sync-imap", async (req, res) => {
           target,
           intent: "Email",
           subject,
-          summary: bodyPreview || subject,
+          summary: bodyContent.text || subject,
+          bodyHtml: bodyContent.html,
           channel: "Email",
           date: Number.isNaN(date.getTime()) ? new Date().toLocaleString() : date.toLocaleString(),
           read: false,

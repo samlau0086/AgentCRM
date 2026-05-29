@@ -786,6 +786,7 @@ export interface ThreadMessage {
   id: string;
   sender: "user" | "agent";
   content: string;
+  htmlContent?: string;
   time: string;
 }
 
@@ -798,6 +799,7 @@ export interface MessagePreview {
   intent: string;
   subject: string;
   summary: string;
+  bodyHtml?: string;
   channel: "Email" | "WhatsApp";
   date: string;
   read: boolean;
