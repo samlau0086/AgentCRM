@@ -1536,8 +1536,9 @@ export default function Inbox() {
                     <div
                       key={tMsg.id}
                       className={cn(
-                        "flex flex-col max-w-[85%]",
-                        tMsg.sender === "agent" ? "ml-auto" : "",
+                        "flex flex-col",
+                        tMsg.htmlContent ? "max-w-full" : "max-w-[85%]",
+                        tMsg.sender === "agent" && !tMsg.htmlContent ? "ml-auto" : "",
                       )}
                     >
                       <div className="flex items-center gap-2 mb-1">
@@ -1553,7 +1554,9 @@ export default function Inbox() {
                       <div
                         className={cn(
                           "p-4 rounded-2xl text-sm leading-relaxed",
-                          tMsg.sender === "agent"
+                          tMsg.htmlContent
+                            ? "bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-slate-200 rounded-tl-sm border border-slate-200 dark:border-white/5"
+                            : tMsg.sender === "agent"
                             ? "bg-blue-600 text-white rounded-tr-sm"
                             : "bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-slate-200 rounded-tl-sm border border-slate-200 dark:border-white/5",
                         )}
@@ -1578,8 +1581,10 @@ export default function Inbox() {
                   ))}
 
                   {/* AI Insights Card (injecting inline if latest message is from user) */}
-                  {activeMessage.thread[activeMessage.thread.length - 1]
-                    .sender === "user" && (
+                  {(activeMessage.thread[activeMessage.thread.length - 1]
+                    .sender === "user" ||
+                    activeMessage.direction === "outbound" ||
+                    activeMessage.intent === "Outbound") && (
                     <div className="max-w-[85%] mt-6">
                       <div className="bg-blue-50/80 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/20 rounded-xl p-5 shadow-sm">
                         <div className="flex items-center justify-between gap-3 mb-3">
@@ -1603,19 +1608,25 @@ export default function Inbox() {
                               ? language === "zh" ? "重新分析" : "Reanalyze"
                               : language === "zh" ? "分析" : "Analyze"}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const key = senderPreferenceKey(activeMessage.sender);
-                              const currentMode = senderAnalysisPrefs[key]?.mode || "auto";
-                              updateSenderAnalysisMode(activeMessage.sender, currentMode === "auto" ? "manual" : "auto");
-                            }}
-                            className="px-3 py-1.5 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-medium hover:bg-slate-50 dark:hover:bg-white/10 transition-colors shadow-sm"
-                          >
-                            {(senderAnalysisPrefs[senderPreferenceKey(activeMessage.sender)]?.mode || "auto") === "auto"
-                              ? language === "zh" ? "发件人：自动分析" : "Sender: Auto"
-                              : language === "zh" ? "发件人：手动分析" : "Sender: Manual"}
-                          </button>
+                          {activeMessage.direction === "outbound" || activeMessage.intent === "Outbound" ? (
+                            <span className="px-3 py-1.5 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-medium shadow-sm">
+                              {language === "zh" ? "默认手动分析" : "Manual by default"}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const key = senderPreferenceKey(activeMessage.sender);
+                                const currentMode = senderAnalysisPrefs[key]?.mode || "auto";
+                                updateSenderAnalysisMode(activeMessage.sender, currentMode === "auto" ? "manual" : "auto");
+                              }}
+                              className="px-3 py-1.5 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-medium hover:bg-slate-50 dark:hover:bg-white/10 transition-colors shadow-sm"
+                            >
+                              {(senderAnalysisPrefs[senderPreferenceKey(activeMessage.sender)]?.mode || "auto") === "auto"
+                                ? language === "zh" ? "发件人：自动分析" : "Sender: Auto"
+                                : language === "zh" ? "发件人：手动分析" : "Sender: Manual"}
+                            </button>
+                          )}
                           </div>
                         </div>
                         {analyzingMessageId === activeMessage.id ? (
