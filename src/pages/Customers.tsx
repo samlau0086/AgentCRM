@@ -10,10 +10,12 @@ import {
   Trash2,
   X,
   Plus,
+  Upload,
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
 import ConfirmModal from "../components/ConfirmModal";
+import { notify } from "../services/notifications";
 import {
   getCustomers,
   saveCustomers,
@@ -23,6 +25,7 @@ import {
   Customer,
   getPublicLeads,
   PublicLead,
+  savePublicLeads,
   claimLead,
 } from "../services/db";
 
@@ -35,6 +38,159 @@ const CONTACT_TYPES = [
   "WeChat",
   "Other",
 ];
+
+type CsvImportTarget = "my-customers" | "public-pool";
+
+type CsvImportPreview = {
+  fileName: string;
+  headers: string[];
+  rows: Record<string, string>[];
+};
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      value += '"';
+      i += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      row.push(value.trim());
+      value = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") i += 1;
+      row.push(value.trim());
+      if (row.some((cell) => cell !== "")) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+
+  row.push(value.trim());
+  if (row.some((cell) => cell !== "")) rows.push(row);
+  return rows;
+}
+
+function normalizeCsvHeader(header: string) {
+  return header.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function csvToObjects(text: string) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return { headers: rows[0] || [], rows: [] };
+  const headers = rows[0].map(normalizeCsvHeader);
+  const dataRows = rows.slice(1).map((row) =>
+    Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])),
+  );
+  return { headers, rows: dataRows };
+}
+
+function pickCsv(row: Record<string, string>, aliases: string[]) {
+  for (const alias of aliases) {
+    const value = row[normalizeCsvHeader(alias)];
+    if (value?.trim()) return value.trim();
+  }
+  return "";
+}
+
+function csvTags(value: string) {
+  return value
+    .split(/[;,|]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function clampScore(value: string, fallback = 50) {
+  const parsed = parseInt(value || "", 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.max(0, Math.min(100, parsed));
+}
+
+function normalizeRisk(value: string): Customer["risk"] {
+  const text = value.trim().toLowerCase();
+  if (text === "high") return "High";
+  if (text === "medium") return "Medium";
+  return "Low";
+}
+
+function buildContactMethods(row: Record<string, string>) {
+  return [
+    { type: "Email", value: pickCsv(row, ["email", "email_address", "mail"]) },
+    { type: "Phone", value: pickCsv(row, ["phone", "phone_number", "tel"]) },
+    { type: "Mobile", value: pickCsv(row, ["mobile", "mobile_phone"]) },
+    { type: "WhatsApp", value: pickCsv(row, ["whatsapp", "whatsapp_number"]) },
+    { type: "Other", value: pickCsv(row, ["website", "site", "url", "linkedin"]) },
+  ]
+    .filter((contact) => contact.value)
+    .map((contact) => ({
+      id: Math.random().toString(36).substring(7),
+      type: contact.type,
+      value: contact.value,
+    }));
+}
+
+function rowToCustomer(row: Record<string, string>): Customer | null {
+  const name = pickCsv(row, ["company", "company_name", "name", "customer", "customer_name", "organization"]);
+  const contact = pickCsv(row, ["contact", "contact_name", "person", "name", "email", "phone", "mobile"]);
+  if (!name && !contact) return null;
+  const contacts = buildContactMethods(row);
+  return {
+    id: `cus_${Math.random().toString(36).substr(2, 9)}`,
+    name: name || contact,
+    contact: contact || contacts[0]?.value || name,
+    contacts,
+    address: pickCsv(row, ["address", "street"]),
+    city: pickCsv(row, ["city"]),
+    province: pickCsv(row, ["province", "state", "region"]),
+    country: pickCsv(row, ["country"]),
+    preferredLanguage: pickCsv(row, ["preferred_language", "language", "lang"]) || "en",
+    description: pickCsv(row, ["description", "notes", "note", "summary"]),
+    industry: pickCsv(row, ["industry", "category"]),
+    stage: pickCsv(row, ["stage", "pipeline_stage"]) || "New Lead",
+    score: clampScore(pickCsv(row, ["score", "priority_score", "ai_score"])),
+    risk: normalizeRisk(pickCsv(row, ["risk"])),
+    intent: pickCsv(row, ["intent"]) || "Low",
+    tags: csvTags(pickCsv(row, ["tags", "tag"])),
+    logs: [
+      {
+        id: Math.random().toString(36).substring(7),
+        time: new Date().toISOString(),
+        event: "Imported from CSV",
+        type: "action",
+      },
+    ],
+    comments: [],
+  };
+}
+
+function rowToPublicLead(row: Record<string, string>): PublicLead | null {
+  const name = pickCsv(row, ["company", "company_name", "name", "lead", "business_name", "organization"]);
+  const contact = pickCsv(row, ["contact", "email", "phone", "mobile", "website", "site", "url"]);
+  if (!name && !contact) return null;
+  return {
+    id: `lead_csv_${Math.random().toString(36).substr(2, 9)}`,
+    name: name || contact,
+    contact: contact || "No contact provided",
+    source: pickCsv(row, ["source", "platform"]) || "CSV Import",
+    scrapedAt: new Date().toISOString(),
+    contacts: buildContactMethods(row),
+    industry: pickCsv(row, ["industry", "category"]),
+    location: pickCsv(row, ["location", "address", "city", "country"]),
+    description: pickCsv(row, ["description", "notes", "note", "summary"]),
+    score: pickCsv(row, ["score", "priority_score", "ai_score"]) ? clampScore(pickCsv(row, ["score", "priority_score", "ai_score"])) : undefined,
+    intent: (pickCsv(row, ["intent"]) as PublicLead["intent"]) || undefined,
+    risk: (pickCsv(row, ["risk"]) as PublicLead["risk"]) || undefined,
+  };
+}
 
 function CustomerFormView({
   customer,
@@ -453,6 +609,10 @@ export default function Customers() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [importTarget, setImportTarget] = useState<CsvImportTarget>("my-customers");
+  const [importPreview, setImportPreview] = useState<CsvImportPreview | null>(null);
+  const [importError, setImportError] = useState("");
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [deletingCustomerId, setDeletingCustomerId] = useState<string | null>(
     null,
   );
@@ -473,6 +633,69 @@ export default function Customers() {
   const handleAdd = () => {
     setEditingCustomer(null);
     setIsModalOpen(true);
+  };
+
+  const openImport = (target: CsvImportTarget) => {
+    setImportTarget(target);
+    setImportPreview(null);
+    setImportError("");
+    setIsImportOpen(true);
+  };
+
+  const handleCsvFile = async (file?: File) => {
+    setImportError("");
+    setImportPreview(null);
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setImportError("Please select a CSV file.");
+      return;
+    }
+    try {
+      const text = await file.text();
+      const parsed = csvToObjects(text);
+      if (parsed.rows.length === 0) {
+        setImportError("No importable rows found. Make sure the first row contains column headers.");
+        return;
+      }
+      setImportPreview({ fileName: file.name, headers: parsed.headers, rows: parsed.rows });
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Failed to parse CSV file.");
+    }
+  };
+
+  const confirmCsvImport = () => {
+    if (!importPreview) return;
+
+    if (importTarget === "my-customers") {
+      const imported = importPreview.rows.map(rowToCustomer).filter(Boolean) as Customer[];
+      const existing = getCustomers();
+      const existingKeys = new Set(existing.map((item) => `${item.name}|${item.contact}`.toLowerCase()));
+      const unique = imported.filter((item) => {
+        const key = `${item.name}|${item.contact}`.toLowerCase();
+        if (existingKeys.has(key)) return false;
+        existingKeys.add(key);
+        return true;
+      });
+      saveCustomers([...unique, ...existing]);
+      setCustomers(getCustomers());
+      notify(`Imported ${unique.length} customer(s). ${imported.length - unique.length} duplicate row(s) skipped.`, "success", "CSV import complete");
+    } else {
+      const imported = importPreview.rows.map(rowToPublicLead).filter(Boolean) as PublicLead[];
+      const existing = getPublicLeads();
+      const existingKeys = new Set(existing.map((item) => `${item.source}|${item.name}|${item.contact}`.toLowerCase()));
+      const unique = imported.filter((item) => {
+        const key = `${item.source}|${item.name}|${item.contact}`.toLowerCase();
+        if (existingKeys.has(key)) return false;
+        existingKeys.add(key);
+        return true;
+      });
+      savePublicLeads([...unique, ...existing]);
+      setPublicLeads(getPublicLeads());
+      notify(`Imported ${unique.length} public lead(s). ${imported.length - unique.length} duplicate row(s) skipped.`, "success", "CSV import complete");
+    }
+
+    setIsImportOpen(false);
+    setImportPreview(null);
   };
 
   const handleEdit = (customer: Customer) => {
@@ -551,6 +774,15 @@ export default function Customers() {
               )}
             </button>
           </div>
+          {!isModalOpen && (
+            <button
+              onClick={() => openImport(activeTab)}
+              className="border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm"
+            >
+              <Upload className="w-4 h-4" />
+              Import CSV
+            </button>
+          )}
           {!isModalOpen && activeTab === "my-customers" && (
             <button
               onClick={handleAdd}
@@ -890,6 +1122,110 @@ export default function Customers() {
             onSave={handleSaveCustomer}
             onClose={() => setIsModalOpen(false)}
           />
+        )}
+
+        {isImportOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+            <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-slate-900 flex flex-col">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6 dark:border-white/10">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Upload className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                      Import CSV to {importTarget === "my-customers" ? "My Customers" : "Public Pool"}
+                    </h2>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    Supported columns include company/name, contact, email, phone, website, industry, address/location, tags, score, intent, risk, and notes.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsImportOpen(false)}
+                  className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-white/5 dark:hover:text-slate-300"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-5">
+                <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-6 py-8 text-center transition-colors hover:border-blue-400 hover:bg-blue-50/40 dark:border-white/10 dark:bg-black/20 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10">
+                  <Upload className="mb-3 h-8 w-8 text-slate-400" />
+                  <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                    Choose a CSV file
+                  </span>
+                  <span className="mt-1 text-xs text-slate-500">
+                    First row must contain column headers.
+                  </span>
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(event) => handleCsvFile(event.target.files?.[0])}
+                  />
+                </label>
+
+                {importError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+                    {importError}
+                  </div>
+                )}
+
+                {importPreview && (
+                  <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
+                    <div className="flex flex-col gap-1 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-black/20">
+                      <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                        {importPreview.fileName}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {importPreview.rows.length} rows detected. Previewing first 5 rows.
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-white dark:bg-black/30">
+                          <tr>
+                            {(importPreview.headers.length ? importPreview.headers : ["name", "contact"]).slice(0, 8).map((header) => (
+                              <th key={header} className="px-4 py-3 font-semibold uppercase tracking-wider text-slate-400">
+                                {header}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                          {importPreview.rows.slice(0, 5).map((row, index) => (
+                            <tr key={index}>
+                              {(importPreview.headers.length ? importPreview.headers : Object.keys(row)).slice(0, 8).map((header) => (
+                                <td key={header} className="max-w-[180px] truncate px-4 py-3 text-slate-600 dark:text-slate-300">
+                                  {row[header] || "-"}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 p-6 dark:border-white/10 dark:bg-black/20">
+                <button
+                  onClick={() => setIsImportOpen(false)}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmCsvImport}
+                  disabled={!importPreview}
+                  className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Upload className="h-4 w-4" />
+                  Import CSV
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         <ConfirmModal
