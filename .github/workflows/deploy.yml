@@ -103,7 +103,7 @@ jobs:
               exit 1
             fi
 
-            if ! grep -R "imap-sync-v4-fast-fail" dist/server.cjs >/dev/null 2>&1; then
+            if ! grep -R "imap-sync-v5-security-inference" dist/server.cjs >/dev/null 2>&1; then
               echo "Current IMAP sync backend version was not found in dist/server.cjs. Aborting deploy."
               exit 1
             fi

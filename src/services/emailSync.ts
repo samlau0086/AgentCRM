@@ -45,7 +45,16 @@ export interface EmailMapping {
 export function getReceiveProfiles(): ReceiveProfile[] {
   try {
     const data = localStorage.getItem('receive_profiles');
-    if (data) return JSON.parse(data);
+    if (data) {
+      const profiles = JSON.parse(data);
+      if (Array.isArray(profiles)) {
+        return profiles.map((profile) => ({
+          ...profile,
+          imapSecurity: profile.imapSecurity || (profile.imapPort === '143' ? 'starttls' : 'ssl'),
+          imapRejectUnauthorized: profile.imapRejectUnauthorized !== false,
+        }));
+      }
+    }
   } catch (e) {}
   return [];
 }
@@ -57,7 +66,16 @@ export function saveReceiveProfiles(profiles: ReceiveProfile[]) {
 export function getSendProfiles(): SendProfile[] {
   try {
     const data = localStorage.getItem('send_profiles');
-    if (data) return JSON.parse(data);
+    if (data) {
+      const profiles = JSON.parse(data);
+      if (Array.isArray(profiles)) {
+        return profiles.map((profile) => ({
+          ...profile,
+          smtpSecurity: profile.smtpSecurity || (profile.smtpPort === '587' ? 'starttls' : 'ssl'),
+          smtpRejectUnauthorized: profile.smtpRejectUnauthorized !== false,
+        }));
+      }
+    }
   } catch (e) {}
   return [];
 }

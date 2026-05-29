@@ -553,10 +553,17 @@ type MailSocket = net.Socket | tls.TLSSocket;
 
 const MAIL_CONNECT_TIMEOUT_MS = 8000;
 const MAIL_RESPONSE_TIMEOUT_MS = 8000;
-const IMAP_SYNC_VERSION = "imap-sync-v4-fast-fail";
+const IMAP_SYNC_VERSION = "imap-sync-v5-security-inference";
 
 function escapeImapString(value: string) {
   return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function normalizeMailSecurity(security: unknown, port: number): MailSecurity {
+  if (security === "ssl" || security === "starttls" || security === "none") return security;
+  if (port === 993 || port === 465) return "ssl";
+  if (port === 143 || port === 587) return "starttls";
+  return "ssl";
 }
 
 function connectMailSocket(options: {
@@ -689,17 +696,18 @@ app.post("/api/email/test-imap", async (req, res) => {
   let socket: MailSocket | undefined;
   try {
     const port = assertMailConfig(imapHost || "", imapPort, imapUser, imapPass);
+    const security = normalizeMailSecurity(imapSecurity, port);
     socket = await connectMailSocket({
       host: imapHost!,
       port,
-      secure: imapSecurity === "ssl",
+      secure: security === "ssl",
       rejectUnauthorized: imapRejectUnauthorized !== false,
     });
     let readLine = createLineReader(socket);
     const greeting = await readLine();
     if (!/^\* OK/i.test(greeting)) throw new Error(`Unexpected IMAP greeting: ${greeting}`);
 
-    if (imapSecurity === "starttls") {
+    if (security === "starttls") {
       writeLine(socket, "a001 STARTTLS");
       const startTlsLine = await readLine();
       if (!/^a001 OK/i.test(startTlsLine)) throw new Error(`IMAP STARTTLS failed: ${startTlsLine}`);
@@ -760,17 +768,18 @@ function parseFetchedHeaderBlocks(lines: string[]) {
 
 async function openImapSession(profile: any) {
   const port = assertMailConfig(profile.imapHost || "", profile.imapPort, profile.imapUser, profile.imapPass);
+  const security = normalizeMailSecurity(profile.imapSecurity, port);
   let socket = await connectMailSocket({
     host: profile.imapHost,
     port,
-    secure: profile.imapSecurity === "ssl",
+    secure: security === "ssl",
     rejectUnauthorized: profile.imapRejectUnauthorized !== false,
   });
   let readLine = createLineReader(socket);
   const greeting = await readLine("IMAP greeting");
   if (!/^\* OK/i.test(greeting)) throw new Error(`Unexpected IMAP greeting from ${profile.name || profile.imapHost}: ${greeting}`);
 
-  if (profile.imapSecurity === "starttls") {
+  if (security === "starttls") {
     writeLine(socket, "a001 STARTTLS");
     const startTlsLine = await readLine("IMAP STARTTLS response");
     if (!/^a001 OK/i.test(startTlsLine)) throw new Error(`IMAP STARTTLS failed: ${startTlsLine}`);
