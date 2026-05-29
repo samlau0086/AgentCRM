@@ -551,9 +551,9 @@ type MailSecurity = "ssl" | "starttls" | "none";
 
 type MailSocket = net.Socket | tls.TLSSocket;
 
-const MAIL_CONNECT_TIMEOUT_MS = 30000;
-const MAIL_RESPONSE_TIMEOUT_MS = 60000;
-const IMAP_SYNC_VERSION = "imap-sync-v3-batched-fetch";
+const MAIL_CONNECT_TIMEOUT_MS = 8000;
+const MAIL_RESPONSE_TIMEOUT_MS = 8000;
+const IMAP_SYNC_VERSION = "imap-sync-v4-fast-fail";
 
 function escapeImapString(value: string) {
   return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;

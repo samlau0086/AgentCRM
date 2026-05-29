@@ -89,11 +89,14 @@ export async function fetchEmails(): Promise<EmailMessage[]> {
   const response = await fetch('/api/email/sync-imap', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mappings, receiveProfiles, limit: 25 }),
+    body: JSON.stringify({ mappings, receiveProfiles, limit: 10 }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const version = data.syncVersion || 'legacy';
+    if ((response.status === 504 || response.status === 520) && !data.syncVersion) {
+      throw new Error(`IMAP sync reached the gateway before the app returned a JSON response (HTTP ${response.status}). The deployed backend is still slow or an old PM2 process is serving this route.`);
+    }
+    const version = data.syncVersion || 'unknown';
     throw new Error(`${data.error || `IMAP sync failed with HTTP ${response.status}.`} Backend sync version: ${version}.`);
   }
   return Array.isArray(data.emails) ? data.emails : [];
