@@ -1408,19 +1408,87 @@ app.post("/api/ai/draft-reply", async (req, res) => {
   }
 });
 
+app.get("/api/ai/inbox-insights/:messageId", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const insight = await getRecord("inbox_ai_insights", req.params.messageId);
+    res.json({ insight: insight || null });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to load inbox AI analysis: ${err.message}` });
+  }
+});
+
+app.delete("/api/ai/inbox-insights/:messageId", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    await deleteRecord("inbox_ai_insights", req.params.messageId);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to delete inbox AI analysis: ${err.message}` });
+  }
+});
+
+function inboxSenderPrefId(sender: string) {
+  return Buffer.from(String(sender || "").trim().toLowerCase()).toString("base64url").slice(0, 100);
+}
+
+app.get("/api/ai/inbox-sender-analysis-pref", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  const sender = String(req.query.sender || "").trim();
+  if (!sender) return res.status(400).json({ error: "sender is required." });
+  try {
+    const preference = await getRecord("inbox_ai_sender_prefs", inboxSenderPrefId(sender));
+    res.json({ preference: preference || null });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to load sender analysis preference: ${err.message}` });
+  }
+});
+
+app.post("/api/ai/inbox-sender-analysis-pref", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  const sender = String(req.body.sender || "").trim();
+  const mode = req.body.mode === "manual" ? "manual" : "auto";
+  if (!sender) return res.status(400).json({ error: "sender is required." });
+  try {
+    const preference = {
+      id: inboxSenderPrefId(sender),
+      sender,
+      mode,
+      updatedAt: new Date().toISOString(),
+    };
+    await upsertRecord("inbox_ai_sender_prefs", preference.id, preference);
+    res.json({ preference });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to save sender analysis preference: ${err.message}` });
+  }
+});
+
 app.post("/api/ai/inbox-insights", async (req, res) => {
   const {
+    messageId = "",
     subject = "",
     sender = "",
     channel = "Email",
     message = "",
     systemLanguage = "en",
     modelProfile = {},
+    force = false,
   } = req.body;
-  const profile = requireModelProfile(modelProfile, res);
-  if (!profile) return;
+  if (!requireDatabase(res)) return;
+  const insightId = String(messageId || "").trim();
+  if (!insightId) {
+    return res.status(400).json({ error: "messageId is required for inbox AI analysis." });
+  }
 
   try {
+    if (!force) {
+      const existing = await getRecord("inbox_ai_insights", insightId);
+      if (existing) return res.json(existing);
+    }
+
+    const profile = requireModelProfile(modelProfile, res);
+    if (!profile) return;
+
     const prompt = `Analyze this CRM inbox conversation using the actual message content.
 
 Channel: ${channel}
@@ -1445,7 +1513,8 @@ Write all human-facing values in this language: ${systemLanguage}. Do not invent
       prompt,
     );
     const data = parseAiJson(text);
-    res.json({
+    const insight = {
+      id: insightId,
       intent: String(data.intent || "General inquiry"),
       priority: ["low", "medium", "high"].includes(String(data.priority)) ? data.priority : "medium",
       risk: String(data.risk || "No clear risk detected."),
@@ -1454,7 +1523,10 @@ Write all human-facing values in this language: ${systemLanguage}. Do not invent
       replyGuidance: Array.isArray(data.replyGuidance) ? data.replyGuidance.map(String).slice(0, 4) : [],
       model: profile.model,
       provider: profile.provider,
-    });
+      analyzedAt: new Date().toISOString(),
+    };
+    await upsertRecord("inbox_ai_insights", insightId, insight);
+    res.json(insight);
   } catch (err: any) {
     res.status(500).json({ error: `Inbox AI analysis failed: ${err.message}` });
   }

@@ -51,6 +51,31 @@ interface InboxInsight {
   replyGuidance: string[];
   model?: string;
   provider?: string;
+  analyzedAt?: string;
+}
+
+type SenderAnalysisMode = "auto" | "manual";
+
+interface SenderAnalysisPreference {
+  sender: string;
+  mode: SenderAnalysisMode;
+  updatedAt?: string;
+}
+
+const INBOX_INSIGHTS_KEY = "crm_inbox_ai_insights";
+const SENDER_ANALYSIS_PREFS_KEY = "crm_inbox_sender_analysis_prefs";
+
+function loadJsonMap<T>(key: string): Record<string, T> {
+  try {
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : {};
+  } catch {
+    return {};
+  }
+}
+
+function senderPreferenceKey(sender = "") {
+  return sender.trim().toLowerCase() || "unknown";
 }
 
 export default function Inbox() {
@@ -191,9 +216,14 @@ export default function Inbox() {
     null,
   );
   const [isSyncing, setIsSyncing] = useState(false);
-  const [inboxInsights, setInboxInsights] = useState<Record<string, InboxInsight>>({});
+  const [inboxInsights, setInboxInsights] = useState<Record<string, InboxInsight>>(() => loadJsonMap<InboxInsight>(INBOX_INSIGHTS_KEY));
   const [insightErrors, setInsightErrors] = useState<Record<string, string>>({});
   const [analyzingMessageId, setAnalyzingMessageId] = useState<string | null>(null);
+  const [loadingInsightId, setLoadingInsightId] = useState<string | null>(null);
+  const [checkedInsightIds, setCheckedInsightIds] = useState<Set<string>>(() => new Set());
+  const [senderAnalysisPrefs, setSenderAnalysisPrefs] = useState<Record<string, SenderAnalysisPreference>>(() => loadJsonMap<SenderAnalysisPreference>(SENDER_ANALYSIS_PREFS_KEY));
+  const [checkedSenderPrefKeys, setCheckedSenderPrefKeys] = useState<Set<string>>(() => new Set());
+  const [loadingSenderPrefKey, setLoadingSenderPrefKey] = useState<string | null>(null);
 
   const syncInboxMessages = async (silent = false) => {
     if (!silent) setIsSyncing(true);
@@ -358,46 +388,136 @@ export default function Inbox() {
   }, [activeMessage?.thread]);
 
   useEffect(() => {
-    if (!activeMessage) return;
-    const latest = activeMessage.thread[activeMessage.thread.length - 1];
-    if (!latest || latest.sender !== "user" || inboxInsights[activeMessage.id] || analyzingMessageId === activeMessage.id) return;
+    localStorage.setItem(INBOX_INSIGHTS_KEY, JSON.stringify(inboxInsights));
+  }, [inboxInsights]);
 
-    const analyze = async () => {
-      setAnalyzingMessageId(activeMessage.id);
-      setInsightErrors((prev) => {
-        const next = { ...prev };
-        delete next[activeMessage.id];
-        return next;
-      });
+  useEffect(() => {
+    localStorage.setItem(SENDER_ANALYSIS_PREFS_KEY, JSON.stringify(senderAnalysisPrefs));
+  }, [senderAnalysisPrefs]);
+
+  useEffect(() => {
+    if (!activeMessage) return;
+    const key = senderPreferenceKey(activeMessage.sender);
+    if (senderAnalysisPrefs[key] || checkedSenderPrefKeys.has(key) || loadingSenderPrefKey === key) return;
+    const loadSenderPreference = async () => {
+      setLoadingSenderPrefKey(key);
       try {
-        const modelProfile = getModelProfiles()[0];
-        const res = await fetch("/api/ai/inbox-insights", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            subject: activeMessage.subject,
-            sender: activeMessage.sender,
-            channel: activeMessage.channel,
-            message: activeMessage.summary,
-            systemLanguage: language,
-            modelProfile,
-          }),
-        });
+        const res = await fetch(`/api/ai/inbox-sender-analysis-pref?sender=${encodeURIComponent(activeMessage.sender)}`);
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `AI analysis failed with HTTP ${res.status}.`);
-        setInboxInsights((prev) => ({ ...prev, [activeMessage.id]: data }));
+        if (res.ok && data.preference) {
+          setSenderAnalysisPrefs((prev) => ({ ...prev, [key]: data.preference }));
+        }
       } catch (err) {
-        setInsightErrors((prev) => ({
-          ...prev,
-          [activeMessage.id]: err instanceof Error ? err.message : "AI analysis failed.",
-        }));
+        console.warn("Failed to load sender analysis preference", err);
       } finally {
-        setAnalyzingMessageId((current) => current === activeMessage.id ? null : current);
+        setCheckedSenderPrefKeys((prev) => new Set(prev).add(key));
+        setLoadingSenderPrefKey((current) => current === key ? null : current);
       }
     };
+    loadSenderPreference();
+  }, [activeMessage?.sender, checkedSenderPrefKeys, loadingSenderPrefKey, senderAnalysisPrefs]);
 
-    analyze();
-  }, [activeMessage?.id, activeMessage?.summary, activeMessage?.subject, language]);
+  async function handleAnalyzeInboxMessage(force = false, targetMessage = activeMessage) {
+    if (!targetMessage) return;
+    if (!force && inboxInsights[targetMessage.id]) return;
+    const messageId = targetMessage.id;
+    setAnalyzingMessageId(messageId);
+    setInsightErrors((prev) => {
+      const next = { ...prev };
+      delete next[messageId];
+      return next;
+    });
+    try {
+      const modelProfile = getModelProfiles()[0];
+      const res = await fetch("/api/ai/inbox-insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messageId,
+          subject: targetMessage.subject,
+          sender: targetMessage.sender,
+          channel: targetMessage.channel,
+          message: targetMessage.summary,
+          systemLanguage: language,
+          modelProfile,
+          force,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `AI analysis failed with HTTP ${res.status}.`);
+      setInboxInsights((prev) => ({ ...prev, [messageId]: data }));
+      setCheckedInsightIds((prev) => new Set(prev).add(messageId));
+    } catch (err) {
+      setInsightErrors((prev) => ({
+        ...prev,
+        [messageId]: err instanceof Error ? err.message : "AI analysis failed.",
+      }));
+      setCheckedInsightIds((prev) => new Set(prev).add(messageId));
+    } finally {
+      setAnalyzingMessageId((current) => current === messageId ? null : current);
+    }
+  }
+
+  useEffect(() => {
+    if (
+      !activeMessage ||
+      inboxInsights[activeMessage.id] ||
+      checkedInsightIds.has(activeMessage.id) ||
+      loadingInsightId === activeMessage.id
+    ) return;
+    const messageId = activeMessage.id;
+    const senderKey = senderPreferenceKey(activeMessage.sender);
+    if (!senderAnalysisPrefs[senderKey] && !checkedSenderPrefKeys.has(senderKey)) return;
+    const senderMode = senderAnalysisPrefs[senderKey]?.mode || "auto";
+    const loadPersistedInsight = async () => {
+      setLoadingInsightId(messageId);
+      try {
+        const res = await fetch(`/api/ai/inbox-insights/${encodeURIComponent(messageId)}`);
+        if (res.status === 404) return;
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.insight) {
+          setInboxInsights((prev) => ({ ...prev, [messageId]: data.insight }));
+        } else if (senderMode === "auto") {
+          await handleAnalyzeInboxMessage(false, activeMessage);
+        }
+      } catch (err) {
+        console.warn("Failed to load persisted inbox insight", err);
+      } finally {
+        setCheckedInsightIds((prev) => new Set(prev).add(messageId));
+        setLoadingInsightId((current) => current === messageId ? null : current);
+      }
+    };
+    loadPersistedInsight();
+  }, [activeMessage?.id, checkedInsightIds, checkedSenderPrefKeys, inboxInsights, loadingInsightId, senderAnalysisPrefs]);
+
+  const updateSenderAnalysisMode = async (sender: string, mode: SenderAnalysisMode) => {
+    const key = senderPreferenceKey(sender);
+    const preference = { sender, mode, updatedAt: new Date().toISOString() };
+    setSenderAnalysisPrefs((prev) => ({ ...prev, [key]: preference }));
+    setCheckedSenderPrefKeys((prev) => new Set(prev).add(key));
+    try {
+      const res = await fetch("/api/ai/inbox-sender-analysis-pref", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sender, mode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed to save sender preference with HTTP ${res.status}.`);
+      if (data.preference) {
+        setSenderAnalysisPrefs((prev) => ({ ...prev, [key]: data.preference }));
+      }
+      if (mode === "auto" && activeMessage && senderPreferenceKey(activeMessage.sender) === key && !inboxInsights[activeMessage.id]) {
+        setCheckedInsightIds((prev) => {
+          const next = new Set(prev);
+          next.delete(activeMessage.id);
+          return next;
+        });
+        await handleAnalyzeInboxMessage(false, activeMessage);
+      }
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to save sender analysis preference.", "error", "Preference save failed");
+    }
+  };
 
   const setScheduleDefaults = () => {
     setReplyScheduleDate("");
@@ -498,6 +618,24 @@ export default function Inbox() {
       delete next[deletingMessageId];
       return next;
     });
+    setInboxInsights((prev) => {
+      const next = { ...prev };
+      delete next[deletingMessageId];
+      return next;
+    });
+    setInsightErrors((prev) => {
+      const next = { ...prev };
+      delete next[deletingMessageId];
+      return next;
+    });
+    setCheckedInsightIds((prev) => {
+      const next = new Set(prev);
+      next.delete(deletingMessageId);
+      return next;
+    });
+    fetch(`/api/ai/inbox-insights/${encodeURIComponent(deletingMessageId)}`, {
+      method: "DELETE",
+    }).catch(console.error);
 
     if (activeMessageId === deletingMessageId) {
       setActiveMessageId(nextMessages[0]?.id || "");
@@ -1165,10 +1303,42 @@ export default function Inbox() {
                     .sender === "user" && (
                     <div className="max-w-[85%] mt-6">
                       <div className="bg-blue-50/80 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/20 rounded-xl p-5 shadow-sm">
-                        <h3 className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest flex items-center gap-2 mb-3">
-                          <Bot className="w-4 h-4 text-blue-500" />
-                          {t("inbox.aiInsights")}
-                        </h3>
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                          <h3 className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest flex items-center gap-2">
+                            <Bot className="w-4 h-4 text-blue-500" />
+                            {t("inbox.aiInsights")}
+                          </h3>
+                          <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleAnalyzeInboxMessage(Boolean(inboxInsights[activeMessage.id]))}
+                            disabled={analyzingMessageId === activeMessage.id}
+                            className="px-3 py-1.5 bg-white dark:bg-white/5 border border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-400 rounded-lg text-xs font-medium hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
+                          >
+                            {analyzingMessageId === activeMessage.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Sparkles className="w-3.5 h-3.5" />
+                            )}
+                            {inboxInsights[activeMessage.id]
+                              ? language === "zh" ? "重新分析" : "Reanalyze"
+                              : language === "zh" ? "分析" : "Analyze"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const key = senderPreferenceKey(activeMessage.sender);
+                              const currentMode = senderAnalysisPrefs[key]?.mode || "auto";
+                              updateSenderAnalysisMode(activeMessage.sender, currentMode === "auto" ? "manual" : "auto");
+                            }}
+                            className="px-3 py-1.5 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-medium hover:bg-slate-50 dark:hover:bg-white/10 transition-colors shadow-sm"
+                          >
+                            {(senderAnalysisPrefs[senderPreferenceKey(activeMessage.sender)]?.mode || "auto") === "auto"
+                              ? language === "zh" ? "发件人：自动分析" : "Sender: Auto"
+                              : language === "zh" ? "发件人：手动分析" : "Sender: Manual"}
+                          </button>
+                          </div>
+                        </div>
                         {analyzingMessageId === activeMessage.id ? (
                           <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                             <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
@@ -1219,7 +1389,13 @@ export default function Inbox() {
                               </div>
                             )}
                           </div>
-                        ) : null}
+                        ) : (
+                          <div className="text-sm text-slate-600 dark:text-slate-300">
+                            {language === "zh"
+                              ? "点击分析按钮后，系统会使用已配置的模型分析当前消息。"
+                              : "Click Analyze to run the configured model on this message."}
+                          </div>
+                        )}
                         <div className="mt-4 pt-4 border-t border-blue-200 dark:border-blue-500/10">
                           <button
                             onClick={handleDraftAIReply}
