@@ -54,6 +54,18 @@ const defaultBaseUrlByProvider: Partial<Record<ModelProfile['provider'], string>
   openrouter: 'https://openrouter.ai/api/v1'
 };
 
+const defaultImapPortBySecurity: Record<NonNullable<ReceiveProfile['imapSecurity']>, string> = {
+  ssl: '993',
+  starttls: '143',
+  none: '143',
+};
+
+const defaultSmtpPortBySecurity: Record<NonNullable<SendProfile['smtpSecurity']>, string> = {
+  ssl: '465',
+  starttls: '587',
+  none: '25',
+};
+
 const leadGenerationPlatforms: LeadPlatform[] = [
   { id: 'outscraper', name: 'Outscraper', desc: 'Google Maps scraping', defaultBaseUrl: 'https://api.outscraper.cloud', helpText: 'Use an OutScraper API key with Google Maps Search or Places endpoints.' },
   { id: 'apify', name: 'Apify', desc: 'Web scraping & automation', defaultBaseUrl: 'https://api.apify.com/v2', helpText: 'Use an Apify token to run actors for prospect discovery and enrichment.' },
@@ -305,6 +317,22 @@ export default function Settings() {
       resendApiKey: '',
       fromAddress: ''
     }]);
+  };
+
+  const updateReceiveSecurity = (profileId: string, security: NonNullable<ReceiveProfile['imapSecurity']>) => {
+    setReceiveProfiles(receiveProfiles.map(profile =>
+      profile.id === profileId
+        ? { ...profile, imapSecurity: security, imapPort: defaultImapPortBySecurity[security] }
+        : profile,
+    ));
+  };
+
+  const updateSendSecurity = (profileId: string, security: NonNullable<SendProfile['smtpSecurity']>) => {
+    setSendProfiles(sendProfiles.map(profile =>
+      profile.id === profileId
+        ? { ...profile, smtpSecurity: security, smtpPort: defaultSmtpPortBySecurity[security] }
+        : profile,
+    ));
   };
 
   const addEmailMapping = () => {
@@ -659,7 +687,7 @@ export default function Settings() {
                       </div>
                       <div>
                         <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Security</label>
-                        <select value={profile.imapSecurity || 'ssl'} onChange={e => setReceiveProfiles(receiveProfiles.map(p => p.id === profile.id ? { ...p, imapSecurity: e.target.value as ReceiveProfile['imapSecurity'] } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500">
+                        <select value={profile.imapSecurity || 'ssl'} onChange={e => updateReceiveSecurity(profile.id, e.target.value as NonNullable<ReceiveProfile['imapSecurity']>)} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500">
                           <option value="ssl">SSL / TLS</option>
                           <option value="starttls">STARTTLS</option>
                           <option value="none">None</option>
@@ -744,7 +772,7 @@ export default function Settings() {
                         </div>
                         <div>
                           <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">Security</label>
-                          <select value={profile.smtpSecurity || 'ssl'} onChange={e => setSendProfiles(sendProfiles.map(p => p.id === profile.id ? { ...p, smtpSecurity: e.target.value as SendProfile['smtpSecurity'] } : p))} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500">
+                          <select value={profile.smtpSecurity || 'ssl'} onChange={e => updateSendSecurity(profile.id, e.target.value as NonNullable<SendProfile['smtpSecurity']>)} className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500">
                             <option value="ssl">SSL / TLS</option>
                             <option value="starttls">STARTTLS</option>
                             <option value="none">None</option>
