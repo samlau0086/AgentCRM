@@ -25,7 +25,7 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useLanguage } from "./i18n";
 import { useTheme } from "./theme";
-import { getAgentApprovals, getCurrentUser, getInboxMessages } from "./services/db";
+import { getCurrentUser } from "./services/db";
 import { AppNotification } from "./services/notifications";
 
 export function cn(...inputs: ClassValue[]) {
@@ -37,33 +37,22 @@ export default function Layout() {
   const { theme, toggleTheme } = useTheme();
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [inboxCount, setInboxCount] = useState(0);
-  const [pendingAgentCount, setPendingAgentCount] = useState(0);
   const [toasts, setToasts] = useState<AppNotification[]>([]);
   const notificationRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   const currentUser = getCurrentUser();
 
-  const refreshNavCounts = () => {
-    setInboxCount(getInboxMessages().length);
-    setPendingAgentCount(
-      getAgentApprovals().filter((approval) => approval.status === "Pending")
-        .length,
-    );
-  };
-
   const navigation = [
     { name: t("nav.dashboard"), href: "/", icon: LayoutDashboard },
     { name: t("nav.customers"), href: "/customers", icon: Users },
     { name: t("nav.sales"), href: "/sales", icon: Receipt },
     { name: t("nav.media"), href: "/media", icon: Film },
-    { name: t("nav.inbox"), href: "/inbox", icon: InboxIcon, badge: inboxCount },
+    { name: t("nav.inbox"), href: "/inbox", icon: InboxIcon },
     {
       name: t("nav.agentCenter"),
       href: "/agent-center",
       icon: Bot,
-      badge: pendingAgentCount,
     },
     { name: t("nav.knowledge"), href: "/knowledge", icon: BookOpen },
     ...(currentUser.role === "superadmin"
@@ -115,19 +104,6 @@ export default function Layout() {
 
     window.addEventListener("crm:notify", handleNotify);
     return () => window.removeEventListener("crm:notify", handleNotify);
-  }, []);
-
-  useEffect(() => {
-    refreshNavCounts();
-
-    const handleDataChanged = () => refreshNavCounts();
-    window.addEventListener("storage", handleDataChanged);
-    window.addEventListener("crm:data-changed", handleDataChanged);
-
-    return () => {
-      window.removeEventListener("storage", handleDataChanged);
-      window.removeEventListener("crm:data-changed", handleDataChanged);
-    };
   }, []);
 
   const toastStyles = {
@@ -202,11 +178,6 @@ export default function Layout() {
                 aria-hidden="true"
               />
               <span className="flex-1">{item.name}</span>
-              {item.badge && (
-                <span className="bg-blue-100 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 py-0.5 px-2 rounded-full text-[10px] font-mono">
-                  {item.badge}
-                </span>
-              )}
             </NavLink>
           ))}
         </nav>

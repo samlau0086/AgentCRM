@@ -294,6 +294,15 @@ export default function Inbox() {
     setActiveTab("compose");
   };
 
+  const handleCancelCompose = () => {
+    const originalMessageId = composeOriginalMessage?.id;
+    resetCompose();
+    setActiveTab("inbox");
+    if (originalMessageId) {
+      setActiveMessageId(originalMessageId);
+    }
+  };
+
   const [messages, setMessages] = useState<MessagePreview[]>([]);
   const [activeMessageId, setActiveMessageId] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -1071,21 +1080,6 @@ export default function Inbox() {
                   </div>
                 )}
               </div>
-              {composeOriginalMessage && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
-                  <div className="mb-2 font-semibold text-slate-800 dark:text-slate-100">Original email</div>
-                  <div className="mb-1">From: {composeOriginalMessage.sender}</div>
-                  <div className="mb-1">To: {composeOriginalMessage.target}</div>
-                  <div className="mb-3">Subject: {composeOriginalMessage.subject}</div>
-                  <div className="max-h-56 overflow-y-auto rounded-lg bg-white p-3 dark:bg-black/20">
-                    {composeOriginalMessage.thread?.[0]?.htmlContent ? (
-                      <iframe title="original-email" sandbox="" srcDoc={composeOriginalMessage.thread[0].htmlContent} className="h-48 w-full rounded bg-white" />
-                    ) : (
-                      <p className="whitespace-pre-wrap">{composeOriginalMessage.thread?.[0]?.content || composeOriginalMessage.summary}</p>
-                    )}
-                  </div>
-                </div>
-              )}
               <div className="flex items-center gap-4">
                 <label className="w-16 shrink-0 text-sm font-medium text-slate-700 dark:text-slate-300">
                   Subject
@@ -1112,7 +1106,7 @@ export default function Inbox() {
                 <label className="w-16 shrink-0 mt-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                   Signature
                 </label>
-                <div className="flex-1 grid grid-cols-1 gap-3">
+                <div className="flex-1">
                   <select
                     value={composeSignatureId}
                     onChange={(e) => {
@@ -1128,12 +1122,6 @@ export default function Inbox() {
                       <option key={signature.id} value={signature.id}>{signature.name}</option>
                     ))}
                   </select>
-                  <RichTextEditor
-                    value={composeSignatureHtml}
-                    onChange={setComposeSignatureHtml}
-                    placeholder="Edit signature for this email..."
-                    className="min-h-[120px]"
-                  />
                 </div>
                 <div className="w-[52px]"></div>
               </div>
@@ -1199,6 +1187,21 @@ export default function Inbox() {
                   />
                 </div>
               </div>
+              {composeOriginalMessage && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                  <div className="mb-2 font-semibold text-slate-800 dark:text-slate-100">Original email</div>
+                  <div className="mb-1">From: {composeOriginalMessage.sender}</div>
+                  <div className="mb-1">To: {composeOriginalMessage.target}</div>
+                  <div className="mb-3">Subject: {composeOriginalMessage.subject}</div>
+                  <div className="max-h-56 overflow-y-auto rounded-lg bg-white p-3 dark:bg-black/20">
+                    {composeOriginalMessage.thread?.[0]?.htmlContent ? (
+                      <iframe title="original-email" sandbox="" srcDoc={composeOriginalMessage.thread[0].htmlContent} className="h-48 w-full rounded bg-white" />
+                    ) : (
+                      <p className="whitespace-pre-wrap">{composeOriginalMessage.thread?.[0]?.content || composeOriginalMessage.summary}</p>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="pt-4 flex justify-between items-center border-t border-slate-200 dark:border-white/10 mt-6">
                 <div className="flex gap-2 items-center">
                   <button
@@ -1232,10 +1235,10 @@ export default function Inbox() {
                 </div>
                 <div className="flex gap-3">
                   <button
-                    onClick={resetCompose}
+                    onClick={handleCancelCompose}
                     className="px-6 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-colors border border-transparent"
                   >
-                    Clear
+                    Cancel
                   </button>
                   <button
                     onClick={handleComposeSend}
