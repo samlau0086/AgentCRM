@@ -553,7 +553,7 @@ type MailSocket = net.Socket | tls.TLSSocket;
 
 const MAIL_CONNECT_TIMEOUT_MS = 8000;
 const MAIL_RESPONSE_TIMEOUT_MS = 8000;
-const IMAP_SYNC_VERSION = "imap-sync-v5-security-inference";
+const IMAP_SYNC_VERSION = "imap-sync-v6-body-preview";
 
 function escapeImapString(value: string) {
   return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -758,6 +758,20 @@ function decodeQuotedPrintableWord(value: string) {
   return Buffer.from(bytes);
 }
 
+function decodeQuotedPrintableText(value: string) {
+  const normalized = value.replace(/=\r?\n/g, "");
+  const bytes: number[] = [];
+  for (let index = 0; index < normalized.length; index += 1) {
+    if (normalized[index] === "=" && /^[0-9a-f]{2}$/i.test(normalized.slice(index + 1, index + 3))) {
+      bytes.push(parseInt(normalized.slice(index + 1, index + 3), 16));
+      index += 2;
+      continue;
+    }
+    bytes.push(normalized.charCodeAt(index));
+  }
+  return Buffer.from(bytes);
+}
+
 function decodeMimeHeader(value = "") {
   return value
     .replace(/(\?=)\s+(=\?)/g, "$1$2")
@@ -785,10 +799,62 @@ function parseHeaderBlock(lines: string[]) {
     const separator = line.indexOf(":");
     if (separator > 0) {
       current = line.slice(0, separator).toLowerCase();
-      headers[current] = decodeMimeHeader(line.slice(separator + 1).trim());
+      headers[current] = line.slice(separator + 1).trim();
     }
   }
+  for (const [key, value] of Object.entries(headers)) {
+    headers[key] = decodeMimeHeader(value);
+  }
   return headers;
+}
+
+function extractFetchedBodyLines(lines: string[]) {
+  const startIndex = lines.findIndex((line) => /BODY\[(?:TEXT|1(?:\.TEXT)?)\]/i.test(line));
+  if (startIndex === -1) return [];
+  const bodyLines: string[] = [];
+  for (const line of lines.slice(startIndex + 1)) {
+    if (line === ")" || /^[a-z]\d+\s/i.test(line)) break;
+    bodyLines.push(line);
+  }
+  return bodyLines;
+}
+
+function decodeEmailBody(headers: Record<string, string>, lines: string[]) {
+  const rawBody = lines.join("\n").trim();
+  if (!rawBody) return "";
+  const contentType = headers["content-type"] || "";
+  const transferEncoding = (headers["content-transfer-encoding"] || "").toLowerCase();
+  const charset = contentType.match(/charset="?([^";\s]+)"?/i)?.[1] || "utf-8";
+
+  let text = rawBody;
+  try {
+    if (transferEncoding.includes("base64")) {
+      text = decodeHeaderBuffer(Buffer.from(rawBody.replace(/\s+/g, ""), "base64"), charset);
+    } else if (transferEncoding.includes("quoted-printable")) {
+      text = decodeHeaderBuffer(decodeQuotedPrintableText(rawBody), charset);
+    } else {
+      text = decodeHeaderBuffer(Buffer.from(rawBody, "utf8"), charset);
+    }
+  } catch {
+    text = rawBody;
+  }
+
+  return text
+    .replace(/--[^\n\r]+/g, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1000);
 }
 
 function parseFetchedHeaderBlocks(lines: string[]) {
@@ -870,7 +936,7 @@ app.post("/api/email/sync-imap", async (req, res) => {
       }
 
       const startSeq = Math.max(1, existsCount - maxPerAccount + 1);
-      writeLine(socket, `a004 FETCH ${startSeq}:${existsCount} (UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE)])`);
+      writeLine(socket, `a004 FETCH ${startSeq}:${existsCount} (UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE CONTENT-TYPE CONTENT-TRANSFER-ENCODING)] BODY.PEEK[TEXT]<0.4096>)`);
       const fetchLines: string[] = [];
       line = await readLine("latest email header response");
       while (!/^a004 /i.test(line)) {
@@ -881,6 +947,7 @@ app.post("/api/email/sync-imap", async (req, res) => {
 
       for (const block of parseFetchedHeaderBlocks(fetchLines)) {
         const headers = parseHeaderBlock(block);
+        const bodyPreview = decodeEmailBody(headers, extractFetchedBodyLines(block));
         const blockText = block.join("\n");
         const sequence = blockText.match(/^\* (\d+) FETCH/im)?.[1];
         const uid = blockText.match(/UID (\d+)/i)?.[1] || sequence || `${Date.now()}`;
@@ -894,7 +961,7 @@ app.post("/api/email/sync-imap", async (req, res) => {
           target,
           intent: "Email",
           subject,
-          summary: subject,
+          summary: bodyPreview || subject,
           channel: "Email",
           date: Number.isNaN(date.getTime()) ? new Date().toLocaleString() : date.toLocaleString(),
           read: false,
