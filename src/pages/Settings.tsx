@@ -24,9 +24,6 @@ type LeadPlatformConfig = {
   baseUrl: string;
   endpointPath?: string;
   method?: 'GET' | 'POST';
-  searchQuery?: string;
-  location?: string;
-  limit?: number;
   actorId?: string;
   agentId?: string;
   requestJson?: string;
@@ -103,9 +100,6 @@ export default function Settings() {
     baseUrl: '',
     endpointPath: '',
     method: 'POST',
-    searchQuery: '',
-    location: '',
-    limit: 10,
     actorId: '',
     agentId: '',
     requestJson: '',
@@ -180,9 +174,6 @@ export default function Settings() {
       baseUrl: existing?.baseUrl || platform.defaultBaseUrl,
       endpointPath: existing?.endpointPath || '',
       method: existing?.method || (platform.id === 'outscraper' ? 'GET' : 'POST'),
-      searchQuery: existing?.searchQuery || '',
-      location: existing?.location || '',
-      limit: existing?.limit || 10,
       actorId: existing?.actorId || '',
       agentId: existing?.agentId || '',
       requestJson: existing?.requestJson || '',
@@ -1094,11 +1085,6 @@ export default function Settings() {
                           <Link2 className="w-3 h-3 shrink-0" />
                           <span className="truncate">{config?.baseUrl || platform.defaultBaseUrl}</span>
                         </div>
-                        {(config?.searchQuery || config?.location) && (
-                          <p className="text-[10px] text-slate-400 dark:text-slate-500">
-                            {[config.searchQuery, config.location].filter(Boolean).join(' / ')}
-                          </p>
-                        )}
                         {config?.updatedAt && (
                           <p className="text-[10px] text-slate-400 dark:text-slate-500">
                             Updated {new Date(config.updatedAt).toLocaleString()}
@@ -1231,38 +1217,6 @@ export default function Settings() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Search Query</label>
-                  <input
-                    value={leadPlatformDraft.searchQuery || ''}
-                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, searchQuery: e.target.value })}
-                    placeholder="e.g. dental clinics"
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Location</label>
-                  <input
-                    value={leadPlatformDraft.location || ''}
-                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, location: e.target.value })}
-                    placeholder="e.g. Singapore"
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Limit</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={leadPlatformDraft.limit || 10}
-                    onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, limit: Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 10)) })}
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
-                  />
-                </div>
-              </div>
-
               {(editingLeadPlatform.id === 'apify' || editingLeadPlatform.id === 'phantombuster') && (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   {editingLeadPlatform.id === 'apify' && (
@@ -1296,10 +1250,10 @@ export default function Settings() {
                   rows={5}
                   value={leadPlatformDraft.requestJson || ''}
                   onChange={e => setLeadPlatformDraft({ ...leadPlatformDraft, requestJson: e.target.value })}
-                  placeholder={'Optional JSON body. Supports {{query}}, {{location}}, {{limit}} placeholders.'}
+                  placeholder={'Optional JSON body schema. Agents fill {{query}}, {{location}}, and {{limit}} at runtime.'}
                   className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs text-slate-900 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
                 />
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">For platforms without a built-in preset, provide the real endpoint and request body from that platform's API docs.</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Configure only the API shape here. The Lead Generation Agent decides the actual search query from RAG, products, customers, and lead context when it runs.</p>
               </div>
 
               <div>

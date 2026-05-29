@@ -1321,14 +1321,18 @@ type LeadPlatformRunConfig = {
   baseUrl?: string;
   endpointPath?: string;
   method?: "GET" | "POST";
-  searchQuery?: string;
-  location?: string;
-  limit?: number;
   actorId?: string;
   agentId?: string;
   requestJson?: string;
   authHeaderName?: string;
   authScheme?: string;
+};
+
+type LeadPlatformRuntime = {
+  query?: string;
+  location?: string;
+  limit?: number;
+  source?: Record<string, unknown>;
 };
 
 function joinUrl(baseUrl: string, endpointPath = "") {
@@ -1443,9 +1447,9 @@ function normalizeLeadItem(item: any, platformName: string, platformId: string) 
   };
 }
 
-function platformDefaults(platformId: string, config: LeadPlatformRunConfig) {
-  const query = [config.searchQuery || "business leads", config.location].filter(Boolean).join(", ");
-  const limit = Math.max(1, Math.min(Number(config.limit || 10), 100));
+function platformDefaults(platformId: string, config: LeadPlatformRunConfig, runtime: LeadPlatformRuntime = {}) {
+  const query = [runtime.query || "business leads", runtime.location].filter(Boolean).join(", ");
+  const limit = Math.max(1, Math.min(Number(runtime.limit || 10), 100));
   if (platformId === "outscraper") {
     return {
       baseUrl: config.baseUrl || "https://api.outscraper.cloud",
@@ -1464,7 +1468,7 @@ function platformDefaults(platformId: string, config: LeadPlatformRunConfig) {
       method: config.method || "POST",
       headers: {},
       queryParams: { token: config.apiKey || "", clean: "true", format: "json" },
-      body: replaceTemplate(parseRequestJson(config.requestJson), { query, location: config.location || "", limit }),
+      body: replaceTemplate(parseRequestJson(config.requestJson), { query, location: runtime.location || "", limit }),
     };
   }
   if (platformId === "phantombuster") {
@@ -1476,7 +1480,7 @@ function platformDefaults(platformId: string, config: LeadPlatformRunConfig) {
       headers: { "X-Phantombuster-Key-1": config.apiKey || "" },
       queryParams: { output: "json" },
       body: {
-        argument: JSON.stringify(replaceTemplate(parseRequestJson(config.requestJson), { query, location: config.location || "", limit })),
+        argument: JSON.stringify(replaceTemplate(parseRequestJson(config.requestJson), { query, location: runtime.location || "", limit })),
       },
     };
   }
@@ -1491,22 +1495,23 @@ function platformDefaults(platformId: string, config: LeadPlatformRunConfig) {
           : `${config.authScheme || "Bearer"} ${config.apiKey || ""}`.trim(),
     },
     queryParams: {},
-    body: replaceTemplate(parseRequestJson(config.requestJson), { query, location: config.location || "", limit }),
+    body: replaceTemplate(parseRequestJson(config.requestJson), { query, location: runtime.location || "", limit }),
   };
 }
 
 app.post("/api/lead-platforms/run", async (req, res) => {
-  const { platformId, platformName, config = {} } = req.body as {
+  const { platformId, platformName, config = {}, runtime = {} } = req.body as {
     platformId?: string;
     platformName?: string;
     config?: LeadPlatformRunConfig;
+    runtime?: LeadPlatformRuntime;
   };
   if (!platformId || !platformName) return res.status(400).json({ error: "Platform ID and name are required." });
   if (!config.enabled) return res.status(400).json({ error: `${platformName} is disabled.` });
   if (!config.apiKey?.trim()) return res.status(400).json({ error: `${platformName} API key is required.` });
 
   try {
-    const defaults = platformDefaults(platformId, config);
+    const defaults = platformDefaults(platformId, config, runtime);
     if (!defaults.baseUrl) return res.status(400).json({ error: `${platformName} Base URL is required.` });
     const url = new URL(joinUrl(defaults.baseUrl, defaults.endpointPath));
     Object.entries(defaults.queryParams).forEach(([key, value]) => {
@@ -1547,6 +1552,12 @@ app.post("/api/lead-platforms/run", async (req, res) => {
       success: true,
       platformId,
       platformName,
+      runtime: {
+        query: runtime.query || "business leads",
+        location: runtime.location || "",
+        limit: Math.max(1, Math.min(Number(runtime.limit || 10), 100)),
+        source: runtime.source || {},
+      },
       requestedUrl: `${url.origin}${url.pathname}`,
       rawCount: items.length,
       leads,

@@ -188,9 +188,6 @@ type LeadPlatformConfig = {
   baseUrl?: string;
   endpointPath?: string;
   method?: "GET" | "POST";
-  searchQuery?: string;
-  location?: string;
-  limit?: number;
   actorId?: string;
   agentId?: string;
   requestJson?: string;
@@ -198,6 +195,41 @@ type LeadPlatformConfig = {
   authScheme?: string;
   notes?: string;
 };
+
+function deriveLeadPlatformRuntime(agent: Agent) {
+  const activeProducts = getProducts().filter((product) => product.status === "Active");
+  const customers = getCustomers();
+  const publicLeads = getPublicLeads();
+  const productTerms = activeProducts
+    .slice(0, 3)
+    .flatMap((product) => [product.name, product.description])
+    .filter(Boolean)
+    .join(" ");
+  const industryTerms = [
+    ...customers.map((customer) => customer.industry),
+    ...publicLeads.map((lead) => lead.industry),
+  ].filter(Boolean);
+  const locationTerms = [
+    ...customers.map((customer) => customer.country || customer.city),
+    ...publicLeads.map((lead) => lead.location),
+  ].filter(Boolean);
+  const industry = industryTerms[0] || "businesses";
+  const location = locationTerms[0] || "";
+  const query = [productTerms || agent.role || "business leads", industry]
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 220);
+  return {
+    query,
+    location,
+    limit: 10,
+    source: {
+      products: activeProducts.slice(0, 3).map((product) => product.name),
+      industry,
+      location,
+    },
+  };
+}
 
 function getEnabledLeadPlatforms(agent?: Agent) {
   const configs = JSON.parse(localStorage.getItem("lead_platform_configs") || "{}") as Record<string, LeadPlatformConfig>;
@@ -294,6 +326,7 @@ export async function executeAgentWorkflow(
         platformId: platform.id,
         platformName: platform.name,
         config: platform.config,
+        runtime: deriveLeadPlatformRuntime(agent),
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -306,12 +339,13 @@ export async function executeAgentWorkflow(
       logs: [
         `Loaded Lead Generation Platform configuration for ${platform.name}.`,
         "Verified that the platform is enabled and allowed for this agent.",
+        "Generated runtime search parameters from product/customer/lead context instead of stored platform configuration.",
         `Called the real platform API endpoint and received ${data.rawCount || leads.length || 0} raw records.`,
         `Imported ${importedCount} new lead(s) into Public Pool.`,
       ],
       steps: [
         { toolName: "lead_generation_platforms.load", label: "Load configured platform", outputJson: platform, status: "Success" },
-        { toolName: "lead_generation_platforms.request", label: "Call platform API", inputJson: { platform: platform.name, baseUrl: platform.baseUrl }, outputJson: { requestedUrl: data.requestedUrl, rawCount: data.rawCount, sample: data.rawSample }, status: "Success" },
+        { toolName: "lead_generation_platforms.request", label: "Call platform API", inputJson: { platform: platform.name, baseUrl: platform.baseUrl, runtime: data.runtime }, outputJson: { requestedUrl: data.requestedUrl, rawCount: data.rawCount, sample: data.rawSample }, status: "Success" },
         { toolName: "public_leads.import", label: "Import public leads", inputJson: { platform: platform.name }, outputJson: { returnedLeads: leads.length, importedCount }, status: "Success" },
       ],
       outputJson: { platform: platform.name, baseUrl: platform.baseUrl, returnedLeads: leads.length, importedCount, mockDataCreated: false },
