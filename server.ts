@@ -551,6 +551,9 @@ type MailSecurity = "ssl" | "starttls" | "none";
 
 type MailSocket = net.Socket | tls.TLSSocket;
 
+const MAIL_CONNECT_TIMEOUT_MS = 30000;
+const MAIL_RESPONSE_TIMEOUT_MS = 30000;
+
 function escapeImapString(value: string) {
   return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
@@ -573,10 +576,10 @@ function connectMailSocket(options: {
     const timeout = setTimeout(() => {
       socket.destroy();
       reject(new Error("Connection timed out."));
-    }, 15000);
+    }, MAIL_CONNECT_TIMEOUT_MS);
     socket.once(options.secure ? "secureConnect" : "connect", () => {
       clearTimeout(timeout);
-      socket.setTimeout(15000);
+      socket.setTimeout(MAIL_RESPONSE_TIMEOUT_MS);
       resolve(socket);
     });
     socket.once("error", (err) => {
@@ -614,7 +617,7 @@ function createLineReader(socket: MailSocket) {
       }
       const timer = setTimeout(() => {
         reject(new Error("Timed out waiting for server response."));
-      }, 15000);
+      }, MAIL_RESPONSE_TIMEOUT_MS);
       pending.push((line) => {
         clearTimeout(timer);
         resolve(line);
@@ -781,38 +784,42 @@ app.post("/api/email/sync-imap", async (req, res) => {
       const readLine = session.readLine;
 
       writeLine(socket, "a003 SELECT INBOX");
+      const selectLines: string[] = [];
       let line = await readLine();
-      while (!/^a003 /i.test(line)) line = await readLine();
-      if (!/^a003 OK/i.test(line)) throw new Error(`Cannot select INBOX: ${line}`);
-
-      writeLine(socket, "a004 SEARCH ALL");
-      const searchLines: string[] = [];
-      line = await readLine();
-      while (!/^a004 /i.test(line)) {
-        searchLines.push(line);
+      while (!/^a003 /i.test(line)) {
+        selectLines.push(line);
         line = await readLine();
       }
-      const ids = searchLines
-        .flatMap((item) => item.replace(/^\* SEARCH\s*/i, "").split(/\s+/))
-        .map((item) => Number(item))
-        .filter(Boolean)
-        .slice(-maxPerAccount);
+      if (!/^a003 OK/i.test(line)) throw new Error(`Cannot select INBOX: ${line}`);
 
-      for (const id of ids) {
-        writeLine(socket, `a005 FETCH ${id} (BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE)])`);
+      const existsLine = selectLines.find((item) => /^\* \d+ EXISTS/i.test(item));
+      const existsCount = Number(existsLine?.match(/^\* (\d+) EXISTS/i)?.[1] || 0);
+      if (existsCount === 0) {
+        writeLine(socket, "a006 LOGOUT");
+        continue;
+      }
+
+      const startSeq = Math.max(1, existsCount - maxPerAccount + 1);
+      const ids = Array.from({ length: existsCount - startSeq + 1 }, (_, index) => startSeq + index);
+
+      for (let index = 0; index < ids.length; index += 1) {
+        const id = ids[index];
+        const tag = `a${String(500 + index).padStart(3, "0")}`;
+        writeLine(socket, `${tag} FETCH ${id} (UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE)])`);
         const fetchLines: string[] = [];
         line = await readLine();
-        while (!/^a005 /i.test(line)) {
+        while (!new RegExp(`^${tag} `, "i").test(line)) {
           fetchLines.push(line);
           line = await readLine();
         }
         const headers = parseHeaderBlock(fetchLines);
+        const uid = fetchLines.join("\n").match(/UID (\d+)/i)?.[1] || String(id);
         const sender = parseEmailAddress(headers.from || profile.imapUser);
         const target = parseEmailAddress(headers.to || profile.imapUser);
         const subject = headers.subject || "(No subject)";
         const date = headers.date ? new Date(headers.date) : new Date();
         emails.push({
-          id: `email_${profile.id}_${id}`,
+          id: `email_${profile.id}_${uid}`,
           sender,
           target,
           intent: "Email",
