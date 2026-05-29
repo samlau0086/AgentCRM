@@ -553,6 +553,7 @@ type MailSocket = net.Socket | tls.TLSSocket;
 
 const MAIL_CONNECT_TIMEOUT_MS = 30000;
 const MAIL_RESPONSE_TIMEOUT_MS = 60000;
+const IMAP_SYNC_VERSION = "imap-sync-v3-batched-fetch";
 
 function escapeImapString(value: string) {
   return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -606,7 +607,7 @@ function createLineReader(socket: MailSocket) {
       pending.shift()?.resolve(line);
     }
   });
-  return (stage = "server response") =>
+  return (stage = "unlabeled IMAP response") =>
     new Promise<string>((resolve, reject) => {
       const newlineIndex = buffer.indexOf("\n");
       if (newlineIndex !== -1) {
@@ -859,9 +860,9 @@ app.post("/api/email/sync-imap", async (req, res) => {
   }
 
   if (emails.length === 0 && errors.length > 0) {
-    return res.status(400).json({ error: errors.join(" | "), emails: [] });
+    return res.status(400).json({ error: errors.join(" | "), emails: [], syncVersion: IMAP_SYNC_VERSION });
   }
-  res.json({ success: true, emails, errors });
+  res.json({ success: true, emails, errors, syncVersion: IMAP_SYNC_VERSION });
 });
 
 app.post("/api/email/test-smtp", async (req, res) => {

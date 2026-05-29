@@ -98,8 +98,8 @@ jobs:
             npm run build
 
             # Fail fast if old browser-prompt UI is still present in the built bundle.
-            if grep -R "Enter API Key for\|prompt(" dist >/dev/null 2>&1; then
-              echo "Legacy prompt UI found in built assets. Aborting deploy."
+            if grep -R "Enter API Key for\|prompt(\|Timed out waiting for server response" dist >/dev/null 2>&1; then
+              echo "Legacy UI or IMAP sync code found in built assets. Aborting deploy."
               exit 1
             fi
             

@@ -93,7 +93,8 @@ export async function fetchEmails(): Promise<EmailMessage[]> {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || `IMAP sync failed with HTTP ${response.status}.`);
+    const version = data.syncVersion || 'legacy';
+    throw new Error(`${data.error || `IMAP sync failed with HTTP ${response.status}.`} Backend sync version: ${version}.`);
   }
   return Array.isArray(data.emails) ? data.emails : [];
 }
