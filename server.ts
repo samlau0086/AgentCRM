@@ -190,7 +190,7 @@ initDB().catch((err) => {
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || "",
-  httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+  httpOptions: { headers: { "User-Agent": "AgentCRM" } },
 });
 
 type ModelProvider = "openai" | "anthropic" | "google" | "openrouter" | "custom";
@@ -249,7 +249,7 @@ async function generateWithModelProfile(
   if (profile.provider === "google") {
     const profileAi = new GoogleGenAI({
       apiKey: profile.apiKey,
-      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+      httpOptions: { headers: { "User-Agent": "AgentCRM" } },
     });
     const response = await profileAi.models.generateContent({
       model: profile.model,
