@@ -116,6 +116,62 @@ export function saveEmailSignatures(signatures: EmailSignature[]) {
   localStorage.setItem('email_signatures', JSON.stringify(signatures));
 }
 
+async function fetchRecordList<T>(route: string): Promise<T[]> {
+  const response = await fetch(route);
+  if (!response.ok) return [];
+  const data = await response.json().catch(() => []);
+  return Array.isArray(data) ? data : [];
+}
+
+async function persistRecordList<T extends { id: string }>(route: string, records: T[]) {
+  const existing = await fetchRecordList<T>(route).catch(() => []);
+  const nextIds = new Set(records.map((record) => record.id));
+  await Promise.allSettled([
+    ...records.map((record) =>
+      fetch(`${route}/${encodeURIComponent(record.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record),
+      }),
+    ),
+    ...existing
+      .filter((record) => !nextIds.has(record.id))
+      .map((record) =>
+        fetch(`${route}/${encodeURIComponent(record.id)}`, {
+          method: 'DELETE',
+        }),
+      ),
+  ]);
+}
+
+export async function loadEmailConfigurationFromServer() {
+  const [receiveProfiles, sendProfiles, mappings, signatures] = await Promise.all([
+    fetchRecordList<ReceiveProfile>('/api/email/receive-profiles'),
+    fetchRecordList<SendProfile>('/api/email/send-profiles'),
+    fetchRecordList<EmailMapping>('/api/email/mappings'),
+    fetchRecordList<EmailSignature>('/api/email/signatures'),
+  ]);
+  if (receiveProfiles.length) saveReceiveProfiles(receiveProfiles);
+  if (sendProfiles.length) saveSendProfiles(sendProfiles);
+  if (mappings.length) saveEmailMappings(mappings);
+  if (signatures.length) saveEmailSignatures(signatures);
+  return { receiveProfiles, sendProfiles, mappings, signatures };
+}
+
+export async function saveEmailConfigurationToServer(config: {
+  receiveProfiles: ReceiveProfile[];
+  sendProfiles: SendProfile[];
+  mappings: EmailMapping[];
+  signatures: EmailSignature[];
+}) {
+  await Promise.allSettled([
+    persistRecordList('/api/email/receive-profiles', config.receiveProfiles),
+    persistRecordList('/api/email/send-profiles', config.sendProfiles),
+    persistRecordList('/api/email/mappings', config.mappings),
+    persistRecordList('/api/email/signatures', config.signatures),
+  ]);
+}
+
 export async function fetchEmails(): Promise<EmailMessage[]> {
   const mappings = getEmailMappings();
   const receiveProfiles = getReceiveProfiles();

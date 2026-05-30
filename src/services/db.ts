@@ -856,11 +856,46 @@ export function getInboxMessages(): MessagePreview[] {
 
 export function saveInboxMessages(msgs: MessagePreview[]) {
   localStorage.setItem("crm_inbox", JSON.stringify(msgs));
+  persistInboxMessagesToServer(msgs);
   notifyDataChanged("crm_inbox");
 }
 
 export function deleteInboxMessage(id: string) {
   saveInboxMessages(getInboxMessages().filter((msg) => msg.id !== id));
+  fetch(`/api/communication/inbox/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }).catch(console.error);
+}
+
+function persistInboxMessagesToServer(msgs: MessagePreview[]) {
+  if (typeof fetch === "undefined") return;
+  msgs.forEach((msg) => {
+    fetch(`/api/communication/inbox/${encodeURIComponent(msg.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(msg),
+    }).catch(console.error);
+  });
+}
+
+export async function loadInboxMessagesFromServer() {
+  const response = await fetch("/api/communication/inbox");
+  if (!response.ok) return getInboxMessages();
+  const remote = await response.json().catch(() => []);
+  if (!Array.isArray(remote)) return getInboxMessages();
+  const local = getInboxMessages();
+  const byId = new Map<string, MessagePreview>();
+  [...remote, ...local].forEach((message) => {
+    if (message?.id) byId.set(message.id, message);
+  });
+  const merged = Array.from(byId.values()).sort((a, b) => {
+    const timeA = Date.parse(a.date || "") || 0;
+    const timeB = Date.parse(b.date || "") || 0;
+    return timeB - timeA;
+  });
+  localStorage.setItem("crm_inbox", JSON.stringify(merged));
+  notifyDataChanged("crm_inbox");
+  return merged;
 }
 
 export function addDraftToThread(messageId: string, reply: string) {

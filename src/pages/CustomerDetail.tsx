@@ -26,49 +26,197 @@ import {
   UniversalComment,
   Attachment,
   getCurrentUser,
+  getModelProfiles,
 } from "../services/db";
 import { CommentSection } from "../components/CommentSection";
+import { notify } from "../services/notifications";
+import { sendEmail } from "../services/emailSync";
+
+type CustomerInsight = {
+  summary: string;
+  nextAction: string;
+  proposalAngle?: string;
+  risk?: string;
+  semanticTags?: string[];
+  confidence?: "low" | "medium" | "high";
+  model?: string;
+  provider?: string;
+  analyzedAt?: string;
+};
+
+type TimelineItem = {
+  id: string;
+  time: string;
+  event: string;
+  type: "ai" | "action" | "comm";
+};
 
 export default function CustomerDetail() {
   const { id } = useParams();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isInsightLoading, setIsInsightLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [hasPendingDraft, setHasPendingDraft] = useState(true);
+  const [hasPendingDraft, setHasPendingDraft] = useState(false);
   const [showInsight, setShowInsight] = useState(true);
   const [isEditingDraft, setIsEditingDraft] = useState(false);
-  const [draftContent, setDraftContent] = useState(
-    "Email Draft: MOQ Negotiation response.",
-  );
+  const [draftContent, setDraftContent] = useState("");
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
 
   const [customer, setCustomer] = useState<Customer | undefined>(undefined);
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [memory, setMemory] = useState<{ semantic?: string[]; behavioral?: string[] }>({});
+  const [insight, setInsight] = useState<CustomerInsight | null>(null);
+  const [insightError, setInsightError] = useState("");
 
   useEffect(() => {
-    if (id) {
-      setCustomer(getCustomer(id));
+    if (!id) return;
+    let cancelled = false;
+
+    async function loadCustomerDetail() {
+      const localCustomer = getCustomer(id);
+      if (localCustomer && !cancelled) setCustomer(localCustomer);
+
+      let loadedCustomer = localCustomer;
+      try {
+        const res = await fetch(`/api/crm/customers/${encodeURIComponent(id)}`);
+        if (res.ok) {
+          loadedCustomer = await res.json();
+          if (!cancelled) setCustomer(loadedCustomer);
+        }
+      } catch (err) {
+        console.warn("Failed to load customer from backend", err);
+      }
+
+      try {
+        const insightRes = await fetch(`/api/ai/customer-insights/${encodeURIComponent(id)}`);
+        const insightData = await insightRes.json().catch(() => ({}));
+        if (!cancelled && insightRes.ok && insightData.insight) {
+          setInsight(insightData.insight);
+        }
+      } catch (err) {
+        console.warn("Failed to load customer insight", err);
+      }
+
+      try {
+        const [inboxRes, timelineRes, memoryRes] = await Promise.allSettled([
+          fetch("/api/communication/inbox"),
+          fetch(`/api/communication/timeline/${encodeURIComponent(id)}`),
+          fetch(`/api/memory/${encodeURIComponent(id)}`),
+        ]);
+        const contactValues = new Set(
+          [loadedCustomer?.contact, ...(loadedCustomer?.contacts || []).map((contact) => contact.value)]
+            .filter(Boolean)
+            .map((value) => String(value).toLowerCase()),
+        );
+        const inboxItems = inboxRes.status === "fulfilled" && inboxRes.value.ok
+          ? await inboxRes.value.json().catch(() => [])
+          : [];
+        const commTimeline: TimelineItem[] = (Array.isArray(inboxItems) ? inboxItems : [])
+          .filter((message: any) =>
+            message.customerId === id ||
+            contactValues.has(String(message.sender || "").toLowerCase()) ||
+            contactValues.has(String(message.target || "").toLowerCase()),
+          )
+          .map((message: any) => ({
+            id: message.id,
+            time: message.date || "",
+            event: `${message.direction === "outbound" ? "Sent" : "Received"} ${message.channel}: ${message.subject || message.summary || "Message"}`,
+            type: "comm" as const,
+          }));
+        const savedTimeline = timelineRes.status === "fulfilled" && timelineRes.value.ok
+          ? await timelineRes.value.json().catch(() => [])
+          : [];
+        if (memoryRes.status === "fulfilled" && memoryRes.value.ok) {
+          const data = await memoryRes.value.json().catch(() => ({}));
+          if (!cancelled) setMemory({ semantic: data.semantic || [], behavioral: data.behavioral || [] });
+        }
+        const customerLogs = (loadedCustomer?.logs || []).map((log) => ({ ...log, type: log.type as TimelineItem["type"] }));
+        const mergedTimeline = [...commTimeline, ...(Array.isArray(savedTimeline) ? savedTimeline : []), ...customerLogs]
+          .filter((item) => item?.id || item?.event)
+          .slice(0, 30);
+        if (!cancelled) setTimeline(mergedTimeline);
+      } catch (err) {
+        console.warn("Failed to load customer timeline", err);
+      }
     }
+
+    loadCustomerDetail();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
+  const persistCustomer = async (updates: Partial<Customer>) => {
+    if (!customer || !id) return;
+    const next = { ...customer, ...updates };
+    setCustomer(next);
+    updateCustomer(id, updates);
+    await fetch(`/api/crm/customers/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    }).catch(console.error);
+  };
+
+  const handleGenerateInsight = async (force = true) => {
+    if (!customer || !id) return;
+    setIsInsightLoading(true);
+    setInsightError("");
+    try {
+      const res = await fetch("/api/ai/customer-insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: id,
+          customer,
+          timeline,
+          memory,
+          systemLanguage: language,
+          modelProfile: getModelProfiles()[0],
+          force,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Customer AI analysis failed with HTTP ${res.status}.`);
+      setInsight(data);
+      const newLog: CustomerLog = {
+        id: `t_${Date.now()}`,
+        time: new Date().toLocaleString(),
+        event: "AI refreshed customer insight",
+        type: "ai",
+      };
+      await persistCustomer({ logs: [newLog, ...(customer.logs || [])] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to generate customer insight.";
+      setInsightError(message);
+      notify(message, "error", "Customer AI failed");
+    } finally {
+      setIsInsightLoading(false);
+    }
+  };
+
   const handleGenerateProposal = async () => {
+    if (!customer) return;
     setIsGenerating(true);
 
-    // Call AI to generate proposal using customer preferred language
     try {
       const prefLanguage = customer?.preferredLanguage || "en";
       const res = await fetch("/api/ai/draft-proposal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          customerName: customer?.name || "Customer",
-          intent: customer?.intent || "Medium",
+          customer,
+          insight,
+          timeline,
           preferredLanguage: prefLanguage,
+          modelProfile: getModelProfiles()[0],
         }),
       });
-      const data = await res.json();
-      const generatedDraft =
-        data.reply || "Email Draft: MOQ Negotiation response.";
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Draft proposal failed with HTTP ${res.status}.`);
+      const generatedDraft = data.reply || "";
 
       setDraftContent(generatedDraft);
       setHasPendingDraft(true);
@@ -76,40 +224,43 @@ export default function CustomerDetail() {
       if (customer && id) {
         const newLog: CustomerLog = {
           id: `t_${Date.now()}`,
-          time: "Just now",
+          time: new Date().toLocaleString(),
           event: "AI drafted a new proposal",
           type: "ai",
         };
-        const newLogs = [newLog, ...(customer.logs || [])];
-        updateCustomer(id, { logs: newLogs });
-        setCustomer(getCustomer(id));
+        await persistCustomer({ logs: [newLog, ...(customer.logs || [])] });
       }
-    } catch (err) {
-      console.error(err);
-      setDraftContent("Error generating proposal.");
-      setHasPendingDraft(true);
+    } catch (err: any) {
+      notify(err.message || "Error generating proposal.", "error", "Proposal draft failed");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleApproveSend = () => {
+  const handleApproveSend = async () => {
+    if (!customer || !id || !draftContent.trim()) return;
+    const recipient = customer.contacts?.find((contact) => contact.type === "Email")?.value;
+    if (!recipient) {
+      notify("This customer does not have an email contact.", "warning", "Cannot send proposal");
+      return;
+    }
     setIsSending(true);
-    setTimeout(() => {
+    try {
+      await sendEmail("default", recipient, `Proposal for ${customer.name}`, draftContent, draftContent.replace(/\n/g, "<br>"));
       setHasPendingDraft(false);
-      if (customer && id) {
-        const newLog: CustomerLog = {
-          id: `t_${Date.now()}`,
-          time: "Just now",
-          event: `Approved and sent: ${draftContent}`,
-          type: "comm",
-        };
-        const newLogs = [newLog, ...(customer.logs || [])];
-        updateCustomer(id, { logs: newLogs });
-        setCustomer(getCustomer(id));
-      }
+      const newLog: CustomerLog = {
+        id: `t_${Date.now()}`,
+        time: new Date().toLocaleString(),
+        event: `Approved and sent proposal to ${recipient}`,
+        type: "comm",
+      };
+      await persistCustomer({ logs: [newLog, ...(customer.logs || [])] });
+      notify("Proposal sent.", "success", "Email sent");
+    } catch (err: any) {
+      notify(err.message || "Failed to send proposal.", "error", "Send failed");
+    } finally {
       setIsSending(false);
-    }, 1000);
+    }
   };
 
   const handleAddComment = (
@@ -150,8 +301,7 @@ export default function CustomerDetail() {
       newComments.push(newComment);
     }
 
-    updateCustomer(id, { comments: newComments });
-    setCustomer(getCustomer(id));
+    persistCustomer({ comments: newComments });
   };
 
   return (
@@ -228,13 +378,35 @@ export default function CustomerDetail() {
                   {t("cd.aiSummary")}
                 </h2>
               </div>
-              <p className="text-slate-700 dark:text-slate-300 text-sm leading-relaxed font-light">
-                Customer is highly interested in bulk ordering 10,000 units but
-                is currently negotiating on the Minimum Order Quantity (MOQ)
-                criteria. They have opened the last pricing proposal 3 times in
-                the past 24 hours. The overall intent is very high, but risk of
-                stalling exists if MOQ flexibility is not addressed.
-              </p>
+              {insight ? (
+                <div className="space-y-3">
+                  <p className="text-slate-700 dark:text-slate-300 text-sm leading-relaxed font-light">
+                    {insight.summary}
+                  </p>
+                  <div className="flex flex-wrap gap-2 text-[10px] text-slate-500 dark:text-slate-400">
+                    {insight.provider && insight.model && <span>{insight.provider} / {insight.model}</span>}
+                    {insight.analyzedAt && <span>Updated {new Date(insight.analyzedAt).toLocaleString()}</span>}
+                    {insight.confidence && <span>Confidence: {insight.confidence}</span>}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed font-light">
+                  Generate an AI customer summary from this customer's actual CRM profile, messages, timeline, and knowledge memory.
+                </p>
+              )}
+              {insightError && (
+                <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+                  {insightError}
+                </p>
+              )}
+              <button
+                onClick={() => handleGenerateInsight(true)}
+                disabled={isInsightLoading}
+                className="mt-4 inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:opacity-50 dark:border-blue-500/30 dark:bg-white/5 dark:text-blue-300 dark:hover:bg-blue-500/10"
+              >
+                {isInsightLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {insight ? "Refresh AI Insight" : "Generate AI Insight"}
+              </button>
             </div>
 
             {/* Next Best Action (AI Driven) */}
@@ -245,11 +417,13 @@ export default function CustomerDetail() {
                   {t("cd.nextAction")}
                 </h2>
                 <p className="text-slate-900 dark:text-white text-lg font-light mb-6">
-                  Suggest offering a{" "}
-                  <span className="font-semibold">5% discount</span> or
-                  splitting the MOQ across two deliveries to close the deal
-                  today.
+                  {insight?.nextAction || "Generate an AI insight to get a next best action based on real CRM activity."}
                 </p>
+                {insight?.risk && (
+                  <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+                    Risk: {insight.risk}
+                  </p>
+                )}
                 <div className="flex gap-3">
                   <button
                     onClick={handleGenerateProposal}
@@ -286,7 +460,7 @@ export default function CustomerDetail() {
               </div>
 
               <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-px before:bg-white/10">
-                {(customer?.logs || []).slice(0, 3).map((item, i) => (
+                {(timeline.length ? timeline : customer?.logs || []).slice(0, 3).map((item, i) => (
                   <div
                     key={item.id}
                     className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active"
@@ -403,10 +577,10 @@ export default function CustomerDetail() {
                   <Briefcase className="w-5 h-5 text-slate-600 shrink-0" />
                   <div>
                     <p className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-widest">
-                      {t("cd.budget")}
+                      Intent / Risk
                     </p>
                     <p className="text-slate-800 dark:text-slate-200 font-mono mt-1 text-xs">
-                      $50k - $100k
+                      {[customer.intent, customer.risk].filter(Boolean).join(" / ") || "-"}
                     </p>
                   </div>
                 </div>
@@ -453,15 +627,18 @@ export default function CustomerDetail() {
                 {t("cd.semanticMemory")}
               </h2>
               <div className="flex flex-wrap gap-2">
-                <span className="px-2.5 py-1 bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 text-[10px] font-mono rounded">
-                  Strict on delivery times
-                </span>
-                <span className="px-2.5 py-1 bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 text-[10px] font-mono rounded">
-                  Prefers WhatsApp
-                </span>
-                <span className="px-2.5 py-1 bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 text-[10px] font-mono rounded">
-                  Requires PO process
-                </span>
+                {[
+                  ...(insight?.semanticTags || []),
+                  ...(customer.tags || []),
+                  ...(memory.semantic || []).slice(0, 4),
+                ].filter(Boolean).slice(0, 10).map((tag) => (
+                  <span key={tag} className="px-2.5 py-1 bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 text-[10px] font-mono rounded">
+                    {tag}
+                  </span>
+                ))}
+                {!(insight?.semanticTags?.length || customer.tags?.length || memory.semantic?.length) && (
+                  <span className="text-xs text-slate-500 dark:text-slate-400">No semantic memory yet.</span>
+                )}
               </div>
             </div>
           </div>
@@ -497,7 +674,7 @@ export default function CustomerDetail() {
               </button>
             </div>
             <div className="overflow-y-auto p-6 space-y-6 relative before:absolute before:inset-0 before:ml-11 before:-translate-x-px before:h-full before:w-px before:bg-slate-200 dark:before:bg-white/10">
-              {(customer?.logs || []).map((item, i) => (
+              {(timeline.length ? timeline : customer?.logs || []).map((item, i) => (
                 <div
                   key={item.id}
                   className="relative flex items-center gap-6 group is-active"

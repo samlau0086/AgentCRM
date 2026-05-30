@@ -3,7 +3,7 @@ import { useLanguage } from '../i18n';
 import { useTheme } from '../theme';
 import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, ToggleLeft, ToggleRight, Loader2, PlugZap } from 'lucide-react';
 import { cn } from '../Layout';
-import { ReceiveProfile, SendProfile, EmailMapping, EmailSignature, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings, getEmailSignatures, saveEmailSignatures } from '../services/emailSync';
+import { ReceiveProfile, SendProfile, EmailMapping, EmailSignature, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings, getEmailSignatures, saveEmailSignatures, loadEmailConfigurationFromServer, saveEmailConfigurationToServer } from '../services/emailSync';
 import { Agent, ModelProfile, getAgents, getModelProfiles, saveModelProfiles, updateAgent } from '../services/db';
 import { notify } from '../services/notifications';
 import PasswordInput from '../components/PasswordInput';
@@ -121,22 +121,12 @@ export default function Settings() {
     setSendProfiles(getSendProfiles());
     setEmailMappings(getEmailMappings());
     setEmailSignatures(getEmailSignatures());
-    fetch('/api/email/signatures')
-      .then(res => res.ok ? res.json() : [])
+    loadEmailConfigurationFromServer()
       .then(data => {
-        if (Array.isArray(data) && data.length > 0) {
-          setEmailSignatures(data);
-          saveEmailSignatures(data);
-        }
-      })
-      .catch(console.error);
-    fetch('/api/email/mappings')
-      .then(res => res.ok ? res.json() : [])
-      .then(data => {
-        if (Array.isArray(data) && data.length > 0) {
-          setEmailMappings(data);
-          saveEmailMappings(data);
-        }
+        if (data.receiveProfiles.length > 0) setReceiveProfiles(data.receiveProfiles);
+        if (data.sendProfiles.length > 0) setSendProfiles(data.sendProfiles);
+        if (data.mappings.length > 0) setEmailMappings(data.mappings);
+        if (data.signatures.length > 0) setEmailSignatures(data.signatures);
       })
       .catch(console.error);
     setModelProfiles(getModelProfiles());
@@ -227,18 +217,12 @@ export default function Settings() {
     saveSendProfiles(sendProfiles);
     saveEmailMappings(emailMappings);
     saveEmailSignatures(emailSignatures);
-    await Promise.allSettled([
-      ...emailSignatures.map(signature => fetch(`/api/email/signatures/${encodeURIComponent(signature.id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(signature),
-      })),
-      ...emailMappings.map(mapping => fetch(`/api/email/mappings/${encodeURIComponent(mapping.id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(mapping),
-      })),
-    ]);
+    await saveEmailConfigurationToServer({
+      receiveProfiles,
+      sendProfiles,
+      mappings: emailMappings,
+      signatures: emailSignatures,
+    });
     notify('Saved Email configuration', 'success', 'Email settings saved');
   };
 

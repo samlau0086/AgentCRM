@@ -546,6 +546,8 @@ crudRoutes("quotes", "/api/crm/quotes");
 crudRoutes("inbox_messages", "/api/communication/inbox");
 crudRoutes("agent_pending_actions", "/api/agent/actions/pending");
 crudRoutes("knowledge_documents", "/api/knowledge");
+crudRoutes("email_receive_profiles", "/api/email/receive-profiles");
+crudRoutes("email_send_profiles", "/api/email/send-profiles");
 crudRoutes("email_signatures", "/api/email/signatures");
 crudRoutes("email_mappings", "/api/email/mappings");
 
@@ -1592,6 +1594,85 @@ app.get("/api/memory/:customerId", async (req, res) => {
   }
 });
 
+app.get("/api/ai/customer-insights/:customerId", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const insight = await getRecord("customer_ai_insights", req.params.customerId);
+    res.json({ insight: insight || null });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to load customer AI insight: ${err.message}` });
+  }
+});
+
+app.post("/api/ai/customer-insights", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  const {
+    customerId = "",
+    customer = {},
+    timeline = [],
+    memory = {},
+    systemLanguage = "en",
+    modelProfile = {},
+    force = false,
+  } = req.body;
+  const insightId = String(customerId || customer?.id || "").trim();
+  if (!insightId) return res.status(400).json({ error: "customerId is required." });
+
+  try {
+    if (!force) {
+      const existing = await getRecord("customer_ai_insights", insightId);
+      if (existing) return res.json(existing);
+    }
+    const profile = requireModelProfile(modelProfile, res);
+    if (!profile) return;
+
+    const prompt = `Analyze this CRM customer using only the provided real CRM data.
+
+Customer:
+${JSON.stringify(customer, null, 2).slice(0, 5000)}
+
+Recent timeline/messages:
+${JSON.stringify(timeline, null, 2).slice(0, 5000)}
+
+Memory:
+${JSON.stringify(memory, null, 2).slice(0, 3000)}
+
+Return strict JSON only:
+{
+  "summary": "concise customer summary grounded in data",
+  "nextAction": "recommended next best action",
+  "proposalAngle": "short proposal or outreach angle",
+  "risk": "short risk assessment",
+  "semanticTags": ["tag 1", "tag 2", "tag 3"],
+  "confidence": "low|medium|high"
+}
+Write all human-facing values in this language: ${systemLanguage}. Do not invent opened emails, prices, budgets, discounts, or policies unless present in the supplied data.`;
+    const text = await generateWithModelProfile(
+      profile,
+      "You are a CRM customer intelligence assistant. Ground every recommendation in the provided customer, timeline, and memory data.",
+      prompt,
+    );
+    const data = parseAiJson(text);
+    const insight = {
+      id: insightId,
+      customerId: insightId,
+      summary: String(data.summary || "No customer insight available yet."),
+      nextAction: String(data.nextAction || "Review customer context and choose the next outreach step."),
+      proposalAngle: String(data.proposalAngle || ""),
+      risk: String(data.risk || "No clear risk detected."),
+      semanticTags: Array.isArray(data.semanticTags) ? data.semanticTags.map(String).slice(0, 6) : [],
+      confidence: ["low", "medium", "high"].includes(String(data.confidence)) ? data.confidence : "medium",
+      model: profile.model,
+      provider: profile.provider,
+      analyzedAt: new Date().toISOString(),
+    };
+    await upsertRecord("customer_ai_insights", insightId, insight);
+    res.json(insight);
+  } catch (err: any) {
+    res.status(500).json({ error: `Customer AI insight failed: ${err.message}` });
+  }
+});
+
 app.post("/api/ai/draft-reply", async (req, res) => {
   if (!requireGemini(res)) return;
   const { message, intent, preferredLanguage = "en" } = req.body;
@@ -1823,16 +1904,40 @@ app.post("/api/ai/vectorize-doc", async (req, res) => {
 });
 
 app.post("/api/ai/draft-proposal", async (req, res) => {
-  if (!requireGemini(res)) return;
-  const { customerName, intent, preferredLanguage = "en" } = req.body;
+  const {
+    customer = {},
+    insight = {},
+    timeline = [],
+    preferredLanguage = "en",
+    modelProfile = {},
+  } = req.body;
+  const profile = requireModelProfile(modelProfile, res);
+  if (!profile) return;
 
   try {
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: `Draft a professional sales proposal for ${customerName}. Their current intent is: ${intent}. Offer a 5% discount on bulk orders to close the deal. Keep it concise, helpful, and under 3 paragraphs. PLEASE REPLY IN THIS LANGUAGE: ${preferredLanguage}`,
-      config: { temperature: 0.7 },
-    });
-    res.json({ reply: response.text });
+    const prompt = `Draft a professional sales proposal email from the CRM data below.
+
+Customer:
+${JSON.stringify(customer, null, 2).slice(0, 5000)}
+
+AI insight:
+${JSON.stringify(insight, null, 2).slice(0, 3000)}
+
+Recent timeline:
+${JSON.stringify(timeline, null, 2).slice(0, 4000)}
+
+Requirements:
+- Keep it concise and practical.
+- Do not invent discounts, prices, delivery terms, or guarantees.
+- If the data is incomplete, ask a clear follow-up question.
+- Do not include placeholders like [Your Name].
+- Reply in this language: ${preferredLanguage}.`;
+    const text = await generateWithModelProfile(
+      profile,
+      "You are a CRM sales assistant drafting grounded customer outreach.",
+      prompt,
+    );
+    res.json({ reply: text, model: profile.model, provider: profile.provider });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

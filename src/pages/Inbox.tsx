@@ -30,9 +30,10 @@ import {
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
 import { fetchClients, fetchMessages, sendMessage, WaClient } from "../services/waHub";
-import { fetchEmails, sendEmail, getEmailMappings, getEmailSignatures } from "../services/emailSync";
+import { fetchEmails, sendEmail, getEmailMappings, getEmailSignatures, loadEmailConfigurationFromServer } from "../services/emailSync";
 import {
   getInboxMessages,
+  loadInboxMessagesFromServer,
   addDraftToThread,
   markMessageRead,
   MessagePreview,
@@ -471,30 +472,28 @@ export default function Inbox() {
       })
       .catch(console.error);
 
+    setCustomers(getCustomers());
     const initialMessages = getInboxMessages();
     setMessages(initialMessages);
     if (initialMessages.length > 0) {
       setActiveMessageId(initialMessages[0].id);
     }
 
-    setCustomers(getCustomers());
-    fetch('/api/email/signatures')
-      .then((res) => res.ok ? res.json() : [])
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          localStorage.setItem('email_signatures', JSON.stringify(data));
+    Promise.allSettled([
+      loadEmailConfigurationFromServer(),
+      loadInboxMessagesFromServer(),
+    ])
+      .then((results) => {
+        const inboxResult = results[1];
+        if (inboxResult.status === "fulfilled") {
+          setMessages(inboxResult.value);
+          if (inboxResult.value.length > 0) {
+            setActiveMessageId((current) => current || inboxResult.value[0].id);
+          }
         }
       })
+      .then(() => syncInboxMessages(true))
       .catch(console.error);
-    fetch('/api/email/mappings')
-      .then((res) => res.ok ? res.json() : [])
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          localStorage.setItem('email_mappings', JSON.stringify(data));
-        }
-      })
-      .catch(console.error);
-    syncInboxMessages(true).catch(console.error);
   }, []);
 
   const activeMessage =
