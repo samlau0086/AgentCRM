@@ -11,6 +11,7 @@ import {
   X,
   Plus,
   Upload,
+  Download,
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
@@ -190,6 +191,23 @@ function rowToPublicLead(row: Record<string, string>): PublicLead | null {
     intent: (pickCsv(row, ["intent"]) as PublicLead["intent"]) || undefined,
     risk: (pickCsv(row, ["risk"]) as PublicLead["risk"]) || undefined,
   };
+}
+
+function csvEscape(value: string | number) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadTextFile(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function CustomerFormView({
@@ -698,6 +716,69 @@ export default function Customers() {
     setImportPreview(null);
   };
 
+  const downloadSampleCsv = () => {
+    const headers = [
+      "company",
+      "contact",
+      "email",
+      "phone",
+      "website",
+      "industry",
+      "location",
+      "tags",
+      "score",
+      "intent",
+      "risk",
+      "notes",
+      ...(importTarget === "public-pool" ? ["source"] : ["stage", "preferred_language"]),
+    ];
+    const rows =
+      importTarget === "public-pool"
+        ? [
+            {
+              company: "Northstar Dental Group",
+              contact: "Mia Chen",
+              email: "mia.chen@example.com",
+              phone: "+1 415 555 0198",
+              website: "https://northstar.example.com",
+              industry: "Healthcare",
+              location: "San Francisco, CA",
+              tags: "clinic;high-fit",
+              score: 78,
+              intent: "Medium",
+              risk: "Low",
+              notes: "Interested in lightweight CRM automation.",
+              source: "CSV Import",
+            },
+          ]
+        : [
+            {
+              company: "Acme Manufacturing",
+              contact: "Jordan Lee",
+              email: "jordan.lee@example.com",
+              phone: "+1 212 555 0144",
+              website: "https://acme.example.com",
+              industry: "Manufacturing",
+              location: "New York, NY",
+              tags: "key-account;renewal",
+              score: 86,
+              intent: "High",
+              risk: "Medium",
+              notes: "Existing customer, asked about annual volume pricing.",
+              stage: "New Lead",
+              preferred_language: "en",
+            },
+          ];
+    const csv = [
+      headers.join(","),
+      ...rows.map((row) => headers.map((header) => csvEscape((row as Record<string, string | number>)[header] || "")).join(",")),
+    ].join("\n");
+    downloadTextFile(
+      importTarget === "public-pool" ? "public-pool-sample.csv" : "my-customers-sample.csv",
+      csv,
+    );
+  };
+
   const handleEdit = (customer: Customer) => {
     setEditingCustomer(customer);
     setIsModalOpen(true);
@@ -1138,6 +1219,14 @@ export default function Customers() {
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                     Supported columns include company/name, contact, email, phone, website, industry, address/location, tags, score, intent, risk, and notes.
                   </p>
+                  <button
+                    type="button"
+                    onClick={downloadSampleCsv}
+                    className="mt-4 inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download Sample CSV
+                  </button>
                 </div>
                 <button
                   onClick={() => setIsImportOpen(false)}
