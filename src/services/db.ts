@@ -164,6 +164,13 @@ export async function loadPublicLeadsFromServer() {
   return leads;
 }
 
+export async function loadAgentsFromServer() {
+  const agents = await loadRecordListFromServer<Agent>("crm_agents");
+  if (!agents) return getAgents();
+  cacheRecordList("crm_agents", agents);
+  return agents;
+}
+
 export interface CustomerLog {
   id: string;
   time: string;
@@ -764,6 +771,7 @@ export function getAgents(): Agent[] {
     const data = localStorage.getItem("crm_agents");
     if (data) {
       let parsed = JSON.parse(data) as Agent[];
+      if (!Array.isArray(parsed)) return builtInAgents();
       const legacyLeadAgent = parsed.find((agent) => agent.id === "5");
       if (legacyLeadAgent) {
         parsed = [
@@ -787,9 +795,7 @@ export function getAgents(): Agent[] {
     }
   } catch (e) {}
 
-  const initial: Agent[] = builtInAgents();
-  saveAgents(initial);
-  return initial;
+  return builtInAgents();
 }
 
 export function saveAgents(agents: Agent[]) {

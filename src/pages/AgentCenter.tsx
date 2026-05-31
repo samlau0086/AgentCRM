@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
-import { getAgents, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, saveAgentSteps, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
+import { getAgents, loadAgentsFromServer, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, saveAgentSteps, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
 import {
   AgentWorkflowDefinition,
   AgentWorkflowTarget,
@@ -421,7 +421,12 @@ export default function AgentCenter() {
         setRunLogLimit(Math.min(500, savedLimit));
       }
     }).catch(console.error);
-    setAgents(getAgents());
+    const refreshAgents = () => {
+      loadAgentsFromServer()
+        .then(setAgents)
+        .catch(() => setAgents(getAgents()));
+    };
+    refreshAgents();
     setRuns(getAgentRuns());
     setSteps(getAgentSteps());
     setApprovals(getAgentApprovals());
@@ -443,7 +448,11 @@ export default function AgentCenter() {
       setModelProfiles(getModelProfiles());
     };
     window.addEventListener("crm:data-changed", handleDataChanged);
-    return () => window.removeEventListener("crm:data-changed", handleDataChanged);
+    const refreshTimer = window.setInterval(refreshAgents, 5000);
+    return () => {
+      window.removeEventListener("crm:data-changed", handleDataChanged);
+      window.clearInterval(refreshTimer);
+    };
   }, []);
 
   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
