@@ -4,7 +4,7 @@ import { useTheme } from '../theme';
 import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, ToggleLeft, ToggleRight, Loader2, PlugZap } from 'lucide-react';
 import { cn } from '../Layout';
 import { ReceiveProfile, SendProfile, EmailMapping, EmailSignature, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings, getEmailSignatures, saveEmailSignatures, loadEmailConfigurationFromServer, saveEmailConfigurationToServer } from '../services/emailSync';
-import { Agent, ModelProfile, getAgents, getModelProfiles, saveModelProfiles, updateAgent } from '../services/db';
+import { Agent, ModelProfile, getAgents, getModelProfiles, loadModelProfilesFromServer, saveModelProfiles, updateAgent } from '../services/db';
 import { notify } from '../services/notifications';
 import PasswordInput from '../components/PasswordInput';
 import { loadAppSettingsFromServer, saveAppSetting } from '../services/appSettings';
@@ -146,6 +146,9 @@ export default function Settings() {
       })
       .catch(console.error);
     setModelProfiles(getModelProfiles());
+    loadModelProfilesFromServer()
+      .then(setModelProfiles)
+      .catch(console.error);
     setAgents(getAgents());
     
     fetch('/api/config/vector')
@@ -310,9 +313,13 @@ export default function Settings() {
     }
   };
 
-  const handleSaveModelProfiles = () => {
-    saveModelProfiles(modelProfiles);
-    notify('Saved Model Profiles', 'success', 'Model profiles saved');
+  const handleSaveModelProfiles = async () => {
+    try {
+      await saveModelProfiles(modelProfiles);
+      notify('Saved Model Profiles', 'success', 'Model profiles saved');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to save model profiles.', 'error', 'Model profiles save failed');
+    }
   };
 
   const addModelProfile = () => {

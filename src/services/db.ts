@@ -41,10 +41,10 @@ const SERVER_COLLECTIONS: Record<string, string> = {
   crm_inbox: "/api/communication/inbox",
 };
 
-function persistRecordList(key: string, records: Array<{ id: string }>) {
+async function persistRecordList(key: string, records: Array<{ id: string }>) {
   const route = SERVER_COLLECTIONS[key];
   if (!route || typeof fetch === "undefined") return;
-  Promise.allSettled(
+  await Promise.allSettled(
     records.map((record) =>
         fetch(`${route}/${encodeURIComponent(record.id)}`, {
           method: "PUT",
@@ -52,7 +52,30 @@ function persistRecordList(key: string, records: Array<{ id: string }>) {
           body: JSON.stringify(record),
         }),
     ),
-  ).catch(console.error);
+  );
+}
+
+async function replaceRecordListOnServer(key: string, records: Array<{ id: string }>) {
+  const route = SERVER_COLLECTIONS[key];
+  if (!route || typeof fetch === "undefined") return;
+  const existing = await loadRecordListFromServer<Array<{ id: string }>[number]>(key);
+  const nextIds = new Set(records.map((record) => record.id));
+  await Promise.allSettled([
+    ...records.map((record) =>
+      fetch(`${route}/${encodeURIComponent(record.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(record),
+      }),
+    ),
+    ...(existing || [])
+      .filter((record) => record?.id && !nextIds.has(record.id))
+      .map((record) =>
+        fetch(`${route}/${encodeURIComponent(record.id)}`, {
+          method: "DELETE",
+        }),
+      ),
+  ]);
 }
 
 function deleteRecordFromServer(key: string, id: string) {
@@ -184,6 +207,14 @@ export async function loadAgentsFromServer() {
 export async function loadModelProfilesFromServer() {
   const profiles = await loadRecordListFromServer<ModelProfile>("crm_model_profiles");
   if (!profiles) return getModelProfiles();
+  if (profiles.length === 0) {
+    const cached = getModelProfiles();
+    if (cached.length > 0) {
+      await persistRecordList("crm_model_profiles", cached);
+      cacheRecordList("crm_model_profiles", cached);
+      return cached;
+    }
+  }
   cacheRecordList("crm_model_profiles", profiles);
   return profiles;
 }
@@ -627,14 +658,14 @@ export function getModelProfiles(): ModelProfile[] {
       temperature: 0.4,
     },
   ];
-  saveModelProfiles(initial);
   return initial;
 }
 
 export function saveModelProfiles(profiles: ModelProfile[]) {
   localStorage.setItem("crm_model_profiles", JSON.stringify(profiles));
-  persistRecordList("crm_model_profiles", profiles);
+  const savePromise = replaceRecordListOnServer("crm_model_profiles", profiles);
   notifyDataChanged("crm_model_profiles");
+  return savePromise;
 }
 
 function builtInAgents(): Agent[] {
