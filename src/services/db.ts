@@ -44,27 +44,21 @@ const SERVER_COLLECTIONS: Record<string, string> = {
 function persistRecordList(key: string, records: Array<{ id: string }>) {
   const route = SERVER_COLLECTIONS[key];
   if (!route || typeof fetch === "undefined") return;
-  fetch(route)
-    .then((res) => (res.ok ? res.json() : []))
-    .then((existing) => {
-      const nextIds = new Set(records.map((record) => record.id));
-      const writes = records.map((record) =>
+  Promise.allSettled(
+    records.map((record) =>
         fetch(`${route}/${encodeURIComponent(record.id)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(record),
         }),
-      );
-      const deletes = (Array.isArray(existing) ? existing : [])
-        .filter((record) => record?.id && !nextIds.has(record.id))
-        .map((record) =>
-          fetch(`${route}/${encodeURIComponent(record.id)}`, {
-            method: "DELETE",
-          }),
-        );
-      return Promise.allSettled([...writes, ...deletes]);
-    })
-    .catch(console.error);
+    ),
+  ).catch(console.error);
+}
+
+function deleteRecordFromServer(key: string, id: string) {
+  const route = SERVER_COLLECTIONS[key];
+  if (!route || typeof fetch === "undefined") return;
+  fetch(`${route}/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(console.error);
 }
 
 async function loadRecordListFromServer<T>(key: string): Promise<T[] | null> {
@@ -140,6 +134,36 @@ export async function hydrateCrmDataFromServer() {
   );
 }
 
+export async function loadCustomersFromServer() {
+  const customers = await loadRecordListFromServer<Customer>("crm_customers");
+  if (!customers) return getCustomers();
+  if (customers.length === 0) {
+    const cached = getCustomers();
+    const migrationResponse = await fetch("/api/app/settings/crm_data_migrated_to_server").catch(() => null);
+    if (migrationResponse?.status === 404 && cached.length > 0) {
+      persistRecordList("crm_customers", cached);
+      return cached;
+    }
+  }
+  cacheRecordList("crm_customers", customers);
+  return customers;
+}
+
+export async function loadPublicLeadsFromServer() {
+  const leads = await loadRecordListFromServer<PublicLead>("crm_public_leads");
+  if (!leads) return getPublicLeads();
+  if (leads.length === 0) {
+    const cached = getPublicLeads();
+    const migrationResponse = await fetch("/api/app/settings/crm_data_migrated_to_server").catch(() => null);
+    if (migrationResponse?.status === 404 && cached.length > 0) {
+      persistRecordList("crm_public_leads", cached);
+      return cached;
+    }
+  }
+  cacheRecordList("crm_public_leads", leads);
+  return leads;
+}
+
 export interface CustomerLog {
   id: string;
   time: string;
@@ -200,6 +224,7 @@ export function savePublicLeads(leads: PublicLead[]) {
 export function deletePublicLead(id: string) {
   const leads = getPublicLeads();
   savePublicLeads(leads.filter((l) => l.id !== id));
+  deleteRecordFromServer("crm_public_leads", id);
 }
 
 export function claimLead(leadId: string, userId: string) {
@@ -298,6 +323,7 @@ export function addDocument(doc: Omit<Document, "id">) {
 export function deleteDocument(id: string) {
   const docs = getDocuments();
   saveDocuments(docs.filter((d) => d.id !== id));
+  deleteRecordFromServer("crm_documents", id);
 }
 
 export function getCustomers(): Customer[] {
@@ -386,6 +412,7 @@ export function updateProduct(id: string, updates: Partial<Product>) {
 
 export function deleteProduct(id: string) {
   saveProducts(getProducts().filter((p) => p.id !== id));
+  deleteRecordFromServer("crm_products", id);
 }
 
 // ----------------------------------------------------------------------
@@ -453,6 +480,7 @@ export function updateQuote(id: string, updates: Partial<Quote>) {
 
 export function deleteQuote(id: string) {
   saveQuotes(getQuotes().filter((q) => q.id !== id));
+  deleteRecordFromServer("crm_quotes", id);
 }
 
 export function getCustomer(id: string): Customer | undefined {
@@ -483,6 +511,7 @@ export function addCustomer(customer: Omit<Customer, "id">) {
 export function deleteCustomer(id: string) {
   const customers = getCustomers();
   saveCustomers(customers.filter((c) => c.id !== id));
+  deleteRecordFromServer("crm_customers", id);
 }
 
 export interface Agent {
@@ -791,6 +820,7 @@ export function updateAgent(id: string, agent: Partial<Agent>) {
 export function deleteAgent(id: string) {
   const agents = getAgents();
   saveAgents(agents.filter((a) => a.id !== id));
+  deleteRecordFromServer("crm_agents", id);
 }
 
 export interface SystemUser {

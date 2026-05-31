@@ -24,7 +24,9 @@ import {
   addCustomer,
   updateCustomer,
   Customer,
+  loadCustomersFromServer,
   getPublicLeads,
+  loadPublicLeadsFromServer,
   PublicLead,
   savePublicLeads,
   claimLead,
@@ -636,7 +638,38 @@ export default function Customers() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+    const refreshCustomers = () => {
+      loadCustomersFromServer()
+        .then((latest) => {
+          if (!cancelled) setCustomers(latest);
+        })
+        .catch(console.error);
+      loadPublicLeadsFromServer()
+        .then((latest) => {
+          if (!cancelled) setPublicLeads(latest);
+        })
+        .catch(console.error);
+    };
+    const handleDataChanged = (event: Event) => {
+      const key = (event as CustomEvent<{ key?: string }>).detail?.key;
+      if (!key || key === "crm_customers") setCustomers(getCustomers());
+      if (!key || key === "crm_public_leads") setPublicLeads(getPublicLeads());
+    };
+
+    refreshCustomers();
     setPublicLeads(getPublicLeads());
+    window.addEventListener("crm:data-changed", handleDataChanged);
+    const refreshTimer = window.setInterval(refreshCustomers, 5000);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("crm:data-changed", handleDataChanged);
+      window.clearInterval(refreshTimer);
+    };
+  }, []);
+
+  useEffect(() => {
     const editId = searchParams.get("edit");
     if (editId) {
       const c = getCustomers().find((c) => c.id === editId);
