@@ -61,6 +61,16 @@ function deleteRecordFromServer(key: string, id: string) {
   fetch(`${route}/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(console.error);
 }
 
+async function clearRecordListFromServer(key: string) {
+  const records = await loadRecordListFromServer<Array<{ id: string }>[number]>(key);
+  if (!records) return;
+  await Promise.allSettled(records.map((record) => {
+    if (!record?.id) return Promise.resolve();
+    const route = SERVER_COLLECTIONS[key];
+    return fetch(`${route}/${encodeURIComponent(record.id)}`, { method: "DELETE" });
+  }));
+}
+
 async function loadRecordListFromServer<T>(key: string): Promise<T[] | null> {
   const route = SERVER_COLLECTIONS[key];
   if (!route || typeof fetch === "undefined") return null;
@@ -169,6 +179,48 @@ export async function loadAgentsFromServer() {
   if (!agents) return getAgents();
   cacheRecordList("crm_agents", agents);
   return agents;
+}
+
+export async function loadAgentRunsFromServer() {
+  const runs = await loadRecordListFromServer<AgentRun>("crm_agent_runs");
+  if (!runs) return getAgentRuns();
+  const sorted = runs.sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""));
+  cacheRecordList("crm_agent_runs", sorted);
+  return sorted;
+}
+
+export async function loadAgentStepsFromServer() {
+  const steps = await loadRecordListFromServer<AgentStep>("crm_agent_steps");
+  if (!steps) return getAgentSteps();
+  const sorted = steps.sort((a, b) => Date.parse(a.createdAt || "") - Date.parse(b.createdAt || ""));
+  cacheRecordList("crm_agent_steps", sorted);
+  return sorted;
+}
+
+export async function loadAgentApprovalsFromServer() {
+  const approvals = await loadRecordListFromServer<AgentApproval>("crm_agent_approvals");
+  if (!approvals) return getAgentApprovals();
+  const sorted = approvals.sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""));
+  cacheRecordList("crm_agent_approvals", sorted);
+  return sorted;
+}
+
+export function deleteAgentRuntimeForRun(runId: string) {
+  deleteRecordFromServer("crm_agent_runs", runId);
+  getAgentSteps()
+    .filter((step) => step.runId === runId)
+    .forEach((step) => deleteRecordFromServer("crm_agent_steps", step.id));
+  getAgentApprovals()
+    .filter((approval) => approval.runId === runId)
+    .forEach((approval) => deleteRecordFromServer("crm_agent_approvals", approval.id));
+}
+
+export async function clearAgentRuntimeFromServer() {
+  await Promise.allSettled([
+    clearRecordListFromServer("crm_agent_runs"),
+    clearRecordListFromServer("crm_agent_steps"),
+    clearRecordListFromServer("crm_agent_approvals"),
+  ]);
 }
 
 export interface CustomerLog {
@@ -685,12 +737,13 @@ export interface AgentApproval {
 export function getAgentRuns(): AgentRun[] {
   try {
     const data = localStorage.getItem("crm_agent_runs");
-    if (data) return JSON.parse(data);
+    if (data) {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    }
   } catch (e) {}
 
-  const initialRuns: AgentRun[] = [];
-  saveAgentRuns(initialRuns);
-  return initialRuns;
+  return [];
 }
 
 export function saveAgentRuns(runs: AgentRun[]) {
@@ -713,12 +766,13 @@ export function addAgentRun(run: Omit<AgentRun, "id" | "createdAt">) {
 export function getAgentSteps(): AgentStep[] {
   try {
     const data = localStorage.getItem("crm_agent_steps");
-    if (data) return JSON.parse(data);
+    if (data) {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    }
   } catch (e) {}
 
-  const initialSteps: AgentStep[] = [];
-  saveAgentSteps(initialSteps);
-  return initialSteps;
+  return [];
 }
 
 export function saveAgentSteps(steps: AgentStep[]) {
@@ -741,12 +795,13 @@ export function addAgentStep(step: Omit<AgentStep, "id" | "createdAt">) {
 export function getAgentApprovals(): AgentApproval[] {
   try {
     const data = localStorage.getItem("crm_agent_approvals");
-    if (data) return JSON.parse(data);
+    if (data) {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    }
   } catch (e) {}
 
-  const initialApprovals: AgentApproval[] = [];
-  saveAgentApprovals(initialApprovals);
-  return initialApprovals;
+  return [];
 }
 
 export function saveAgentApprovals(approvals: AgentApproval[]) {

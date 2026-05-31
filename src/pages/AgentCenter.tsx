@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
-import { getAgents, loadAgentsFromServer, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, saveAgentSteps, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
+import { getAgents, loadAgentsFromServer, loadAgentRunsFromServer, loadAgentStepsFromServer, loadAgentApprovalsFromServer, deleteAgentRuntimeForRun, clearAgentRuntimeFromServer, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, saveAgentSteps, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
 import {
   AgentWorkflowDefinition,
   AgentWorkflowTarget,
@@ -426,10 +426,19 @@ export default function AgentCenter() {
         .then(setAgents)
         .catch(() => setAgents(getAgents()));
     };
+    const refreshRuntime = () => {
+      Promise.allSettled([
+        loadAgentRunsFromServer(),
+        loadAgentStepsFromServer(),
+        loadAgentApprovalsFromServer(),
+      ]).then(([runsResult, stepsResult, approvalsResult]) => {
+        setRuns(runsResult.status === "fulfilled" ? runsResult.value : getAgentRuns());
+        setSteps(stepsResult.status === "fulfilled" ? stepsResult.value : getAgentSteps());
+        setApprovals(approvalsResult.status === "fulfilled" ? approvalsResult.value : getAgentApprovals());
+      });
+    };
     refreshAgents();
-    setRuns(getAgentRuns());
-    setSteps(getAgentSteps());
-    setApprovals(getAgentApprovals());
+    refreshRuntime();
     setModelProfiles(getModelProfiles());
     const handleDataChanged = (event: Event) => {
       const key = (event as CustomEvent<{ key?: string }>).detail?.key;
@@ -448,7 +457,10 @@ export default function AgentCenter() {
       setModelProfiles(getModelProfiles());
     };
     window.addEventListener("crm:data-changed", handleDataChanged);
-    const refreshTimer = window.setInterval(refreshAgents, 5000);
+    const refreshTimer = window.setInterval(() => {
+      refreshAgents();
+      refreshRuntime();
+    }, 5000);
     return () => {
       window.removeEventListener("crm:data-changed", handleDataChanged);
       window.clearInterval(refreshTimer);
@@ -799,6 +811,7 @@ export default function AgentCenter() {
     saveAgentRuns(updatedRuns);
     saveAgentSteps(updatedSteps);
     saveAgentApprovals(updatedApprovals);
+    deleteAgentRuntimeForRun(deletingRunId);
     setRuns(updatedRuns);
     setSteps(updatedSteps);
     setApprovals(updatedApprovals);
@@ -810,6 +823,7 @@ export default function AgentCenter() {
     saveAgentRuns([]);
     saveAgentSteps([]);
     saveAgentApprovals([]);
+    clearAgentRuntimeFromServer().catch(console.error);
     setRuns([]);
     setSteps([]);
     setApprovals([]);
