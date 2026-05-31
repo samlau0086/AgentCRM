@@ -17,6 +17,7 @@ import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
 import ConfirmModal from "../components/ConfirmModal";
 import { notify } from "../services/notifications";
+import { useServerCollectionSync } from "../hooks/useServerCollectionSync";
 import {
   getCustomers,
   saveCustomers,
@@ -637,37 +638,20 @@ export default function Customers() {
     null,
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    const refreshCustomers = () => {
-      loadCustomersFromServer()
-        .then((latest) => {
-          if (!cancelled) setCustomers(latest);
-        })
-        .catch(console.error);
-      loadPublicLeadsFromServer()
-        .then((latest) => {
-          if (!cancelled) setPublicLeads(latest);
-        })
-        .catch(console.error);
-    };
-    const handleDataChanged = (event: Event) => {
-      const key = (event as CustomEvent<{ key?: string }>).detail?.key;
-      if (!key || key === "crm_customers") setCustomers(getCustomers());
-      if (!key || key === "crm_public_leads") setPublicLeads(getPublicLeads());
-    };
-
-    refreshCustomers();
-    setPublicLeads(getPublicLeads());
-    window.addEventListener("crm:data-changed", handleDataChanged);
-    const refreshTimer = window.setInterval(refreshCustomers, 5000);
-
-    return () => {
-      cancelled = true;
-      window.removeEventListener("crm:data-changed", handleDataChanged);
-      window.clearInterval(refreshTimer);
-    };
-  }, []);
+  useServerCollectionSync([
+    {
+      keys: ["crm_customers"],
+      loadFromServer: loadCustomersFromServer,
+      readFromCache: getCustomers,
+      setData: setCustomers,
+    },
+    {
+      keys: ["crm_public_leads"],
+      loadFromServer: loadPublicLeadsFromServer,
+      readFromCache: getPublicLeads,
+      setData: setPublicLeads,
+    },
+  ]);
 
   useEffect(() => {
     const editId = searchParams.get("edit");

@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
-import { getAgents, loadAgentsFromServer, loadAgentRunsFromServer, loadAgentStepsFromServer, loadAgentApprovalsFromServer, deleteAgentRuntimeForRun, clearAgentRuntimeFromServer, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, saveAgentSteps, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
+import { getAgents, loadAgentsFromServer, loadModelProfilesFromServer, loadAgentRunsFromServer, loadAgentStepsFromServer, loadAgentApprovalsFromServer, deleteAgentRuntimeForRun, clearAgentRuntimeFromServer, addAgent, updateAgent, deleteAgent, Agent, getAgentRuns, getAgentSteps, getAgentApprovals, AgentRun, AgentStep, AgentApproval, ModelProfile, getModelProfiles, saveAgentApprovals, saveAgentRuns, saveAgentSteps, addAgentRun, addAgentStep, addAgentApproval } from "../services/db";
 import {
   AgentWorkflowDefinition,
   AgentWorkflowTarget,
@@ -37,6 +37,7 @@ import {
 import { notify } from "../services/notifications";
 import ConfirmModal from "../components/ConfirmModal";
 import { loadAppSettingsFromServer, saveAppSetting } from "../services/appSettings";
+import { useServerCollectionSync } from "../hooks/useServerCollectionSync";
 
 type OperationGuard = {
   repeatable: boolean;
@@ -421,51 +422,41 @@ export default function AgentCenter() {
         setRunLogLimit(Math.min(500, savedLimit));
       }
     }).catch(console.error);
-    const refreshAgents = () => {
-      loadAgentsFromServer()
-        .then(setAgents)
-        .catch(() => setAgents(getAgents()));
-    };
-    const refreshRuntime = () => {
-      Promise.allSettled([
-        loadAgentRunsFromServer(),
-        loadAgentStepsFromServer(),
-        loadAgentApprovalsFromServer(),
-      ]).then(([runsResult, stepsResult, approvalsResult]) => {
-        setRuns(runsResult.status === "fulfilled" ? runsResult.value : getAgentRuns());
-        setSteps(stepsResult.status === "fulfilled" ? stepsResult.value : getAgentSteps());
-        setApprovals(approvalsResult.status === "fulfilled" ? approvalsResult.value : getAgentApprovals());
-      });
-    };
-    refreshAgents();
-    refreshRuntime();
     setModelProfiles(getModelProfiles());
-    const handleDataChanged = (event: Event) => {
-      const key = (event as CustomEvent<{ key?: string }>).detail?.key;
-      if (!key || ![
-        "crm_agents",
-        "crm_agent_runs",
-        "crm_agent_steps",
-        "crm_agent_approvals",
-        "crm_model_profiles",
-      ].includes(key)) return;
-
-      setAgents(getAgents());
-      setRuns(getAgentRuns());
-      setSteps(getAgentSteps());
-      setApprovals(getAgentApprovals());
-      setModelProfiles(getModelProfiles());
-    };
-    window.addEventListener("crm:data-changed", handleDataChanged);
-    const refreshTimer = window.setInterval(() => {
-      refreshAgents();
-      refreshRuntime();
-    }, 5000);
-    return () => {
-      window.removeEventListener("crm:data-changed", handleDataChanged);
-      window.clearInterval(refreshTimer);
-    };
   }, []);
+
+  useServerCollectionSync([
+    {
+      keys: ["crm_agents"],
+      loadFromServer: loadAgentsFromServer,
+      readFromCache: getAgents,
+      setData: setAgents,
+    },
+    {
+      keys: ["crm_agent_runs"],
+      loadFromServer: loadAgentRunsFromServer,
+      readFromCache: getAgentRuns,
+      setData: setRuns,
+    },
+    {
+      keys: ["crm_agent_steps"],
+      loadFromServer: loadAgentStepsFromServer,
+      readFromCache: getAgentSteps,
+      setData: setSteps,
+    },
+    {
+      keys: ["crm_agent_approvals"],
+      loadFromServer: loadAgentApprovalsFromServer,
+      readFromCache: getAgentApprovals,
+      setData: setApprovals,
+    },
+    {
+      keys: ["crm_model_profiles"],
+      loadFromServer: loadModelProfilesFromServer,
+      readFromCache: getModelProfiles,
+      setData: setModelProfiles,
+    },
+  ]);
 
   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);

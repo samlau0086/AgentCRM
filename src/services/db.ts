@@ -181,6 +181,13 @@ export async function loadAgentsFromServer() {
   return agents;
 }
 
+export async function loadModelProfilesFromServer() {
+  const profiles = await loadRecordListFromServer<ModelProfile>("crm_model_profiles");
+  if (!profiles) return getModelProfiles();
+  cacheRecordList("crm_model_profiles", profiles);
+  return profiles;
+}
+
 export async function loadAgentRunsFromServer() {
   const runs = await loadRecordListFromServer<AgentRun>("crm_agent_runs");
   if (!runs) return getAgentRuns();
