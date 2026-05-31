@@ -52,6 +52,7 @@ import {
 import { CommentSection } from "../components/CommentSection";
 import ConfirmModal from "../components/ConfirmModal";
 import { notify } from "../services/notifications";
+import { saveAppSetting } from "../services/appSettings";
 
 interface InboxInsight {
   intent: string;
@@ -230,7 +231,7 @@ export default function Inbox() {
       await sendEmail("default", composeTo.join(", "), composeSubject, finalText, finalHtml);
       if (composeTo[0] && composeSignatureId) {
         const next = { ...loadLastSignatureByRecipient(), [composeTo[0].trim().toLowerCase()]: composeSignatureId };
-        localStorage.setItem(LAST_SIGNATURE_BY_RECIPIENT_KEY, JSON.stringify(next));
+        saveAppSetting(LAST_SIGNATURE_BY_RECIPIENT_KEY, next);
       }
       const sentMessage = addOutboundMessage({
         sender: "agent@example.com",

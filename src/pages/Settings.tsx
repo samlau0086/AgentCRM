@@ -7,6 +7,7 @@ import { ReceiveProfile, SendProfile, EmailMapping, EmailSignature, getReceivePr
 import { Agent, ModelProfile, getAgents, getModelProfiles, saveModelProfiles, updateAgent } from '../services/db';
 import { notify } from '../services/notifications';
 import PasswordInput from '../components/PasswordInput';
+import { loadAppSettingsFromServer, saveAppSetting } from '../services/appSettings';
 
 type Tab = 'general' | 'agents' | 'integrations';
 
@@ -91,6 +92,7 @@ export default function Settings() {
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [pushAlerts, setPushAlerts] = useState(true);
   const [leadPlatformConfigs, setLeadPlatformConfigs] = useState<Record<string, LeadPlatformConfig>>({});
+  const [appSettingsLoaded, setAppSettingsLoaded] = useState(false);
   const [editingLeadPlatform, setEditingLeadPlatform] = useState<LeadPlatform | null>(null);
   const [testingEmailKey, setTestingEmailKey] = useState<string | null>(null);
   const [isTestingWaHub, setIsTestingWaHub] = useState(false);
@@ -109,24 +111,38 @@ export default function Settings() {
   });
 
   useEffect(() => {
-    setTimezone(localStorage.getItem('crm_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
-    setEmailAlerts(localStorage.getItem('crm_email_alerts') !== 'false');
-    setPushAlerts(localStorage.getItem('crm_push_alerts') !== 'false');
-    try {
-      setLeadPlatformConfigs(JSON.parse(localStorage.getItem('lead_platform_configs') || '{}'));
-    } catch (e) {
-      setLeadPlatformConfigs({});
-    }
+    loadAppSettingsFromServer().then((settings) => {
+      setTimezone(String(settings.crm_timezone || localStorage.getItem('crm_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone));
+      setEmailAlerts(String(settings.crm_email_alerts ?? localStorage.getItem('crm_email_alerts') ?? 'true') !== 'false');
+      setPushAlerts(String(settings.crm_push_alerts ?? localStorage.getItem('crm_push_alerts') ?? 'true') !== 'false');
+      const leadConfigs = settings.lead_platform_configs || localStorage.getItem('lead_platform_configs') || {};
+      setLeadPlatformConfigs(
+        typeof leadConfigs === 'string'
+          ? JSON.parse(leadConfigs || '{}')
+          : (leadConfigs as Record<string, LeadPlatformConfig>),
+      );
+      setAppSettingsLoaded(true);
+    }).catch(() => {
+      setTimezone(localStorage.getItem('crm_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
+      setEmailAlerts(localStorage.getItem('crm_email_alerts') !== 'false');
+      setPushAlerts(localStorage.getItem('crm_push_alerts') !== 'false');
+      try {
+        setLeadPlatformConfigs(JSON.parse(localStorage.getItem('lead_platform_configs') || '{}'));
+      } catch (e) {
+        setLeadPlatformConfigs({});
+      }
+      setAppSettingsLoaded(true);
+    });
     setReceiveProfiles(getReceiveProfiles());
     setSendProfiles(getSendProfiles());
     setEmailMappings(getEmailMappings());
     setEmailSignatures(getEmailSignatures());
     loadEmailConfigurationFromServer()
       .then(data => {
-        if (data.receiveProfiles.length > 0) setReceiveProfiles(data.receiveProfiles);
-        if (data.sendProfiles.length > 0) setSendProfiles(data.sendProfiles);
-        if (data.mappings.length > 0) setEmailMappings(data.mappings);
-        if (data.signatures.length > 0) setEmailSignatures(data.signatures);
+        setReceiveProfiles(data.receiveProfiles);
+        setSendProfiles(data.sendProfiles);
+        setEmailMappings(data.mappings);
+        setEmailSignatures(data.signatures);
       })
       .catch(console.error);
     setModelProfiles(getModelProfiles());
@@ -139,20 +155,23 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('crm_timezone', timezone);
-  }, [timezone]);
+    if (!appSettingsLoaded) return;
+    saveAppSetting('crm_timezone', timezone);
+  }, [appSettingsLoaded, timezone]);
 
   useEffect(() => {
-    localStorage.setItem('crm_email_alerts', String(emailAlerts));
-  }, [emailAlerts]);
+    if (!appSettingsLoaded) return;
+    saveAppSetting('crm_email_alerts', String(emailAlerts));
+  }, [appSettingsLoaded, emailAlerts]);
 
   useEffect(() => {
-    localStorage.setItem('crm_push_alerts', String(pushAlerts));
-  }, [pushAlerts]);
+    if (!appSettingsLoaded) return;
+    saveAppSetting('crm_push_alerts', String(pushAlerts));
+  }, [appSettingsLoaded, pushAlerts]);
 
   const saveLeadPlatformConfigs = (configs: Record<string, LeadPlatformConfig>) => {
     setLeadPlatformConfigs(configs);
-    localStorage.setItem('lead_platform_configs', JSON.stringify(configs));
+    saveAppSetting('lead_platform_configs', configs);
   };
 
   const openLeadPlatformModal = (platform: LeadPlatform) => {
@@ -966,8 +985,8 @@ export default function Settings() {
                     </button>
                     <button
                       onClick={() => {
-                        localStorage.setItem('wa_hub_url', (document.getElementById('hub_url') as HTMLInputElement).value);
-                        localStorage.setItem('wa_hub_token', (document.getElementById('hub_token') as HTMLInputElement).value);
+                        saveAppSetting('wa_hub_url', (document.getElementById('hub_url') as HTMLInputElement).value);
+                        saveAppSetting('wa_hub_token', (document.getElementById('hub_token') as HTMLInputElement).value);
                         notify('Saved WhatsApp Actor Hub configuration', 'success', 'WhatsApp settings saved');
                       }}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded transition-colors shadow-sm"

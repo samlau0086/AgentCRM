@@ -26,6 +26,120 @@ function notifyDataChanged(key: string) {
   window.dispatchEvent(new CustomEvent("crm:data-changed", { detail: { key } }));
 }
 
+const SERVER_COLLECTIONS: Record<string, string> = {
+  crm_public_leads: "/api/crm/public-leads",
+  crm_documents: "/api/knowledge",
+  crm_customers: "/api/crm/customers",
+  crm_products: "/api/crm/products",
+  crm_quotes: "/api/crm/quotes",
+  crm_model_profiles: "/api/model-profiles",
+  crm_agents: "/api/agents",
+  crm_agent_runs: "/api/agent/runs",
+  crm_agent_steps: "/api/agent/steps",
+  crm_agent_approvals: "/api/agent/approvals",
+  crm_users: "/api/app/users",
+  crm_inbox: "/api/communication/inbox",
+};
+
+function persistRecordList(key: string, records: Array<{ id: string }>) {
+  const route = SERVER_COLLECTIONS[key];
+  if (!route || typeof fetch === "undefined") return;
+  fetch(route)
+    .then((res) => (res.ok ? res.json() : []))
+    .then((existing) => {
+      const nextIds = new Set(records.map((record) => record.id));
+      const writes = records.map((record) =>
+        fetch(`${route}/${encodeURIComponent(record.id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(record),
+        }),
+      );
+      const deletes = (Array.isArray(existing) ? existing : [])
+        .filter((record) => record?.id && !nextIds.has(record.id))
+        .map((record) =>
+          fetch(`${route}/${encodeURIComponent(record.id)}`, {
+            method: "DELETE",
+          }),
+        );
+      return Promise.allSettled([...writes, ...deletes]);
+    })
+    .catch(console.error);
+}
+
+async function loadRecordListFromServer<T>(key: string): Promise<T[] | null> {
+  const route = SERVER_COLLECTIONS[key];
+  if (!route || typeof fetch === "undefined") return null;
+  const response = await fetch(route);
+  if (!response.ok) return null;
+  const data = await response.json().catch(() => []);
+  return Array.isArray(data) ? data : [];
+}
+
+function cacheRecordList<T>(key: string, records: T[]) {
+  localStorage.setItem(key, JSON.stringify(records));
+  notifyDataChanged(key);
+}
+
+export async function hydrateCrmDataFromServer() {
+  let shouldMigrateLocalCache = false;
+  try {
+    const migrationResponse = await fetch("/api/app/settings/crm_data_migrated_to_server");
+    shouldMigrateLocalCache = migrationResponse.status === 404;
+  } catch (e) {
+    shouldMigrateLocalCache = false;
+  }
+
+  const entries = await Promise.allSettled(
+    Object.keys(SERVER_COLLECTIONS).map(async (key) => {
+      const records = await loadRecordListFromServer(key);
+      if (!records) {
+        try {
+          const cached = JSON.parse(localStorage.getItem(key) || "[]");
+          return [key, Array.isArray(cached) ? cached : []] as const;
+        } catch (e) {
+          return [key, []] as const;
+        }
+      }
+      if (records.length > 0) {
+        cacheRecordList(key, records);
+        return [key, records] as const;
+      }
+
+      if (shouldMigrateLocalCache) {
+        try {
+          const cached = JSON.parse(localStorage.getItem(key) || "[]");
+          if (Array.isArray(cached) && cached.length > 0) {
+            persistRecordList(key, cached.filter((record) => record?.id));
+            return [key, cached] as const;
+          }
+        } catch (e) {}
+      }
+
+      cacheRecordList(key, []);
+      return [key, []] as const;
+    }),
+  );
+
+  if (shouldMigrateLocalCache) {
+    fetch("/api/app/settings/crm_data_migrated_to_server", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "crm_data_migrated_to_server",
+        value: true,
+        updatedAt: new Date().toISOString(),
+      }),
+    }).catch(console.error);
+  }
+
+  return Object.fromEntries(
+    entries
+      .filter((entry): entry is PromiseFulfilledResult<readonly [string, unknown[]]> => entry.status === "fulfilled")
+      .map((entry) => entry.value),
+  );
+}
+
 export interface CustomerLog {
   id: string;
   time: string;
@@ -79,6 +193,8 @@ export function getPublicLeads(): PublicLead[] {
 
 export function savePublicLeads(leads: PublicLead[]) {
   localStorage.setItem("crm_public_leads", JSON.stringify(leads));
+  persistRecordList("crm_public_leads", leads);
+  notifyDataChanged("crm_public_leads");
 }
 
 export function deletePublicLead(id: string) {
@@ -169,6 +285,8 @@ export function getDocuments(): Document[] {
 
 export function saveDocuments(docs: Document[]) {
   localStorage.setItem("crm_documents", JSON.stringify(docs));
+  persistRecordList("crm_documents", docs);
+  notifyDataChanged("crm_documents");
 }
 
 export function addDocument(doc: Omit<Document, "id">) {
@@ -196,53 +314,7 @@ export function getCustomers(): Customer[] {
         if (!c.preferredLanguage) {
           c.preferredLanguage = "en";
         }
-        if (!c.logs || c.logs.length <= 3) {
-          needsSave = true;
-          c.logs = [
-            {
-              id: "1",
-              time: "Today, 10:30 AM",
-              event: "AI identified high read-rate on Quotation #1044",
-              type: "ai",
-            },
-            {
-              id: "2",
-              time: "Yesterday, 2:15 PM",
-              event: 'Customer opened email: "Updated Pricing for Bulk"',
-              type: "action",
-            },
-            {
-              id: "3",
-              time: "May 20, 11:00 AM",
-              event: "Sent Quotation #1044 ($42,000)",
-              type: "comm",
-            },
-            {
-              id: "h1",
-              time: "May 18, 9:00 AM",
-              event: "Initial inquiry received via Website Form",
-              type: "comm",
-            },
-            {
-              id: "h2",
-              time: "May 18, 9:15 AM",
-              event: "AI auto-replied with product catalog",
-              type: "ai",
-            },
-            {
-              id: "h3",
-              time: "May 19, 10:20 AM",
-              event: "Customer requested bulk pricing",
-              type: "action",
-            },
-            {
-              id: "h4",
-              time: "May 19, 11:00 AM",
-              event: "Agent generated quotation #1044",
-              type: "comm",
-            },
-          ];
-        }
+        if (!c.logs) c.logs = [];
         return c;
       });
       if (needsSave) saveCustomers(parsed);
@@ -257,6 +329,8 @@ export function getCustomers(): Customer[] {
 
 export function saveCustomers(customers: Customer[]) {
   localStorage.setItem("crm_customers", JSON.stringify(customers));
+  persistRecordList("crm_customers", customers);
+  notifyDataChanged("crm_customers");
 }
 
 // ----------------------------------------------------------------------
@@ -288,6 +362,8 @@ export function getProducts(): Product[] {
 
 export function saveProducts(products: Product[]) {
   localStorage.setItem("crm_products", JSON.stringify(products));
+  persistRecordList("crm_products", products);
+  notifyDataChanged("crm_products");
 }
 
 export function addProduct(product: Omit<Product, "id">) {
@@ -353,6 +429,8 @@ export function getQuotes(): Quote[] {
 
 export function saveQuotes(quotes: Quote[]) {
   localStorage.setItem("crm_quotes", JSON.stringify(quotes));
+  persistRecordList("crm_quotes", quotes);
+  notifyDataChanged("crm_quotes");
 }
 
 export function addQuote(quote: Omit<Quote, "id">) {
@@ -460,6 +538,7 @@ export function getModelProfiles(): ModelProfile[] {
 
 export function saveModelProfiles(profiles: ModelProfile[]) {
   localStorage.setItem("crm_model_profiles", JSON.stringify(profiles));
+  persistRecordList("crm_model_profiles", profiles);
   notifyDataChanged("crm_model_profiles");
 }
 
@@ -580,6 +659,7 @@ export function getAgentRuns(): AgentRun[] {
 
 export function saveAgentRuns(runs: AgentRun[]) {
   localStorage.setItem("crm_agent_runs", JSON.stringify(runs));
+  persistRecordList("crm_agent_runs", runs);
   notifyDataChanged("crm_agent_runs");
 }
 
@@ -607,6 +687,7 @@ export function getAgentSteps(): AgentStep[] {
 
 export function saveAgentSteps(steps: AgentStep[]) {
   localStorage.setItem("crm_agent_steps", JSON.stringify(steps));
+  persistRecordList("crm_agent_steps", steps);
   notifyDataChanged("crm_agent_steps");
 }
 
@@ -634,6 +715,7 @@ export function getAgentApprovals(): AgentApproval[] {
 
 export function saveAgentApprovals(approvals: AgentApproval[]) {
   localStorage.setItem("crm_agent_approvals", JSON.stringify(approvals));
+  persistRecordList("crm_agent_approvals", approvals);
   notifyDataChanged("crm_agent_approvals");
 }
 
@@ -683,6 +765,7 @@ export function getAgents(): Agent[] {
 
 export function saveAgents(agents: Agent[]) {
   localStorage.setItem("crm_agents", JSON.stringify(agents));
+  persistRecordList("crm_agents", agents);
   notifyDataChanged("crm_agents");
 }
 
@@ -765,6 +848,8 @@ export function getSystemUsers(): SystemUser[] {
 
 export function saveSystemUsers(users: SystemUser[]) {
   localStorage.setItem("crm_users", JSON.stringify(users));
+  persistRecordList("crm_users", users);
+  notifyDataChanged("crm_users");
 }
 
 export function getCurrentUser(): SystemUser {
@@ -774,12 +859,17 @@ export function getCurrentUser(): SystemUser {
   } catch (e) {}
   const users = getSystemUsers();
   const defaultUser = users[0];
-  localStorage.setItem("crm_current_user", JSON.stringify(defaultUser));
+  setCurrentUser(defaultUser);
   return defaultUser;
 }
 
 export function setCurrentUser(user: SystemUser) {
   localStorage.setItem("crm_current_user", JSON.stringify(user));
+  fetch("/api/app/settings/crm_current_user", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: "crm_current_user", value: user, updatedAt: new Date().toISOString() }),
+  }).catch(console.error);
 }
 
 export interface ThreadMessage {
@@ -856,7 +946,7 @@ export function getInboxMessages(): MessagePreview[] {
 
 export function saveInboxMessages(msgs: MessagePreview[]) {
   localStorage.setItem("crm_inbox", JSON.stringify(msgs));
-  persistInboxMessagesToServer(msgs);
+  persistRecordList("crm_inbox", msgs);
   notifyDataChanged("crm_inbox");
 }
 
@@ -867,35 +957,19 @@ export function deleteInboxMessage(id: string) {
   }).catch(console.error);
 }
 
-function persistInboxMessagesToServer(msgs: MessagePreview[]) {
-  if (typeof fetch === "undefined") return;
-  msgs.forEach((msg) => {
-    fetch(`/api/communication/inbox/${encodeURIComponent(msg.id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(msg),
-    }).catch(console.error);
-  });
-}
-
 export async function loadInboxMessagesFromServer() {
   const response = await fetch("/api/communication/inbox");
   if (!response.ok) return getInboxMessages();
   const remote = await response.json().catch(() => []);
   if (!Array.isArray(remote)) return getInboxMessages();
-  const local = getInboxMessages();
-  const byId = new Map<string, MessagePreview>();
-  [...remote, ...local].forEach((message) => {
-    if (message?.id) byId.set(message.id, message);
-  });
-  const merged = Array.from(byId.values()).sort((a, b) => {
+  const messages = remote.sort((a, b) => {
     const timeA = Date.parse(a.date || "") || 0;
     const timeB = Date.parse(b.date || "") || 0;
     return timeB - timeA;
   });
-  localStorage.setItem("crm_inbox", JSON.stringify(merged));
+  localStorage.setItem("crm_inbox", JSON.stringify(messages));
   notifyDataChanged("crm_inbox");
-  return merged;
+  return messages;
 }
 
 export function addDraftToThread(messageId: string, reply: string) {

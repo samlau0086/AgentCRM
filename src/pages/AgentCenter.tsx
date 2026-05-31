@@ -36,6 +36,7 @@ import {
 } from "../services/agentRuntime";
 import { notify } from "../services/notifications";
 import ConfirmModal from "../components/ConfirmModal";
+import { loadAppSettingsFromServer, saveAppSetting } from "../services/appSettings";
 
 type OperationGuard = {
   repeatable: boolean;
@@ -414,6 +415,12 @@ export default function AgentCenter() {
   const [scheduleModeDraft, setScheduleModeDraft] = useState<"interval" | "monthly">("interval");
 
   useEffect(() => {
+    loadAppSettingsFromServer().then((settings) => {
+      const savedLimit = parseInt(String(settings.crm_agent_run_log_limit || ""), 10);
+      if (Number.isFinite(savedLimit) && savedLimit > 0) {
+        setRunLogLimit(Math.min(500, savedLimit));
+      }
+    }).catch(console.error);
     setAgents(getAgents());
     setRuns(getAgentRuns());
     setSteps(getAgentSteps());
@@ -866,7 +873,7 @@ export default function AgentCenter() {
   const updateRunLogLimit = (value: number) => {
     const nextLimit = Math.max(1, Math.min(500, value || 20));
     setRunLogLimit(nextLimit);
-    localStorage.setItem("crm_agent_run_log_limit", String(nextLimit));
+    saveAppSetting("crm_agent_run_log_limit", String(nextLimit));
   };
 
   return (

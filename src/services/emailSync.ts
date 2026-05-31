@@ -69,6 +69,7 @@ export function getReceiveProfiles(): ReceiveProfile[] {
 
 export function saveReceiveProfiles(profiles: ReceiveProfile[]) {
   localStorage.setItem('receive_profiles', JSON.stringify(profiles));
+  persistRecordList('/api/email/receive-profiles', profiles).catch(console.error);
 }
 
 export function getSendProfiles(): SendProfile[] {
@@ -90,6 +91,7 @@ export function getSendProfiles(): SendProfile[] {
 
 export function saveSendProfiles(profiles: SendProfile[]) {
   localStorage.setItem('send_profiles', JSON.stringify(profiles));
+  persistRecordList('/api/email/send-profiles', profiles).catch(console.error);
 }
 
 export function getEmailMappings(): EmailMapping[] {
@@ -102,6 +104,7 @@ export function getEmailMappings(): EmailMapping[] {
 
 export function saveEmailMappings(mappings: EmailMapping[]) {
   localStorage.setItem('email_mappings', JSON.stringify(mappings));
+  persistRecordList('/api/email/mappings', mappings).catch(console.error);
 }
 
 export function getEmailSignatures(): EmailSignature[] {
@@ -114,17 +117,18 @@ export function getEmailSignatures(): EmailSignature[] {
 
 export function saveEmailSignatures(signatures: EmailSignature[]) {
   localStorage.setItem('email_signatures', JSON.stringify(signatures));
+  persistRecordList('/api/email/signatures', signatures).catch(console.error);
 }
 
-async function fetchRecordList<T>(route: string): Promise<T[]> {
+async function fetchRecordList<T>(route: string): Promise<T[] | null> {
   const response = await fetch(route);
-  if (!response.ok) return [];
+  if (!response.ok) return null;
   const data = await response.json().catch(() => []);
   return Array.isArray(data) ? data : [];
 }
 
 async function persistRecordList<T extends { id: string }>(route: string, records: T[]) {
-  const existing = await fetchRecordList<T>(route).catch(() => []);
+  const existing = (await fetchRecordList<T>(route).catch(() => null)) || [];
   const nextIds = new Set(records.map((record) => record.id));
   await Promise.allSettled([
     ...records.map((record) =>
@@ -151,11 +155,16 @@ export async function loadEmailConfigurationFromServer() {
     fetchRecordList<EmailMapping>('/api/email/mappings'),
     fetchRecordList<EmailSignature>('/api/email/signatures'),
   ]);
-  if (receiveProfiles.length) saveReceiveProfiles(receiveProfiles);
-  if (sendProfiles.length) saveSendProfiles(sendProfiles);
-  if (mappings.length) saveEmailMappings(mappings);
-  if (signatures.length) saveEmailSignatures(signatures);
-  return { receiveProfiles, sendProfiles, mappings, signatures };
+  if (receiveProfiles) saveReceiveProfiles(receiveProfiles);
+  if (sendProfiles) saveSendProfiles(sendProfiles);
+  if (mappings) saveEmailMappings(mappings);
+  if (signatures) saveEmailSignatures(signatures);
+  return {
+    receiveProfiles: receiveProfiles ?? getReceiveProfiles(),
+    sendProfiles: sendProfiles ?? getSendProfiles(),
+    mappings: mappings ?? getEmailMappings(),
+    signatures: signatures ?? getEmailSignatures(),
+  };
 }
 
 export async function saveEmailConfigurationToServer(config: {

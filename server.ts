@@ -541,11 +541,20 @@ function crudRoutes(entity: string, route: string) {
 }
 
 crudRoutes("customers", "/api/crm/customers");
+crudRoutes("public_leads", "/api/crm/public-leads");
 crudRoutes("products", "/api/crm/products");
 crudRoutes("quotes", "/api/crm/quotes");
 crudRoutes("inbox_messages", "/api/communication/inbox");
 crudRoutes("agent_pending_actions", "/api/agent/actions/pending");
+crudRoutes("model_profiles", "/api/model-profiles");
+crudRoutes("agents", "/api/agents");
+crudRoutes("agent_runs", "/api/agent/runs");
+crudRoutes("agent_steps", "/api/agent/steps");
+crudRoutes("agent_approvals", "/api/agent/approvals");
 crudRoutes("knowledge_documents", "/api/knowledge");
+crudRoutes("app_users", "/api/app/users");
+crudRoutes("app_settings", "/api/app/settings");
+crudRoutes("media_items", "/api/media");
 crudRoutes("email_receive_profiles", "/api/email/receive-profiles");
 crudRoutes("email_send_profiles", "/api/email/send-profiles");
 crudRoutes("email_signatures", "/api/email/signatures");

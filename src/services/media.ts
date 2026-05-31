@@ -26,6 +26,11 @@ function getDB(): Promise<IDBDatabase> {
 }
 
 export async function addMedia(item: MediaItem): Promise<MediaItem> {
+  fetch(`/api/media/${encodeURIComponent(item.id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  }).catch(console.error);
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -37,6 +42,17 @@ export async function addMedia(item: MediaItem): Promise<MediaItem> {
 }
 
 export async function getMedias(): Promise<MediaItem[]> {
+  try {
+    const res = await fetch('/api/media');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      }
+    }
+  } catch (e) {
+    console.warn('Falling back to local media cache', e);
+  }
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
@@ -52,6 +68,7 @@ export async function getMedias(): Promise<MediaItem[]> {
 }
 
 export async function deleteMedia(id: string): Promise<void> {
+  fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(console.error);
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');

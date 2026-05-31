@@ -22,6 +22,8 @@ import Login from "./pages/Login";
 import { LanguageProvider } from "./i18n";
 import { ThemeProvider } from "./theme";
 import { startAgentScheduler } from "./services/agentScheduler";
+import { hydrateCrmDataFromServer } from "./services/db";
+import { loadAppSettingsFromServer } from "./services/appSettings";
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -30,6 +32,10 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
+    Promise.allSettled([
+      loadAppSettingsFromServer(),
+      hydrateCrmDataFromServer(),
+    ]).catch(console.error);
     return startAgentScheduler();
   }, [isAuthenticated]);
 
