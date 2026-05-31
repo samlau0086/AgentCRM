@@ -15,6 +15,7 @@ import { GoogleGenAI } from "@google/genai";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const CRM_DEPLOY_MARKER = "crm-db-sync-v2-record-upsert-polling";
 const JWT_SECRET = process.env.JWT_SECRET || "change_me_in_env";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const useSecureCookies = process.env.NODE_ENV === "production";
@@ -23,6 +24,17 @@ const hasVectorDatabase = Boolean(process.env.PG_VECTOR_URL);
 
 app.use(express.json({ limit: "25mb" }));
 app.use(cookieParser());
+
+app.get("/api/deploy-info", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({
+    marker: CRM_DEPLOY_MARKER,
+    gitSha: process.env.BUILD_SHA || "unknown",
+    buildTime: process.env.BUILD_TIME || "unknown",
+    repository: process.env.DEPLOY_REPOSITORY || "unknown",
+    nodeEnv: process.env.NODE_ENV || "development",
+  });
+});
 
 const VectorPool = new pg.Pool({
   connectionString: process.env.PG_VECTOR_URL || undefined,
@@ -1961,8 +1973,17 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(
+      express.static(distPath, {
+        setHeaders(res, filePath) {
+          if (filePath.endsWith("index.html")) {
+            res.setHeader("Cache-Control", "no-store");
+          }
+        },
+      }),
+    );
     app.get("*", (_req, res) => {
+      res.setHeader("Cache-Control", "no-store");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

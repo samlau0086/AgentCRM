@@ -45,6 +45,9 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             git branch -M main
+            DEPLOY_SHA="$(git rev-parse HEAD)"
+            DEPLOY_TIME="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            echo "Deploying commit: ${DEPLOY_SHA}"
             
             # 写入或更新运行端口环境变量
             # Remove stale untracked files from previous deployments, but keep runtime env.
@@ -53,6 +56,12 @@ jobs:
             touch .env
             sed -i '/^PORT=/d' .env
             echo "PORT=${{ secrets.APP_PORT }}" >> .env
+            sed -i '/^BUILD_SHA=/d' .env
+            sed -i '/^BUILD_TIME=/d' .env
+            sed -i '/^DEPLOY_REPOSITORY=/d' .env
+            echo "BUILD_SHA=${DEPLOY_SHA}" >> .env
+            echo "BUILD_TIME=${DEPLOY_TIME}" >> .env
+            echo "DEPLOY_REPOSITORY=${{ github.repository }}" >> .env
             
             if [ -n "${{ secrets.DATABASE_URL }}" ]; then
               sed -i '/^DATABASE_URL=/d' .env
@@ -105,6 +114,11 @@ jobs:
 
             if ! grep -R "imap-sync-v9-html-body" dist/server.cjs >/dev/null 2>&1; then
               echo "Current IMAP sync backend version was not found in dist/server.cjs. Aborting deploy."
+              exit 1
+            fi
+
+            if ! grep -R "crm-db-sync-v2-record-upsert-polling" dist/server.cjs >/dev/null 2>&1; then
+              echo "Current CRM DB sync marker was not found in dist/server.cjs. Aborting deploy."
               exit 1
             fi
             
