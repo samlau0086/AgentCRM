@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Plus, Edit2, Trash2, Search, Shield, Save, X } from 'lucide-react';
-import { getSystemUsers, saveSystemUsers, SystemUser, getCurrentUser } from '../services/db';
+import { getSystemUsers, loadSystemUsersFromServer, saveSystemUsers, SystemUser, getCurrentUser } from '../services/db';
 import { useLanguage } from '../i18n';
 import { cn } from '../Layout';
 import ConfirmModal from '../components/ConfirmModal';
+import { useServerCollectionSync } from '../hooks/useServerCollectionSync';
 
 export default function UserManagement() {
   const { t } = useLanguage();
@@ -14,9 +15,14 @@ export default function UserManagement() {
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setUsers(getSystemUsers());
-  }, []);
+  useServerCollectionSync([
+    {
+      keys: ['crm_users'],
+      loadFromServer: loadSystemUsersFromServer,
+      readFromCache: getSystemUsers,
+      setData: setUsers,
+    },
+  ]);
 
   if (currentUser.role !== 'superadmin') {
     return (
@@ -46,7 +52,7 @@ export default function UserManagement() {
     if (deletingUserId) {
       const newUsers = users.filter(u => u.id !== deletingUserId);
       setUsers(newUsers);
-      saveSystemUsers(newUsers);
+      saveSystemUsers(newUsers).catch(console.error);
       setDeletingUserId(null);
     }
   };
@@ -58,7 +64,7 @@ export default function UserManagement() {
         ? [...users, { ...editingUser, id: Math.random().toString(36).substr(2, 9) }]
         : users.map(u => u.id === editingUser.id ? editingUser : u);
       setUsers(newUsers);
-      saveSystemUsers(newUsers);
+      saveSystemUsers(newUsers).catch(console.error);
       setIsModalOpen(false);
       setEditingUser(null);
     }

@@ -60,7 +60,7 @@ async function replaceRecordListOnServer(key: string, records: Array<{ id: strin
   if (!route || typeof fetch === "undefined") return;
   const existing = await loadRecordListFromServer<Array<{ id: string }>[number]>(key);
   const nextIds = new Set(records.map((record) => record.id));
-  await Promise.allSettled([
+  const responses = await Promise.all([
     ...records.map((record) =>
       fetch(`${route}/${encodeURIComponent(record.id)}`, {
         method: "PUT",
@@ -76,6 +76,10 @@ async function replaceRecordListOnServer(key: string, records: Array<{ id: strin
         }),
       ),
   ]);
+  const failed = responses.find((response) => !response.ok);
+  if (failed) {
+    throw new Error(`Failed to save ${key}: HTTP ${failed.status}`);
+  }
 }
 
 function deleteRecordFromServer(key: string, id: string) {
@@ -207,14 +211,6 @@ export async function loadAgentsFromServer() {
 export async function loadModelProfilesFromServer() {
   const profiles = await loadRecordListFromServer<ModelProfile>("crm_model_profiles");
   if (!profiles) return getModelProfiles();
-  if (profiles.length === 0) {
-    const cached = getModelProfiles();
-    if (cached.length > 0) {
-      await persistRecordList("crm_model_profiles", cached);
-      cacheRecordList("crm_model_profiles", cached);
-      return cached;
-    }
-  }
   cacheRecordList("crm_model_profiles", profiles);
   return profiles;
 }
@@ -241,6 +237,13 @@ export async function loadAgentApprovalsFromServer() {
   const sorted = approvals.sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""));
   cacheRecordList("crm_agent_approvals", sorted);
   return sorted;
+}
+
+export async function loadSystemUsersFromServer() {
+  const users = await loadRecordListFromServer<SystemUser>("crm_users");
+  if (!users) return getSystemUsers();
+  cacheRecordList("crm_users", users);
+  return users;
 }
 
 export function deleteAgentRuntimeForRun(runId: string) {
@@ -971,14 +974,14 @@ export function getSystemUsers(): SystemUser[] {
       permissions: ["view_customers", "reply_inbox"],
     },
   ];
-  saveSystemUsers(initial);
   return initial;
 }
 
 export function saveSystemUsers(users: SystemUser[]) {
   localStorage.setItem("crm_users", JSON.stringify(users));
-  persistRecordList("crm_users", users);
+  const savePromise = replaceRecordListOnServer("crm_users", users);
   notifyDataChanged("crm_users");
+  return savePromise;
 }
 
 export function getCurrentUser(): SystemUser {

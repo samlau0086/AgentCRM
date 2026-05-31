@@ -145,10 +145,9 @@ export default function Settings() {
         setEmailSignatures(data.signatures);
       })
       .catch(console.error);
-    setModelProfiles(getModelProfiles());
     loadModelProfilesFromServer()
       .then(setModelProfiles)
-      .catch(console.error);
+      .catch(() => setModelProfiles(getModelProfiles()));
     setAgents(getAgents());
     
     fetch('/api/config/vector')
@@ -316,6 +315,8 @@ export default function Settings() {
   const handleSaveModelProfiles = async () => {
     try {
       await saveModelProfiles(modelProfiles);
+      const latest = await loadModelProfilesFromServer();
+      setModelProfiles(latest);
       notify('Saved Model Profiles', 'success', 'Model profiles saved');
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to save model profiles.', 'error', 'Model profiles save failed');
