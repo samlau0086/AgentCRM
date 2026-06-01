@@ -133,6 +133,10 @@ function extractRecipientValue(recipient: string) {
   return (match?.[1] || recipient).trim();
 }
 
+function normalizeConversationAddress(value = "") {
+  return value.trim().toLowerCase().replace(/[^\d+a-z@._-]/g, "");
+}
+
 export default function Inbox() {
   const { t, language } = useLanguage();
   const [waClients, setWaClients] = useState<WaClient[]>([]);
@@ -256,10 +260,8 @@ export default function Inbox() {
           ],
         });
         setMessages(getInboxMessages());
-        resetCompose("WhatsApp");
-        setSelectedMailbox("sent");
         setActiveMessageId(sentMessage.id);
-        setActiveTab("inbox");
+        setComposeBody("");
         return;
       }
 
@@ -316,7 +318,7 @@ export default function Inbox() {
     const recipient = message.direction === "outbound" || message.intent === "Outbound" ? message.target : message.sender;
     setComposeChannel(message.channel);
     setComposeMode("reply");
-    setComposeOriginalMessage(message);
+    setComposeOriginalMessage(message.channel === "Email" ? message : null);
     setComposeTo(recipient ? [recipient] : []);
     setComposeCc([]);
     setComposeBcc([]);
@@ -329,7 +331,7 @@ export default function Inbox() {
   const startForward = (message: MessagePreview) => {
     setComposeChannel(message.channel);
     setComposeMode("forward");
-    setComposeOriginalMessage(message);
+    setComposeOriginalMessage(message.channel === "Email" ? message : null);
     setComposeTo([]);
     setComposeCc([]);
     setComposeBcc([]);
@@ -934,6 +936,34 @@ export default function Inbox() {
     );
   });
 
+  const activeWhatsAppTarget = composeChannel === "WhatsApp" && composeTo[0]
+    ? extractRecipientValue(composeTo[0])
+    : "";
+  const activeWhatsAppTargetKey = normalizeConversationAddress(activeWhatsAppTarget);
+  const whatsappConversationItems = activeWhatsAppTargetKey
+    ? messages
+        .filter((msg) => {
+          if (msg.channel !== "WhatsApp") return false;
+          const senderKey = normalizeConversationAddress(msg.sender);
+          const targetKey = normalizeConversationAddress(msg.target);
+          return senderKey === activeWhatsAppTargetKey || targetKey === activeWhatsAppTargetKey;
+        })
+        .sort((a, b) => (Date.parse(a.date || "") || 0) - (Date.parse(b.date || "") || 0))
+        .flatMap((msg) =>
+          (msg.thread?.length ? msg.thread : [{
+            id: msg.id,
+            sender: msg.direction === "outbound" ? "agent" : "user",
+            content: msg.summary,
+            time: msg.date,
+          }]).map((threadItem) => ({
+            id: `${msg.id}:${threadItem.id}`,
+            direction: threadItem.sender === "agent" || msg.direction === "outbound" ? "outbound" : "inbound",
+            content: threadItem.content,
+            time: threadItem.time || msg.date,
+          })),
+        )
+    : [];
+
   const switchMailbox = (mailbox: "inbox" | "sent") => {
     setSelectedMailbox(mailbox);
     setActiveTab("inbox");
@@ -1279,23 +1309,81 @@ export default function Inbox() {
                 </div>
                 <div className="w-[52px]"></div>
               </div>}
+              {composeChannel === "WhatsApp" ? (
+                <div className="mt-4 flex min-h-[430px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/5">
+                  <div className="border-b border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-black/20">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      <MessageCircle className="h-4 w-4 text-emerald-500" />
+                      {activeWhatsAppTarget || (language === "zh" ? "选择 WhatsApp 收件人" : "Select a WhatsApp recipient")}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {language === "zh" ? "这里会显示与该号码的收发记录。" : "Messages with this number appear here."}
+                    </p>
+                  </div>
+                  <div className="flex-1 space-y-3 overflow-y-auto p-4">
+                    {activeWhatsAppTarget && whatsappConversationItems.length === 0 && (
+                      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                        {language === "zh" ? "暂无聊天记录，可以直接发送第一条消息。" : "No conversation yet. Send the first message below."}
+                      </div>
+                    )}
+                    {!activeWhatsAppTarget && (
+                      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                        {language === "zh" ? "先输入号码，或输入 @ 选择客户。" : "Enter a number or type @ to choose a customer."}
+                      </div>
+                    )}
+                    {whatsappConversationItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className={cn("flex", item.direction === "outbound" ? "justify-end" : "justify-start")}
+                      >
+                        <div
+                          className={cn(
+                            "max-w-[75%] rounded-2xl px-4 py-2 text-sm shadow-sm",
+                            item.direction === "outbound"
+                              ? "rounded-br-md bg-emerald-600 text-white"
+                              : "rounded-bl-md border border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-black/30 dark:text-slate-200",
+                          )}
+                        >
+                          <div className="whitespace-pre-wrap break-words">{item.content}</div>
+                          <div
+                            className={cn(
+                              "mt-1 text-[10px]",
+                              item.direction === "outbound" ? "text-emerald-100" : "text-slate-400",
+                            )}
+                          >
+                            {item.time}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border-t border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-black/20">
+                    <textarea
+                      value={composeBody}
+                      onChange={(event) => setComposeBody(event.target.value)}
+                      placeholder={language === "zh" ? "输入 WhatsApp 消息..." : "Type a WhatsApp message..."}
+                      className="min-h-[92px] w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                    />
+                  </div>
+                </div>
+              ) : (
               <div className="flex-1 flex flex-col min-h-[300px] mt-4 relative">
-                {composeChannel === "Email" && <button
+                <button
                   onClick={handleAIGenerateBody}
                   title="Generate Content"
                   className="absolute top-12 right-3 p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors z-10 shadow-sm border border-blue-200 dark:border-blue-800"
                 >
                   <Sparkles className="w-4 h-4" />
-                </button>}
+                </button>
                 <RichTextEditor
                   value={composeBody}
                   onChange={setComposeBody}
-                  placeholder={composeChannel === "WhatsApp" ? "Type your WhatsApp message here..." : "Type your message here..."}
+                  placeholder="Type your message here..."
                   className="flex-1 min-h-[300px]"
                 />
 
                 {/* Attachments Area */}
-                {composeChannel === "Email" && composeAttachments.length > 0 && (
+                {composeAttachments.length > 0 && (
                   <div className="absolute bottom-16 left-4 right-4 flex flex-wrap gap-2">
                     {composeAttachments.map((file, idx) => (
                       <span
@@ -1324,7 +1412,7 @@ export default function Inbox() {
                   </div>
                 )}
 
-                {composeChannel === "Email" && <div className="absolute bottom-3 left-3">
+                <div className="absolute bottom-3 left-3">
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className="p-2 text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-colors"
@@ -1339,11 +1427,14 @@ export default function Inbox() {
                     ref={fileInputRef}
                     onChange={handleFileSelect}
                   />
-                </div>}
+                </div>
               </div>
+              )}
               {composeOriginalMessage && (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
-                  <div className="mb-2 font-semibold text-slate-800 dark:text-slate-100">Original email</div>
+                  <div className="mb-2 font-semibold text-slate-800 dark:text-slate-100">
+                    {composeOriginalMessage.channel === "WhatsApp" ? "Original WhatsApp message" : "Original email"}
+                  </div>
                   <div className="mb-1">From: {composeOriginalMessage.sender}</div>
                   <div className="mb-1">To: {composeOriginalMessage.target}</div>
                   <div className="mb-3">Subject: {composeOriginalMessage.subject}</div>
