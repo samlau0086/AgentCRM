@@ -128,6 +128,11 @@ function loadLastSignatureByRecipient(): Record<string, string> {
   return loadJsonMap<string>(LAST_SIGNATURE_BY_RECIPIENT_KEY);
 }
 
+function extractRecipientValue(recipient: string) {
+  const match = recipient.match(/<([^>]+)>/);
+  return (match?.[1] || recipient).trim();
+}
+
 export default function Inbox() {
   const { t, language } = useLanguage();
   const [waClients, setWaClients] = useState<WaClient[]>([]);
@@ -189,13 +194,14 @@ export default function Inbox() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const resetCompose = () => {
+  const resetCompose = (channel: "Email" | "WhatsApp" = "Email") => {
     setComposeTo([]);
     setComposeCc([]);
     setComposeBcc([]);
     setComposeSubject("");
     setComposeBody("");
     setComposeMode("new");
+    setComposeChannel(channel);
     setComposeOriginalMessage(null);
     const mappingSignatureId = getEmailMappings()[0]?.signatureId || "";
     const signature = getEmailSignatures().find((item) => item.id === mappingSignatureId);
@@ -209,8 +215,14 @@ export default function Inbox() {
 
   const handleComposeSend = async () => {
     const composePlainText = stripHtml(composeBody);
-    if (!composeTo.length || !composeSubject.trim() || !composePlainText) {
-      notify("Please add at least one recipient, a subject, and a message.", "warning", "Missing email details");
+    if (!composeTo.length || (composeChannel === "Email" && !composeSubject.trim()) || !composePlainText) {
+      notify(
+        composeChannel === "WhatsApp"
+          ? "Please add a WhatsApp recipient and a message."
+          : "Please add at least one recipient, a subject, and a message.",
+        "warning",
+        composeChannel === "WhatsApp" ? "Missing WhatsApp details" : "Missing email details",
+      );
       return;
     }
 
@@ -224,6 +236,33 @@ export default function Inbox() {
 
     setIsSending(true);
     try {
+      if (composeChannel === "WhatsApp") {
+        const target = extractRecipientValue(composeTo[0]);
+        await sendMessage(target, composePlainText, selectedClientId);
+        const sentMessage = addOutboundMessage({
+          sender: "agent",
+          target,
+          intent: "Outbound",
+          subject: "WhatsApp message",
+          summary: composePlainText.slice(0, 140),
+          channel: "WhatsApp",
+          thread: [
+            {
+              id: `t_${Date.now()}`,
+              sender: "agent",
+              content: composePlainText,
+              time: new Date().toLocaleTimeString(),
+            },
+          ],
+        });
+        setMessages(getInboxMessages());
+        resetCompose("WhatsApp");
+        setSelectedMailbox("sent");
+        setActiveMessageId(sentMessage.id);
+        setActiveTab("inbox");
+        return;
+      }
+
       const signatureHtml = composeSignatureHtml || "";
       const originalHtml = composeOriginalMessage ? quotedOriginalHtml(composeOriginalMessage) : "";
       const finalHtml = `${composeBody}${signatureHtml ? `<div class="email-signature">${signatureHtml}</div>` : ""}${originalHtml}`;
@@ -275,6 +314,7 @@ export default function Inbox() {
 
   const startReply = (message: MessagePreview, initialBody = "") => {
     const recipient = message.direction === "outbound" || message.intent === "Outbound" ? message.target : message.sender;
+    setComposeChannel(message.channel);
     setComposeMode("reply");
     setComposeOriginalMessage(message);
     setComposeTo(recipient ? [recipient] : []);
@@ -282,11 +322,12 @@ export default function Inbox() {
     setComposeBcc([]);
     setComposeSubject(message.subject.toLowerCase().startsWith("re:") ? message.subject : `Re: ${message.subject}`);
     setComposeBody(initialBody);
-    applySignatureForRecipient(recipient);
+    if (message.channel === "Email") applySignatureForRecipient(recipient);
     setActiveTab("compose");
   };
 
   const startForward = (message: MessagePreview) => {
+    setComposeChannel(message.channel);
     setComposeMode("forward");
     setComposeOriginalMessage(message);
     setComposeTo([]);
@@ -332,6 +373,7 @@ export default function Inbox() {
   const [composeSubject, setComposeSubject] = useState("");
   const [composeBody, setComposeBody] = useState("");
   const [composeMode, setComposeMode] = useState<"new" | "reply" | "forward">("new");
+  const [composeChannel, setComposeChannel] = useState<"Email" | "WhatsApp">("Email");
   const [composeOriginalMessage, setComposeOriginalMessage] = useState<MessagePreview | null>(null);
   const [composeSignatureId, setComposeSignatureId] = useState("");
   const [composeSignatureHtml, setComposeSignatureHtml] = useState("");
@@ -916,7 +958,7 @@ export default function Inbox() {
               <button
                 type="button"
                 onClick={() => {
-                  resetCompose();
+                  resetCompose("Email");
                   setActiveTab("compose");
                 }}
                 className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 dark:border-blue-500/30"
@@ -924,6 +966,18 @@ export default function Inbox() {
                 aria-label={language === "zh" ? "写邮件" : "Compose email"}
               >
                 <SquarePen className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetCompose("WhatsApp");
+                  setActiveTab("compose");
+                }}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700 dark:border-emerald-500/30"
+                title={language === "zh" ? "发送 WhatsApp 消息" : "Send WhatsApp message"}
+                aria-label={language === "zh" ? "发送 WhatsApp 消息" : "Send WhatsApp message"}
+              >
+                <MessageCircle className="h-4 w-4" />
               </button>
               <button
                 type="button"
@@ -1100,26 +1154,29 @@ export default function Inbox() {
         {activeTab === "compose" ? (
           <div className="flex-1 flex flex-col p-6 overflow-y-auto">
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-6">
-              {composeMode === "reply" ? "Reply Mail" : composeMode === "forward" ? "Forward Mail" : "Compose Mail"}
+              {composeChannel === "WhatsApp"
+                ? language === "zh" ? "发送 WhatsApp 消息" : "Send WhatsApp Message"
+                : composeMode === "reply" ? "Reply Mail" : composeMode === "forward" ? "Forward Mail" : "Compose Mail"}
             </h2>
             <div className="space-y-4">
               <div className="flex flex-col gap-3">
                 <div className="flex items-start gap-4">
                   <label className="w-16 shrink-0 mt-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-                    To
+                    {composeChannel === "WhatsApp" ? "WhatsApp" : "To"}
                   </label>
                   <div className="flex-1">
                     <TaggedEmailInput
                       value={composeTo}
                       onChange={(next) => {
                         setComposeTo(next);
-                        if (next[0] && next[0] !== composeTo[0]) applySignatureForRecipient(next[0]);
+                        if (composeChannel === "Email" && next[0] && next[0] !== composeTo[0]) applySignatureForRecipient(next[0]);
                       }}
                       customers={customers}
-                      placeholder="Type @name or email..."
+                      preferredContactType={composeChannel === "WhatsApp" ? "WhatsApp" : "Email"}
+                      placeholder={composeChannel === "WhatsApp" ? "Type @name or WhatsApp number..." : "Type @name or email..."}
                     />
                   </div>
-                  <div className="flex gap-2 shrink-0 mt-2">
+                  {composeChannel === "Email" && <div className="flex gap-2 shrink-0 mt-2">
                     <button
                       className={cn(
                         "text-xs font-medium hover:text-blue-500",
@@ -1142,9 +1199,9 @@ export default function Inbox() {
                     >
                       Bcc
                     </button>
-                  </div>
+                  </div>}
                 </div>
-                {showCc && (
+                {composeChannel === "Email" && showCc && (
                   <div className="flex items-start gap-4">
                     <label className="w-16 shrink-0 mt-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                       Cc
@@ -1160,7 +1217,7 @@ export default function Inbox() {
                     <div className="w-[52px]"></div>
                   </div>
                 )}
-                {showBcc && (
+                {composeChannel === "Email" && showBcc && (
                   <div className="flex items-start gap-4">
                     <label className="w-16 shrink-0 mt-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                       Bcc
@@ -1177,7 +1234,7 @@ export default function Inbox() {
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-4">
+              {composeChannel === "Email" && <div className="flex items-center gap-4">
                 <label className="w-16 shrink-0 text-sm font-medium text-slate-700 dark:text-slate-300">
                   Subject
                 </label>
@@ -1198,8 +1255,8 @@ export default function Inbox() {
                   </button>
                 </div>
                 <div className="w-[52px]"></div>
-              </div>
-              <div className="flex items-start gap-4">
+              </div>}
+              {composeChannel === "Email" && <div className="flex items-start gap-4">
                 <label className="w-16 shrink-0 mt-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                   Signature
                 </label>
@@ -1221,24 +1278,24 @@ export default function Inbox() {
                   </select>
                 </div>
                 <div className="w-[52px]"></div>
-              </div>
+              </div>}
               <div className="flex-1 flex flex-col min-h-[300px] mt-4 relative">
-                <button
+                {composeChannel === "Email" && <button
                   onClick={handleAIGenerateBody}
                   title="Generate Content"
                   className="absolute top-12 right-3 p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg transition-colors z-10 shadow-sm border border-blue-200 dark:border-blue-800"
                 >
                   <Sparkles className="w-4 h-4" />
-                </button>
+                </button>}
                 <RichTextEditor
                   value={composeBody}
                   onChange={setComposeBody}
-                  placeholder="Type your message here..."
+                  placeholder={composeChannel === "WhatsApp" ? "Type your WhatsApp message here..." : "Type your message here..."}
                   className="flex-1 min-h-[300px]"
                 />
 
                 {/* Attachments Area */}
-                {composeAttachments.length > 0 && (
+                {composeChannel === "Email" && composeAttachments.length > 0 && (
                   <div className="absolute bottom-16 left-4 right-4 flex flex-wrap gap-2">
                     {composeAttachments.map((file, idx) => (
                       <span
@@ -1267,7 +1324,7 @@ export default function Inbox() {
                   </div>
                 )}
 
-                <div className="absolute bottom-3 left-3">
+                {composeChannel === "Email" && <div className="absolute bottom-3 left-3">
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className="p-2 text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg transition-colors"
@@ -1282,7 +1339,7 @@ export default function Inbox() {
                     ref={fileInputRef}
                     onChange={handleFileSelect}
                   />
-                </div>
+                </div>}
               </div>
               {composeOriginalMessage && (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
@@ -1301,6 +1358,20 @@ export default function Inbox() {
               )}
               <div className="pt-4 flex justify-between items-center border-t border-slate-200 dark:border-white/10 mt-6">
                 <div className="flex gap-2 items-center">
+                  {composeChannel === "WhatsApp" && waClients.length > 0 && (
+                    <select
+                      value={selectedClientId}
+                      onChange={(e) => setSelectedClientId(e.target.value)}
+                      className="px-3 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg text-sm outline-none focus:border-emerald-500 text-slate-800 dark:text-slate-200"
+                    >
+                      {waClients.map((client) => (
+                        <option key={client.id} value={client.id}>
+                          {client.name} ({client.status})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {composeChannel === "Email" && (
                   <button
                     onClick={() => setShowComposeSchedule(!showComposeSchedule)}
                     className={cn(
@@ -1313,7 +1384,8 @@ export default function Inbox() {
                   >
                     <Calendar className="w-5 h-5" />
                   </button>
-                  {showComposeSchedule && (
+                  )}
+                  {composeChannel === "Email" && showComposeSchedule && (
                     <div className="flex gap-2">
                       <input
                         type="date"
@@ -1339,11 +1411,14 @@ export default function Inbox() {
                   </button>
                   <button
                     onClick={handleComposeSend}
-                    disabled={isSending || !composeTo.length || !composeSubject.trim() || !stripHtml(composeBody)}
-                    className="px-6 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50"
+                    disabled={isSending || !composeTo.length || (composeChannel === "Email" && !composeSubject.trim()) || !stripHtml(composeBody)}
+                    className={cn(
+                      "px-6 py-2 text-sm font-medium text-white rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50",
+                      composeChannel === "WhatsApp" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-blue-600 hover:bg-blue-700",
+                    )}
                   >
-                    <Send className="w-4 h-4" />
-                    {isSending ? "Sending..." : showComposeSchedule ? "Schedule" : "Send"}
+                    {composeChannel === "WhatsApp" ? <MessageCircle className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                    {isSending ? "Sending..." : composeChannel === "WhatsApp" ? "Send WhatsApp" : showComposeSchedule ? "Schedule" : "Send"}
                   </button>
                 </div>
               </div>
@@ -1927,11 +2002,13 @@ function TaggedEmailInput({
   onChange,
   customers,
   placeholder,
+  preferredContactType = "Email",
 }: {
   value: string[];
   onChange: (val: string[]) => void;
   customers: Customer[];
   placeholder: string;
+  preferredContactType?: string;
 }) {
   const [inputVal, setInputVal] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -1968,7 +2045,12 @@ function TaggedEmailInput({
       if (showDropdown && filteredCustomers.length > 0) {
         const selected = filteredCustomers[activeIndex];
         const emailToUse =
+          selected.contacts?.find((c) => c.type === preferredContactType)?.value ||
+          selected.contacts?.find((c) => c.type === "WhatsApp")?.value ||
+          selected.contacts?.find((c) => c.type === "Mobile")?.value ||
+          selected.contacts?.find((c) => c.type === "Phone")?.value ||
           selected.contacts?.find((c) => c.type === "Email")?.value ||
+          selected.contact ||
           `${selected.name.toLowerCase().replace(" ", ".")}@example.com`;
         handleAdd(`${selected.name} <${emailToUse}>`);
       } else if (inputVal.trim()) {
@@ -2027,7 +2109,12 @@ function TaggedEmailInput({
         <div className="absolute top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-10 py-1">
           {filteredCustomers.map((c, idx) => {
             const emailToUse =
+              c.contacts?.find((contact) => contact.type === preferredContactType)?.value ||
+              c.contacts?.find((contact) => contact.type === "WhatsApp")?.value ||
+              c.contacts?.find((contact) => contact.type === "Mobile")?.value ||
+              c.contacts?.find((contact) => contact.type === "Phone")?.value ||
               c.contacts?.find((contact) => contact.type === "Email")?.value ||
+              c.contact ||
               `${c.name.toLowerCase().replace(" ", ".")}@example.com`;
             return (
               <div
