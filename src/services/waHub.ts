@@ -50,7 +50,7 @@ export async function fetchMessages(limit: number = 50): Promise<WaMessage[]> {
   return data.messages;
 }
 
-export async function sendMessage(to: string, body: string, clientId?: string) {
+export async function sendMessage(to: string, body: string, clientId?: string, attachments?: Array<{ name: string; type: string; url: string; size: number }>) {
   const { url, token } = getHubConfig();
   if (!url || !token) {
     throw new Error('WhatsApp Actor Hub is not configured.');
@@ -58,6 +58,7 @@ export async function sendMessage(to: string, body: string, clientId?: string) {
 
   const payload: any = { to, body };
   if (clientId) payload.clientId = clientId;
+  if (attachments?.length) payload.attachments = attachments;
 
   const res = await fetch(`${url}/api/tasks/send-message`, {
     method: 'POST',
