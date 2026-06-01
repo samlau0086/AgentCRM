@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, Edit2, Trash2, Search, Shield, Save, X } from 'lucide-react';
-import { getSystemUsers, loadSystemUsersFromServer, saveSystemUsers, SystemUser, getCurrentUser } from '../services/db';
+import { getSystemUsers, loadSystemUsersFromServer, saveSystemUsers, SystemUser, getCurrentUser, setCurrentUser } from '../services/db';
 import { useLanguage } from '../i18n';
 import { cn } from '../Layout';
 import ConfirmModal from '../components/ConfirmModal';
@@ -8,19 +8,32 @@ import { useServerCollectionSync } from '../hooks/useServerCollectionSync';
 
 export default function UserManagement() {
   const { t } = useLanguage();
-  const currentUser = getCurrentUser();
+  const [currentUser, setCurrentUserState] = useState<SystemUser>(() => getCurrentUser());
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
+  const applyUsers = (nextUsers: SystemUser[]) => {
+    setUsers(nextUsers);
+    setCurrentUserState((previousUser) => {
+      const matchedUser = nextUsers.find((user) => user.id === previousUser.id || user.email === previousUser.email);
+      const superAdmin = nextUsers.find((user) => user.role === 'superadmin');
+      const nextCurrentUser = matchedUser?.role === 'superadmin' ? matchedUser : superAdmin || matchedUser || previousUser;
+      if (nextCurrentUser.id !== previousUser.id || nextCurrentUser.role !== previousUser.role || nextCurrentUser.email !== previousUser.email) {
+        setCurrentUser(nextCurrentUser);
+      }
+      return nextCurrentUser;
+    });
+  };
+
   useServerCollectionSync([
     {
       keys: ['crm_users'],
       loadFromServer: loadSystemUsersFromServer,
       readFromCache: getSystemUsers,
-      setData: setUsers,
+      setData: applyUsers,
     },
   ]);
 
