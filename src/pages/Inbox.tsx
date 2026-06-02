@@ -1416,7 +1416,10 @@ export default function Inbox() {
                       <div className="relative flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => setIsEmojiPickerOpen((open) => !open)}
+                          onClick={() => {
+                            setIsEmojiPickerOpen((open) => !open);
+                            setIsMediaPickerOpen(false);
+                          }}
                           className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-emerald-600 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
                           title={language === "zh" ? "添加 Emoji" : "Add emoji"}
                         >
@@ -1424,7 +1427,10 @@ export default function Inbox() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setIsMediaPickerOpen((open) => !open)}
+                          onClick={() => {
+                            setIsMediaPickerOpen((open) => !open);
+                            setIsEmojiPickerOpen(false);
+                          }}
                           className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-emerald-600 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
                           title={language === "zh" ? "选择媒体素材" : "Choose media asset"}
                         >
@@ -1436,7 +1442,10 @@ export default function Inbox() {
                               <button
                                 key={emoji}
                                 type="button"
-                                onClick={() => setComposeBody((body) => `${body}${emoji}`)}
+                                onClick={() => {
+                                  setComposeBody((body) => `${body}${emoji}`);
+                                  setIsEmojiPickerOpen(false);
+                                }}
                                 className="rounded-lg p-2 text-lg hover:bg-slate-100 dark:hover:bg-white/10"
                               >
                                 {emoji}
@@ -1462,9 +1471,12 @@ export default function Inbox() {
                                     key={item.id}
                                     type="button"
                                     onClick={() =>
-                                      setSelectedWhatsAppMedia((prev) =>
-                                        selected ? prev.filter((media) => media.id !== item.id) : [...prev, item],
-                                      )
+                                      {
+                                        setSelectedWhatsAppMedia((prev) =>
+                                          selected ? prev.filter((media) => media.id !== item.id) : [...prev, item],
+                                        );
+                                        setIsMediaPickerOpen(false);
+                                      }
                                     }
                                     className={cn(
                                       "flex w-full items-center gap-3 rounded-lg border p-2 text-left text-sm transition-colors",
