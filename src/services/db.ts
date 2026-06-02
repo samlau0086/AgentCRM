@@ -1028,6 +1028,7 @@ export interface MessagePreview {
   channel: "Email" | "WhatsApp";
   date: string;
   read: boolean;
+  important?: boolean;
   assignee?: string;
   thread: ThreadMessage[];
   comments?: UniversalComment[];
