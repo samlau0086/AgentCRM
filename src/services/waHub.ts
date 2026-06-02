@@ -8,6 +8,11 @@ export interface WaClient {
 export interface WaMessage {
   id: string;
   client_id: string;
+  chatId?: string;
+  chat_id?: string;
+  chatid?: string;
+  mob?: string;
+  mobile?: string;
   direction: 'inbound' | 'outbound';
   sender: string;
   recipient: string;

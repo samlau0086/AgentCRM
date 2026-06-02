@@ -80,6 +80,7 @@ interface SenderAnalysisPreference {
 const INBOX_INSIGHTS_KEY = "crm_inbox_ai_insights";
 const SENDER_ANALYSIS_PREFS_KEY = "crm_inbox_sender_analysis_prefs";
 const LAST_SIGNATURE_BY_RECIPIENT_KEY = "crm_last_email_signature_by_recipient";
+const WHATSAPP_CHAT_MOB_MAPPINGS_KEY = "crm_whatsapp_chat_mob_mappings";
 const WHATSAPP_EMOJIS = ["😀", "😂", "😊", "😍", "👍", "🙏", "🎉", "🔥", "✅", "💬", "📎", "❤️"];
 
 function loadJsonMap<T>(key: string): Record<string, T> {
@@ -141,6 +142,14 @@ function normalizeConversationAddress(value = "") {
   return value.trim().toLowerCase().replace(/[^\d+a-z@._-]/g, "");
 }
 
+function getWhatsAppChatId(msg: { chatId?: string; chat_id?: string; chatid?: string; sender?: string; recipient?: string; direction?: string }) {
+  const explicit = msg.chatId || msg.chat_id || msg.chatid;
+  if (explicit) return String(explicit);
+  return msg.direction === "outbound"
+    ? String(msg.recipient || msg.sender || "unknown")
+    : String(msg.sender || msg.recipient || "unknown");
+}
+
 export default function Inbox() {
   const { t, language } = useLanguage();
   const [waClients, setWaClients] = useState<WaClient[]>([]);
@@ -149,6 +158,8 @@ export default function Inbox() {
   const [selectedWhatsAppMedia, setSelectedWhatsAppMedia] = useState<MediaItem[]>([]);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
+  const [whatsAppChatMobMappings, setWhatsAppChatMobMappings] = useState<Record<string, string>>(() => loadJsonMap<string>(WHATSAPP_CHAT_MOB_MAPPINGS_KEY));
+  const [editingChatMob, setEditingChatMob] = useState("");
   const [replyText, setReplyText] = useState("");
   const [replyTo, setReplyTo] = useState<string[]>([]);
   const [replyCc, setReplyCc] = useState<string[]>([]);
@@ -214,6 +225,7 @@ export default function Inbox() {
     setComposeBody("");
     setComposeMode("new");
     setComposeChannel(channel);
+    setComposeWhatsAppChatId("");
     setComposeOriginalMessage(null);
     const mappingSignatureId = getEmailMappings()[0]?.signatureId || "";
     const signature = getEmailSignatures().find((item) => item.id === mappingSignatureId);
@@ -399,6 +411,7 @@ export default function Inbox() {
   const [composeBody, setComposeBody] = useState("");
   const [composeMode, setComposeMode] = useState<"new" | "reply" | "forward">("new");
   const [composeChannel, setComposeChannel] = useState<"Email" | "WhatsApp">("Email");
+  const [composeWhatsAppChatId, setComposeWhatsAppChatId] = useState("");
   const [composeOriginalMessage, setComposeOriginalMessage] = useState<MessagePreview | null>(null);
   const [composeSignatureId, setComposeSignatureId] = useState("");
   const [composeSignatureHtml, setComposeSignatureHtml] = useState("");
@@ -444,8 +457,11 @@ export default function Inbox() {
       const existing = getInboxMessages();
       const existingIds = new Set(existing.map((m) => m.id));
       const emailById = new Map(emails.map((email) => [email.id, email]));
+      const waChatIds = new Set(waMessages.map(getWhatsAppChatId));
       let updatedCount = 0;
-      const refreshedExisting = existing.map((message) => {
+      const refreshedExisting = existing
+        .filter((message) => message.channel !== "WhatsApp" || !message.chatId || !waChatIds.has(message.chatId))
+        .map((message) => {
         const email = emailById.get(message.id);
         if (!email) return message;
         if (message.subject !== email.subject || message.summary !== email.summary || message.sender !== email.sender) {
@@ -484,28 +500,40 @@ export default function Inbox() {
         }));
       emailPreviews.forEach((message) => existingIds.add(message.id));
 
-      const waPreviews: MessagePreview[] = waMessages
-        .filter((msg) => !existingIds.has(msg.id))
-        .map((msg) => ({
-          id: msg.id,
-          sender: msg.sender,
-          target: msg.recipient,
+      const waGroups = new Map<string, typeof waMessages>();
+      waMessages.forEach((msg) => {
+        const chatId = getWhatsAppChatId(msg);
+        waGroups.set(chatId, [...(waGroups.get(chatId) || []), msg]);
+      });
+      const existingById = new Map(existing.map((message) => [message.id, message]));
+      const waPreviews: MessagePreview[] = Array.from(waGroups.entries()).map(([chatId, group]) => {
+        const sorted = group.sort((a, b) => Date.parse(a.created_at || "") - Date.parse(b.created_at || ""));
+        const latest = sorted[sorted.length - 1];
+        const previewId = `wa_chat_${chatId}`;
+        const existingPreview = existingById.get(previewId);
+        const mappedMob = whatsAppChatMobMappings[chatId] || latest.mob || latest.mobile || (latest.direction === "outbound" ? latest.recipient : latest.sender);
+        return {
+          ...(existingPreview || {}),
+          id: previewId,
+          chatId,
+          mob: mappedMob,
+          sender: mappedMob || latest.sender,
+          target: mappedMob || latest.recipient,
           intent: "WhatsApp",
           subject: "WhatsApp conversation",
-          summary: msg.body,
+          summary: latest.body,
           channel: "WhatsApp",
-          date: new Date(msg.created_at).toLocaleString(),
-          direction: msg.direction === "outbound" ? "outbound" : "inbound",
-          read: msg.direction === "outbound",
-          thread: [
-            {
+          date: new Date(latest.created_at).toLocaleString(),
+          direction: latest.direction === "outbound" ? "outbound" : "inbound",
+          read: existingPreview?.read ?? latest.direction === "outbound",
+          thread: sorted.map((msg) => ({
               id: `t_${msg.id}`,
               sender: msg.direction === "outbound" ? "agent" : "user",
               content: msg.body,
               time: new Date(msg.created_at).toLocaleTimeString(),
-            },
-          ],
-        }));
+            })),
+        };
+      });
 
       const merged = [...emailPreviews, ...waPreviews, ...refreshedExisting];
       addedCount = emailPreviews.length + waPreviews.length;

@@ -1016,6 +1016,8 @@ export interface MessagePreview {
   id: string;
   sender: string;
   target: string;
+  chatId?: string;
+  mob?: string;
   direction?: "inbound" | "outbound";
   customerId?: string;
   userId?: string;
