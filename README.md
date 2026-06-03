@@ -70,7 +70,7 @@ Database-backed data includes:
 ### Main Features
 
 - **Dashboard**: CRM metrics, unread messages, estimated revenue, pending work, and a GitHub-style contribution chart.
-- **Customer Management**: Create, edit, delete, search, tag, CSV import, Public Pool lead claiming, and List/Map views. The Map view shows a world map, country counts, and click-to-filter behavior.
+- **Customer Management**: Create, edit, delete, search, tag, CSV import, Public Pool lead claiming, and List/Map views. The Map view uses an SVG world map with recognizable continent outlines, country counts, and click-to-filter behavior.
 - **Unified Inbox**: Manage Email and WhatsApp conversations in one place. Supports Inbox/Sent views, fixed channel filters for All/WhatsApp/Email, search, bulk delete, bulk tag, bulk follow-up with due date, mark important, delete, sync, assignee, internal comments, and AI analysis.
 - **WhatsApp Conversations**: WhatsApp messages are grouped by chatId into one conversation. The message view uses left/right chat bubbles to distinguish customer and agent messages. The input box supports emoji and media library attachments.
 - **WhatsApp Auto Translation**: Optional, disabled by default. Customer messages can be translated into the system language inside the same bubble. Outbound WhatsApp messages can also be translated before sending on a per-number basis. Translation reads from browser cache first, then database cache, then AI only when needed.
@@ -103,7 +103,7 @@ Database-backed data includes:
 1. Use **My Customers** for owned customer records.
 2. Use **Public Pool** for public leads gathered or imported before claiming.
 3. Use **List** view for table management.
-4. Use **Map** view to see customer/lead distribution on a world map.
+4. Use **Map** view to see customer/lead distribution on an SVG world map with recognizable continent outlines.
 5. Click a country on the map or country list to switch back to List view filtered by that country.
 6. Use **Import CSV** to import customers or public leads. The modal provides a sample CSV download.
 
@@ -270,7 +270,7 @@ ANTHROPIC_API_KEY=...
 ### 主要功能
 
 - **仪表盘**：CRM 指标、未读消息、预计收入、待处理工作，以及类似 GitHub Contributions 的事件图表。
-- **客户管理**：创建、编辑、删除、搜索、标签管理、CSV 导入、Public Pool 线索领取，并支持 List/Map 视图。Map 视图显示世界地图、国家数量，并支持点击国家筛选列表。
+- **客户管理**：创建、编辑、删除、搜索、标签管理、CSV 导入、Public Pool 线索领取，并支持 List/Map 视图。Map 视图使用带清晰大陆轮廓的 SVG 世界地图，显示国家数量，并支持点击国家筛选列表。
 - **统一收件箱**：集中管理 Email 和 WhatsApp 会话。支持 Inbox/Sent、固定 All/WhatsApp/Email 渠道筛选、搜索、批量删除、批量加标签、批量加入跟进并设置到期时间、标记重要、删除、同步、负责人、内部评论和 AI 分析。
 - **WhatsApp 会话**：按 chatId 聚合同一个聊天窗口。消息气泡会区分我方和客户：我方靠右，客户靠左。输入框支持 emoji 和媒体素材库附件。
 - **WhatsApp 自动翻译**：可选功能，默认关闭。客人的非系统语言消息可在同一个气泡内翻译为系统语言；我方发送 WhatsApp 时也可以按号码开启发送前自动翻译。翻译读取顺序为浏览器缓存、数据库缓存，最后才调用 AI。
@@ -303,7 +303,7 @@ ANTHROPIC_API_KEY=...
 1. **My Customers** 用于管理已拥有客户。
 2. **Public Pool** 用于管理待领取的公共线索。
 3. **List** 视图用于表格管理。
-4. **Map** 视图用于查看客户/线索在世界地图上的分布。
+4. **Map** 视图用于在带清晰大陆轮廓的 SVG 世界地图上查看客户/线索分布。
 5. 点击地图上的国家点或右侧国家列表，会自动切回 List 并筛选该国家。
 6. 使用 **Import CSV** 导入客户或公共线索，弹窗中提供示例 CSV 下载。
 

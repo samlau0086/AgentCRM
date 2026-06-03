@@ -10,6 +10,7 @@ export interface Attachment {
   url: string;
   type: string;
   size: number;
+  mimeType?: string;
 }
 
 export interface UniversalComment {
@@ -1009,6 +1010,7 @@ export interface ThreadMessage {
   sender: "user" | "agent";
   content: string;
   htmlContent?: string;
+  attachments?: Attachment[];
   time: string;
 }
 

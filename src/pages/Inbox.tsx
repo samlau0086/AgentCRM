@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
-import { fetchClients, fetchMessages, sendMessage, WaClient } from "../services/waHub";
+import { fetchClients, fetchHubMediaBlob, fetchMessages, resolveHubMediaUrl, sendMessage, WaClient, WaMessage } from "../services/waHub";
 import { fetchEmails, sendEmail, getEmailMappings, getEmailSignatures, loadEmailConfigurationFromServer } from "../services/emailSync";
 import { getMedias, MediaItem } from "../services/media";
 import {
@@ -238,6 +238,124 @@ function getWhatsAppChatId(msg: { chatId?: string; chat_id?: string; chatid?: st
     : String(msg.sender || msg.recipient || "unknown");
 }
 
+function getWhatsAppConversationKey(msg: WaMessage) {
+  return msg.conversation_key || msg.conversation_id || msg.mob || msg.mobile || getWhatsAppChatId(msg);
+}
+
+function getWhatsAppBody(msg: WaMessage) {
+  return msg.body || msg.payload?.caption || "";
+}
+
+function getWhatsAppMediaAttachments(msg: WaMessage): Attachment[] {
+  const media = msg.payload?.media;
+  if (!media?.url) return [];
+  const mimeType = media.mimeType || media.type || "application/octet-stream";
+  return [
+    {
+      id: String(media.id || media.whatsappMessageId || msg.id),
+      name: media.originalName || media.name || (mimeType.startsWith("image/") ? "WhatsApp image" : "WhatsApp media"),
+      url: resolveHubMediaUrl(media.url),
+      type: mimeType,
+      mimeType,
+      size: Number(media.size || 0),
+    },
+  ];
+}
+
+function mediaItemToAttachment(item: MediaItem): Attachment {
+  const mimeType =
+    item.type === "image"
+      ? "image/*"
+      : item.type === "video"
+        ? "video/*"
+        : "application/octet-stream";
+  return {
+    id: item.id,
+    name: item.name,
+    url: item.url,
+    type: mimeType,
+    mimeType,
+    size: item.size,
+  };
+}
+
+function WhatsAppAttachmentView({ attachment }: { attachment: Attachment }) {
+  const [objectUrl, setObjectUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+  const isImage = (attachment.mimeType || attachment.type || "").startsWith("image/");
+
+  useEffect(() => {
+    let revoked = false;
+    let createdObjectUrl = "";
+    setFailed(false);
+    setObjectUrl("");
+
+    if (!attachment.url) return undefined;
+    if (!isImage) return undefined;
+    if (attachment.url.startsWith("blob:") || attachment.url.startsWith("data:")) {
+      setObjectUrl(attachment.url);
+      return undefined;
+    }
+
+    fetchHubMediaBlob(attachment.url)
+      .then((blob) => {
+        if (revoked) return;
+        createdObjectUrl = URL.createObjectURL(blob);
+        setObjectUrl(createdObjectUrl);
+      })
+      .catch((err) => {
+        console.error(err);
+        if (!revoked) setFailed(true);
+      });
+
+    return () => {
+      revoked = true;
+      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl);
+    };
+  }, [attachment.url, isImage]);
+
+  const openAttachment = async () => {
+    try {
+      const blob = await fetchHubMediaBlob(attachment.url);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (err) {
+      console.error(err);
+      notify(err instanceof Error ? err.message : "Failed to open WhatsApp media.", "error", "Media unavailable");
+    }
+  };
+
+  if (isImage) {
+    return (
+      <div className="mt-2 overflow-hidden rounded-xl border border-white/20 bg-black/5 dark:bg-black/20">
+        {objectUrl ? (
+          <img src={objectUrl} alt={attachment.name} className="max-h-80 w-full max-w-sm object-contain" />
+        ) : (
+          <button
+            type="button"
+            onClick={openAttachment}
+            className="flex min-h-28 w-64 items-center justify-center px-4 py-6 text-xs opacity-75"
+          >
+            {failed ? "Open WhatsApp image" : "Loading image..."}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={openAttachment}
+      className="mt-2 flex max-w-sm items-center gap-2 rounded-xl border border-white/20 bg-black/5 px-3 py-2 text-left text-xs font-medium hover:bg-black/10 dark:bg-black/20 dark:hover:bg-black/30"
+    >
+      <Paperclip className="h-4 w-4 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
+    </button>
+  );
+}
+
 export default function Inbox() {
   const { t, language } = useLanguage();
   const [waClients, setWaClients] = useState<WaClient[]>([]);
@@ -366,12 +484,7 @@ export default function Inbox() {
           : composePlainText;
         const mediaLines = selectedWhatsAppMedia.map((item) => `[${item.type}] ${item.name}`);
         const finalWhatsAppText = [outboundText, ...mediaLines].filter(Boolean).join("\n");
-        const attachments = selectedWhatsAppMedia.map((item) => ({
-          name: item.name,
-          type: item.type,
-          url: item.url,
-          size: item.size,
-        }));
+        const attachments = selectedWhatsAppMedia.map(mediaItemToAttachment);
         await sendMessage(target, finalWhatsAppText, selectedClientId, attachments);
         const sentMessage = addOutboundMessage({
           sender: "agent",
@@ -385,6 +498,7 @@ export default function Inbox() {
               id: `t_${Date.now()}`,
               sender: "agent",
               content: finalWhatsAppText,
+              attachments,
               time: new Date().toLocaleTimeString(),
             },
           ],
@@ -560,10 +674,22 @@ export default function Inbox() {
       const existing = getInboxMessages();
       const existingIds = new Set(existing.map((m) => m.id));
       const emailById = new Map(emails.map((email) => [email.id, email]));
-      const waChatIds = new Set(waMessages.map(getWhatsAppChatId));
+      const waConversationKeys = new Set(
+        waMessages.flatMap((msg) =>
+          [getWhatsAppConversationKey(msg), getWhatsAppChatId(msg), msg.mob, msg.mobile, msg.sender, msg.recipient]
+            .filter(Boolean)
+            .map((value) => normalizeConversationAddress(String(value))),
+        ),
+      );
       let updatedCount = 0;
       const refreshedExisting = existing
-        .filter((message) => message.channel !== "WhatsApp" || !message.chatId || !waChatIds.has(message.chatId))
+        .filter((message) => {
+          if (message.channel !== "WhatsApp") return true;
+          const existingKeys = [message.chatId, message.mob, message.sender, message.target]
+            .filter(Boolean)
+            .map((value) => normalizeConversationAddress(String(value)));
+          return !existingKeys.some((key) => waConversationKeys.has(key));
+        })
         .map((message) => {
         const email = emailById.get(message.id);
         if (!email) return message;
@@ -605,7 +731,7 @@ export default function Inbox() {
 
       const waGroups = new Map<string, typeof waMessages>();
       waMessages.forEach((msg) => {
-        const chatId = getWhatsAppChatId(msg);
+        const chatId = getWhatsAppConversationKey(msg);
         waGroups.set(chatId, [...(waGroups.get(chatId) || []), msg]);
       });
       const existingById = new Map(existing.map((message) => [message.id, message]));
@@ -615,6 +741,9 @@ export default function Inbox() {
         const previewId = `wa_chat_${chatId}`;
         const existingPreview = existingById.get(previewId);
         const mappedMob = whatsAppChatMobMappings[chatId] || latest.mob || latest.mobile || (latest.direction === "outbound" ? latest.recipient : latest.sender);
+        const latestBody = getWhatsAppBody(latest);
+        const latestAttachments = getWhatsAppMediaAttachments(latest);
+        const summary = latestBody || latestAttachments[0]?.name || (latest.message_type === "media" ? "WhatsApp media" : "");
         return {
           ...(existingPreview || {}),
           id: previewId,
@@ -624,17 +753,21 @@ export default function Inbox() {
           target: mappedMob || latest.recipient,
           intent: "WhatsApp",
           subject: "WhatsApp conversation",
-          summary: latest.body,
+          summary,
           channel: "WhatsApp",
           date: new Date(latest.created_at).toLocaleString(),
           direction: latest.direction === "outbound" ? "outbound" : "inbound",
           read: existingPreview?.read ?? latest.direction === "outbound",
-          thread: sorted.map((msg) => ({
+          thread: sorted.map((msg) => {
+            const attachments = getWhatsAppMediaAttachments(msg);
+            return {
               id: `t_${msg.id}`,
               sender: msg.direction === "outbound" ? "agent" : "user",
-              content: msg.body,
+              content: getWhatsAppBody(msg),
+              attachments,
               time: new Date(msg.created_at).toLocaleTimeString(),
-            })),
+            };
+          }),
         };
       });
 
@@ -1100,12 +1233,7 @@ export default function Inbox() {
           : replyPlainText;
         const mediaLines = selectedWhatsAppMedia.map((item) => `[${item.type}] ${item.name}`);
         const finalWhatsAppText = [outboundText, ...mediaLines].filter(Boolean).join("\n");
-        const attachments = selectedWhatsAppMedia.map((item) => ({
-          name: item.name,
-          type: item.type,
-          url: item.url,
-          size: item.size,
-        }));
+        const attachments = selectedWhatsAppMedia.map(mediaItemToAttachment);
         await sendMessage(targetAddress, finalWhatsAppText, selectedClientId, attachments);
         addOutboundMessage({
           sender: "agent",
@@ -1121,6 +1249,7 @@ export default function Inbox() {
               id: `t_${Date.now()}`,
               sender: "agent",
               content: finalWhatsAppText,
+              attachments,
               time: new Date().toLocaleTimeString(),
             },
           ],
@@ -1525,11 +1654,13 @@ export default function Inbox() {
             id: msg.id,
             sender: msg.direction === "outbound" ? "agent" : "user",
             content: msg.summary,
+            attachments: [],
             time: msg.date,
           }]).map((threadItem) => ({
             id: `${msg.id}:${threadItem.id}`,
             direction: threadItem.sender === "agent" || msg.direction === "outbound" ? "outbound" : "inbound",
             content: threadItem.content,
+            attachments: threadItem.attachments || [],
             time: threadItem.time || msg.date,
           })),
         )
@@ -2084,7 +2215,12 @@ export default function Inbox() {
                               : "rounded-bl-md border border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-black/30 dark:text-slate-200",
                           )}
                         >
-                          <div className="whitespace-pre-wrap break-words">{item.content}</div>
+                          <div className="whitespace-pre-wrap break-words">
+                            {item.content}
+                            {item.attachments?.map((attachment) => (
+                              <WhatsAppAttachmentView key={attachment.id || attachment.url} attachment={attachment} />
+                            ))}
+                          </div>
                           <div
                             className={cn(
                               "mt-1 text-[10px]",
@@ -2706,6 +2842,9 @@ export default function Inbox() {
                                     {translation.translatedText}
                                   </div>
                                 )}
+                                {tMsg.attachments?.map((attachment) => (
+                                  <WhatsAppAttachmentView key={attachment.id || attachment.url} attachment={attachment} />
+                                ))}
                               </div>
                             );
                           })()
