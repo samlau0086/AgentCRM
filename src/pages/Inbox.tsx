@@ -772,7 +772,7 @@ export default function Inbox() {
 
   const handleSend = async () => {
     const replyPlainText = stripHtml(replyText);
-    if (!replyPlainText || !activeMessage) return;
+    if ((!replyPlainText && selectedWhatsAppMedia.length === 0) || !activeMessage) return;
     setIsSending(true);
 
     const isScheduled =
@@ -785,23 +785,35 @@ export default function Inbox() {
       }
 
       if (activeMessage.channel === "WhatsApp") {
-        await sendMessage(activeMessage.target, replyPlainText, selectedClientId);
+        const mediaLines = selectedWhatsAppMedia.map((item) => `[${item.type}] ${item.name}`);
+        const finalWhatsAppText = [replyPlainText, ...mediaLines].filter(Boolean).join("\n");
+        const attachments = selectedWhatsAppMedia.map((item) => ({
+          name: item.name,
+          type: item.type,
+          url: item.url,
+          size: item.size,
+        }));
+        await sendMessage(activeMessage.target, finalWhatsAppText, selectedClientId, attachments);
         addOutboundMessage({
           sender: "agent",
           target: activeMessage.target,
+          chatId: activeMessage.chatId,
+          mob: activeMessage.mob || activeMessage.target,
           intent: "Outbound",
           subject: activeMessage.subject,
-          summary: replyPlainText.slice(0, 140),
+          summary: finalWhatsAppText.slice(0, 140),
           channel: "WhatsApp",
           thread: [
             {
               id: `t_${Date.now()}`,
               sender: "agent",
-              content: replyPlainText,
+              content: finalWhatsAppText,
               time: new Date().toLocaleTimeString(),
             },
           ],
+          tags: selectedWhatsAppMedia.length ? ["media"] : [],
         });
+        addDraftToThread(activeMessage.id, finalWhatsAppText);
       } else {
         await sendEmail(
           "default",
@@ -827,12 +839,15 @@ export default function Inbox() {
             },
           ],
         });
+        addDraftToThread(activeMessage.id, replyPlainText);
       }
 
-      addDraftToThread(activeMessage.id, replyPlainText);
       setMessages(getInboxMessages());
 
       setReplyText("");
+      setSelectedWhatsAppMedia([]);
+      setIsEmojiPickerOpen(false);
+      setIsMediaPickerOpen(false);
       setDrafts((prev) => {
         const newDrafts = { ...prev };
         delete newDrafts[activeMessage.id];
@@ -2237,6 +2252,152 @@ export default function Inbox() {
                     </div>
                   )}
                 </div>
+
+                {activeMessage.channel === "WhatsApp" && (
+                  <div className="shrink-0 border-t border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-black/20">
+                    {selectedWhatsAppMedia.length > 0 && (
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        {selectedWhatsAppMedia.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
+                          >
+                            {item.type === "image" ? (
+                              <img src={item.url} alt={item.name} className="h-8 w-8 rounded object-cover" />
+                            ) : (
+                              <Paperclip className="h-4 w-4" />
+                            )}
+                            <span className="max-w-[180px] truncate">{item.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedWhatsAppMedia((prev) => prev.filter((media) => media.id !== item.id))}
+                              className="text-emerald-700 hover:text-red-500 dark:text-emerald-200"
+                              aria-label={language === "zh" ? "移除附件" : "Remove attachment"}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-end gap-2">
+                      <div className="relative flex items-center gap-1 pb-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEmojiPickerOpen((open) => !open);
+                            setIsMediaPickerOpen(false);
+                          }}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-emerald-600 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
+                          title={language === "zh" ? "添加 Emoji" : "Add emoji"}
+                          aria-label={language === "zh" ? "添加 Emoji" : "Add emoji"}
+                        >
+                          <Smile className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsMediaPickerOpen((open) => !open);
+                            setIsEmojiPickerOpen(false);
+                          }}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-emerald-600 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
+                          title={language === "zh" ? "选择媒体素材" : "Choose media asset"}
+                          aria-label={language === "zh" ? "选择媒体素材" : "Choose media asset"}
+                        >
+                          <ImageIcon className="h-4 w-4" />
+                        </button>
+                        {isEmojiPickerOpen && (
+                          <div className="absolute bottom-11 left-0 z-20 grid w-56 grid-cols-6 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-slate-900">
+                            {WHATSAPP_EMOJIS.map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => {
+                                  setReplyText((body) => `${body}${emoji}`);
+                                  setIsEmojiPickerOpen(false);
+                                }}
+                                className="rounded-lg p-2 text-lg hover:bg-slate-100 dark:hover:bg-white/10"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {isMediaPickerOpen && (
+                          <div className="absolute bottom-11 left-10 z-20 w-80 rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-white/10 dark:bg-slate-900">
+                            <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
+                              {language === "zh" ? "媒体素材库" : "Media Library"}
+                            </div>
+                            <div className="max-h-64 space-y-2 overflow-y-auto">
+                              {mediaItems.length === 0 && (
+                                <div className="py-6 text-center text-sm text-slate-400">
+                                  {language === "zh" ? "暂无媒体素材" : "No media assets"}
+                                </div>
+                              )}
+                              {mediaItems.map((item) => {
+                                const selected = selectedWhatsAppMedia.some((media) => media.id === item.id);
+                                return (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedWhatsAppMedia((prev) =>
+                                        selected ? prev.filter((media) => media.id !== item.id) : [...prev, item],
+                                      );
+                                      setIsMediaPickerOpen(false);
+                                    }}
+                                    className={cn(
+                                      "flex w-full items-center gap-3 rounded-lg border p-2 text-left text-sm transition-colors",
+                                      selected
+                                        ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                                        : "border-slate-200 hover:bg-slate-50 dark:border-white/10 dark:hover:bg-white/10",
+                                    )}
+                                  >
+                                    {item.type === "image" ? (
+                                      <img src={item.url} alt={item.name} className="h-10 w-10 rounded object-cover" />
+                                    ) : (
+                                      <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-100 dark:bg-white/10">
+                                        <Paperclip className="h-4 w-4 text-slate-500" />
+                                      </div>
+                                    )}
+                                    <div className="min-w-0 flex-1">
+                                      <div className="truncate font-medium text-slate-800 dark:text-slate-100">{item.name}</div>
+                                      <div className="text-xs capitalize text-slate-400">{item.type}</div>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <textarea
+                        value={replyText}
+                        onChange={(event) => {
+                          setReplyText(event.target.value);
+                          setDrafts((prev) => ({ ...prev, [activeMessage.id]: event.target.value }));
+                        }}
+                        onKeyDown={(event) => {
+                          if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                            event.preventDefault();
+                            handleSend();
+                          }
+                        }}
+                        placeholder={language === "zh" ? "输入 WhatsApp 消息..." : "Type a WhatsApp message..."}
+                        className="min-h-[52px] max-h-32 flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSend}
+                        disabled={isSending || (!stripHtml(replyText) && selectedWhatsAppMedia.length === 0)}
+                        className="mb-1 flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        {language === "zh" ? "发送" : "Send"}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Reply Area */}
                 {false && <div className="p-4 md:p-6 border-t border-slate-200 dark:border-white/10 shrink-0 bg-slate-50 dark:bg-black/20">
