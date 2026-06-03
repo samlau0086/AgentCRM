@@ -1057,6 +1057,58 @@ export default function Inbox() {
     }
   };
 
+  const getInsightSearchText = (message: MessagePreview, insight?: InboxInsight) =>
+    [
+      message.subject,
+      message.summary,
+      message.intent,
+      ...(message.tags || []),
+      insight?.intent,
+      insight?.risk,
+      insight?.customerNeed,
+      ...(insight?.recommendedActions || []),
+      ...(insight?.replyGuidance || []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+  const isLikelySpamMessage = (message: MessagePreview, insight?: InboxInsight) =>
+    /spam|junk|phishing|scam|unsubscribe|promo|promotion|newsletter|垃圾|钓鱼|诈骗|退订|促销|广告|营销/.test(
+      getInsightSearchText(message, insight),
+    );
+
+  const addMessageTag = (message: MessagePreview, tag: string) => {
+    const tags = Array.from(new Set([...(message.tags || []), tag]));
+    updateInboxMessage(message.id, { tags });
+    setMessages(getInboxMessages());
+    notify(
+      language === "zh" ? `已添加标签：${tag}` : `Tag added: ${tag}`,
+      "success",
+      language === "zh" ? "标签已更新" : "Tag updated",
+    );
+  };
+
+  const markMessageImportant = (message: MessagePreview) => {
+    updateInboxMessage(message.id, { important: true });
+    setMessages(getInboxMessages());
+    notify(
+      language === "zh" ? "已标记为重要。" : "Marked as important.",
+      "success",
+      language === "zh" ? "已标记" : "Marked",
+    );
+  };
+
+  const assignMessageToSales = (message: MessagePreview) => {
+    updateInboxMessage(message.id, { assignee: "Alice Chen" });
+    setMessages(getInboxMessages());
+    notify(
+      language === "zh" ? "已分配给 Alice Chen。" : "Assigned to Alice Chen.",
+      "success",
+      language === "zh" ? "已分配" : "Assigned",
+    );
+  };
+
   const mailboxMessages = messages.filter((msg) =>
     selectedMailbox === "sent"
       ? msg.direction === "outbound" || msg.intent === "Outbound"
@@ -2377,17 +2429,93 @@ export default function Inbox() {
                               : "Click Analyze to run the configured model on this message."}
                           </div>
                         )}
-                        <div className="mt-4 pt-4 border-t border-blue-200 dark:border-blue-500/10">
-                          <button
-                            onClick={handleDraftAIReply}
-                            disabled={isDrafting}
-                            className="px-4 py-2 bg-white dark:bg-white/5 border border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-400 rounded-lg text-sm font-medium hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
-                          >
-                            {isDrafting ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : null}
-                            {isDrafting ? "Drafting..." : "Draft AI Reply"}
-                          </button>
+                        <div className="mt-4 border-t border-blue-200 pt-4 dark:border-blue-500/10">
+                          <div className="mb-2 text-xs font-semibold text-slate-500">
+                            {language === "zh" ? "快捷处理选项" : "Options"}
+                          </div>
+                          {(() => {
+                            const insight = inboxInsights[activeMessage.id];
+                            const isSpam = isLikelySpamMessage(activeMessage, insight);
+                            return (
+                              <div className="flex flex-wrap gap-2">
+                                {!isSpam && (
+                                  <button
+                                    type="button"
+                                    onClick={handleDraftAIReply}
+                                    disabled={isDrafting}
+                                    className="flex items-center gap-2 rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition-colors hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:bg-white/5 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                                  >
+                                    {isDrafting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                                    {isDrafting ? "Drafting..." : "Draft AI Reply"}
+                                  </button>
+                                )}
+                                {isSpam && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeletingMessageId(activeMessage.id)}
+                                      className="flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 shadow-sm transition-colors hover:bg-red-50 dark:border-red-500/30 dark:bg-white/5 dark:text-red-300 dark:hover:bg-red-500/10"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                      {language === "zh" ? "删除垃圾邮件" : "Delete Spam"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => addMessageTag(activeMessage, "spam")}
+                                      className="flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm font-medium text-amber-700 shadow-sm transition-colors hover:bg-amber-50 dark:border-amber-500/30 dark:bg-white/5 dark:text-amber-300 dark:hover:bg-amber-500/10"
+                                    >
+                                      <Tag className="h-4 w-4" />
+                                      {language === "zh" ? "标记垃圾" : "Tag Spam"}
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => markMessageImportant(activeMessage)}
+                                  className="flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm font-medium text-amber-700 shadow-sm transition-colors hover:bg-amber-50 dark:border-amber-500/30 dark:bg-white/5 dark:text-amber-300 dark:hover:bg-amber-500/10"
+                                >
+                                  <Star className="h-4 w-4" />
+                                  {language === "zh" ? "标记重要" : "Mark Important"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => addMessageTag(activeMessage, "follow-up")}
+                                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+                                >
+                                  <Tag className="h-4 w-4" />
+                                  {language === "zh" ? "加入跟进" : "Tag Follow-up"}
+                                </button>
+                                {activeMessage.direction !== "outbound" && activeMessage.intent !== "Outbound" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => assignMessageToSales(activeMessage)}
+                                    className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-white/5 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                                  >
+                                    <User className="h-4 w-4" />
+                                    {language === "zh" ? "分配销售" : "Assign Sales"}
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => startForward(activeMessage)}
+                                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+                                >
+                                  <Forward className="h-4 w-4" />
+                                  {language === "zh" ? "转发" : "Forward"}
+                                </button>
+                                {isSpam && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateSenderAnalysisMode(activeMessage.sender, "manual")}
+                                    className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                                  >
+                                    <Bot className="h-4 w-4" />
+                                    {language === "zh" ? "该发件人手动分析" : "Sender Manual Analysis"}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
