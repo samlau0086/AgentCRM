@@ -2279,12 +2279,12 @@ export default function Inbox() {
                     <div
                       key={tMsg.id}
                       className={cn(
-                        "flex flex-col",
+                        "flex w-fit flex-col",
                         tMsg.htmlContent ? "max-w-full" : "max-w-[85%]",
-                        tMsg.sender === "agent" && !tMsg.htmlContent ? "ml-auto" : "",
+                        tMsg.sender === "agent" && !tMsg.htmlContent ? "ml-auto items-end" : "mr-auto items-start",
                       )}
                     >
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className={cn("flex items-center gap-2 mb-1", tMsg.sender === "agent" && !tMsg.htmlContent ? "justify-end" : "justify-start")}>
                         <span className="text-xs font-medium text-slate-500">
                           {tMsg.sender === "agent"
                             ? "You"
@@ -2296,7 +2296,7 @@ export default function Inbox() {
                       </div>
                       <div
                         className={cn(
-                          "p-4 rounded-2xl text-sm leading-relaxed",
+                          "w-fit max-w-full break-words p-4 rounded-2xl text-sm leading-relaxed",
                           tMsg.htmlContent
                             ? "bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-slate-200 rounded-tl-sm border border-slate-200 dark:border-white/5"
                             : tMsg.sender === "agent"

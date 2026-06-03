@@ -2,7 +2,7 @@
 
 AgentCRM is an AI-assisted CRM built with React, Vite, Express, and PostgreSQL/pgvector. It includes customer management, unified Email/WhatsApp inbox, sales quotes, products, media library, knowledge base vectorization, AI agent workflows, user management, and system settings.
 
-AgentCRM 是一个基于 React、Vite、Express 和 PostgreSQL/pgvector 的 AI CRM 系统，包含客户管理、统一 Email/WhatsApp 收件箱、销售报价、产品库、媒体库、知识库向量化、AI 智能体工作流、用户管理和系统设置。
+AgentCRM 是一个基于 React、Vite、Express 和 PostgreSQL/pgvector 的 AI CRM 系统，包含客户管理、统一 Email/WhatsApp 收件箱、销售报价、产品库、媒体素材库、知识库向量化、AI 智能体工作流、用户管理和系统设置。
 
 ---
 
@@ -47,40 +47,60 @@ OPENROUTER_API_KEY=...
 ANTHROPIC_API_KEY=...
 ```
 
-`DATABASE_URL` stores CRM data. `PG_VECTOR_URL` is used by the vector knowledge base. In the GitHub Actions deployment script, `PG_VECTOR_URL` is automatically set to `DATABASE_URL` when only `DATABASE_URL` is provided.
+`DATABASE_URL` stores CRM data. `PG_VECTOR_URL` is used by the vector knowledge base. In GitHub Actions deployment, `PG_VECTOR_URL` can be set from `DATABASE_URL` when only one database URL is provided.
 
 ### Data Persistence
 
-Business data is stored in PostgreSQL, not only in the browser. The frontend keeps local storage only as a fallback/cache layer.
+Business data is stored in PostgreSQL, not only in browser storage. The frontend keeps local storage only as a fallback/cache layer.
 
-Database-first sync is used for:
+Database-backed data includes:
 
 - Customers and Public Pool leads
-- Unified inbox messages
+- Unified inbox Email/WhatsApp messages
+- WhatsApp chatId to mob mappings
 - Model Profiles
 - Agents, agent runs, trace steps, and approvals
 - System users
 - App settings
 - Media records
-- Email receive/send profiles, mappings, and signatures
-
-Pages use a shared sync pattern: load from server first, fall back to cache only on request failure, listen for local `crm:data-changed` events, and periodically refresh without re-rendering when data is unchanged.
+- Email receive/send profiles, account mappings, and signatures
 
 ### Main Features
 
 - **Dashboard**: CRM metrics, unread messages, estimated revenue, pending work, and a GitHub-style contribution chart.
-- **Unified Inbox**: Manage Email and WhatsApp conversations, delete messages, sync messages, tag conversations, assign owners, add internal comments, and run AI context analysis.
-- **WhatsApp Chat**: The WhatsApp send button opens a chat-style interface. You can choose a customer with `@name`, view sent/received WhatsApp history for that number, and send new messages through WhatsApp Actor Hub.
+- **Customer Management**: Create, edit, delete, search, tag, CSV import, Public Pool lead claiming, and List/Map views. The Map view shows a world map, country counts, and click-to-filter behavior.
+- **Unified Inbox**: Manage Email and WhatsApp conversations in one place. Supports Inbox/Sent views, fixed channel filters for All/WhatsApp/Email, search, bulk delete, bulk tag, mark important, delete, sync, assignee, internal comments, and AI analysis.
+- **WhatsApp Conversations**: WhatsApp messages are grouped by chatId into one conversation. The message view uses left/right chat bubbles to distinguish customer and agent messages. The input box supports emoji and media library attachments.
+- **WhatsApp Actor Hub Mapping**: In a WhatsApp conversation, double-click the `chatId -> mob` field in the `From` area to inline edit the mapping. The mapping is saved to app settings and inbox records.
+- **Inbox AI Context & Suggestions**: Run AI analysis once and reuse stored results. Options include Draft AI Reply, Delete Spam, Tag Spam, Mark Important, Tag Follow-up, Assign Sales, Forward, and Sender Manual Analysis where applicable.
 - **Email**: IMAP receive and SMTP send profiles support SSL/TLS, STARTTLS, plain connections, TLS certificate verification, and real server-side connection tests.
-- **Customers**: Create, edit, delete, search, tag, and import customers by CSV. Public leads can be claimed into customer records.
-- **Customer Detail**: View AI insights, timeline, memory, internal discussion, and AI proposal drafts using real CRM data.
+- **Email Composer**: WYSIWYG email editor, reply/forward flows, signatures, original email preview, and sent mailbox storage.
 - **Sales & Quotes**: Manage products, quantity-based pricing tiers, quote drafts, discounts, fees, and product images.
 - **AI Agent Center**: Configure agents with a left/right layout, model profile, tools, integrations, workflows, schedules, and human approval mode.
 - **Agent Runtime**: Runs real workflow tools, logs execution traces, supports human approvals, duplicate-operation guards, deletion, and clear-log limits.
 - **Knowledge Base**: Upload PDF/TXT/DOC/DOCX/CSV files, vectorize documents, and track indexed chunks.
-- **Media Library**: Upload and manage media assets.
+- **Media Library**: Upload and manage images and files. WhatsApp messages can use media assets from this library.
 - **Users**: Manage user roles, permissions, and account status.
-- **Settings**: Configure theme, language, timezone, notifications, model providers, Email/WhatsApp integrations, vector database, and Lead Generation Platform API keys.
+- **Settings**: Configure theme, language, timezone, notifications, model providers, Email/WhatsApp integrations, vector database, signatures, and Lead Generation Platform API keys.
+
+### Unified Inbox Usage
+
+1. Use **Inbox/Sent** to switch between received and sent conversations.
+2. Use the fixed **All / WhatsApp / Email** filter above search to filter by channel.
+3. Use checkboxes to select messages, then bulk delete, add tags, or mark important.
+4. Open a WhatsApp conversation to see grouped chat bubbles by chatId.
+5. Double-click the `chatId -> mob` field in the `From` area to edit WhatsApp Actor Hub mappings.
+6. Use the bottom WhatsApp input box to send text, emoji, images, or files.
+7. Run **Analyze** in Agent Context & Suggestions, then use the generated options to process the message efficiently.
+
+### Customer Management Usage
+
+1. Use **My Customers** for owned customer records.
+2. Use **Public Pool** for public leads gathered or imported before claiming.
+3. Use **List** view for table management.
+4. Use **Map** view to see customer/lead distribution on a world map.
+5. Click a country on the map or country list to switch back to List view filtered by that country.
+6. Use **Import CSV** to import customers or public leads. The modal provides a sample CSV download.
 
 ### Model Profiles
 
@@ -124,7 +144,7 @@ When the web app is open, the browser starts the scheduler and writes scheduled 
 Current executable workflows include:
 
 - **AI Lead Analysis**: Analyze a public lead and store score, intent, risk, AI analysis, and recommended next action.
-- **Lead Generation Platforms**: Uses enabled platform API configuration from Settings and imports real returned leads into Public Pool. It does not create mock leads.
+- **Lead Generation Platforms**: Uses enabled platform API configuration from Settings and imports real returned leads into Public Pool.
 - **Customer Scoring**: Refreshes customer score, intent, risk, and timeline log.
 - **Quote Draft**: Creates a draft quote from active products for a selected customer.
 
@@ -132,7 +152,7 @@ Non-repeatable workflows use operation keys, so the same lead/customer is not pr
 
 ### Lead Generation Platforms
 
-Configure platform credentials in **Settings > Integrations**. Platform settings should include API key, auth header, base URL, endpoint path, method, and provider-specific identifiers such as Apify Actor ID or PhantomBuster Agent ID.
+Configure platform credentials in **Settings > Integrations**. Platform settings include API key, auth header, base URL, endpoint path, method, and provider-specific identifiers such as Apify Actor ID or PhantomBuster Agent ID.
 
 Specific search requests are generated by agents from CRM/RAG/product context, not stored as static platform configuration.
 
@@ -163,7 +183,7 @@ The deployment workflow:
 2. Points the deploy directory to the repository that triggered the workflow.
 3. Fetches and resets to `origin/main`.
 4. Keeps `.env` but removes stale untracked files.
-5. Writes runtime environment variables, including `BUILD_SHA`, `BUILD_TIME`, and `DEPLOY_REPOSITORY`.
+5. Writes runtime environment variables.
 6. Runs `npm install`.
 7. Runs `npm run build`.
 8. Fails fast if legacy prompt UI or stale backend markers are found.
@@ -177,18 +197,7 @@ After deployment, verify the backend version:
 https://your-domain.com/api/deploy-info
 ```
 
-Expected fields:
-
-```json
-{
-  "marker": "crm-db-sync-v2-record-upsert-polling",
-  "gitSha": "...",
-  "buildTime": "...",
-  "repository": "..."
-}
-```
-
-If the marker is missing, the server is not running the latest code. If the marker is correct but the UI still looks old, clear CDN/reverse-proxy/browser cache for the frontend bundle.
+If the backend marker is old, the server is not running the latest code. If the marker is correct but the UI still looks old, clear CDN/reverse-proxy/browser cache for the frontend bundle.
 
 ---
 
@@ -207,7 +216,7 @@ npm run dev
 http://localhost:3000
 ```
 
-### 默认登录
+### 默认登录账号
 
 登录依赖 PostgreSQL。当配置了 `DATABASE_URL` 或 `PG_VECTOR_URL` 后，服务端首次启动会初始化默认账号：
 
@@ -233,44 +242,64 @@ OPENROUTER_API_KEY=...
 ANTHROPIC_API_KEY=...
 ```
 
-`DATABASE_URL` 用于保存 CRM 业务数据。`PG_VECTOR_URL` 用于知识库向量化。GitHub Actions 自动部署脚本会在只配置 `DATABASE_URL` 时，把 `PG_VECTOR_URL` 设置为同一个值。
+`DATABASE_URL` 用于保存 CRM 业务数据。`PG_VECTOR_URL` 用于知识库向量化。如果 GitHub Actions 自动部署时只配置了 `DATABASE_URL`，可以在部署脚本中将 `PG_VECTOR_URL` 设置为同一个值。
 
 ### 数据持久化
 
-业务数据保存到 PostgreSQL，不再只保存在浏览器前端。浏览器本地存储只作为 fallback/cache。
+业务数据保存到 PostgreSQL，不再只保存在浏览器。前端 localStorage 仅作为缓存或请求失败时的 fallback。
 
-数据库优先同步已覆盖：
+数据库持久化覆盖：
 
 - 客户和 Public Pool 线索
-- 统一收件箱消息
-- 模型 Profile
-- 智能体、运行日志、追踪步骤、人工审批
+- 统一收件箱 Email/WhatsApp 消息
+- WhatsApp chatId 到 mob 的映射
+- 模型 Profiles
+- 智能体、运行日志、追踪步骤和人工审批
 - 系统用户
-- 系统设置
-- 媒体记录
-- 邮箱收信/发信配置、账号映射、邮件签名
-
-页面使用统一同步机制：优先从服务端加载，请求失败才使用本地缓存；监听本窗口 `crm:data-changed` 事件；并定时跨浏览器刷新。数据没有变化时不会重新渲染，避免审批列表闪烁。
+- 应用设置
+- 媒体素材记录
+- 邮件收信/发信配置、账号映射和签名
 
 ### 主要功能
 
 - **仪表盘**：CRM 指标、未读消息、预计收入、待处理工作，以及类似 GitHub Contributions 的事件图表。
-- **统一收件箱**：管理 Email 和 WhatsApp 会话，支持删除、同步、标签、负责人、内部评论和 AI 上下文分析。
-- **WhatsApp 聊天**：点击 WhatsApp 发送按钮会打开聊天式界面。可以用 `@客户名` 选择客户，查看该号码的收发历史，并通过 WhatsApp Actor Hub 继续发送消息。
-- **邮箱集成**：IMAP 收信和 SMTP 发信支持 SSL/TLS、STARTTLS、无加密连接、TLS 证书校验，以及真实服务端连接测试。
-- **客户管理**：创建、编辑、删除、搜索、标签管理客户，支持 CSV 导入，并可将 Public Pool 线索领取为客户。
-- **客户详情**：基于真实 CRM 数据查看 AI 洞察、活动时间线、客户记忆、内部讨论和 AI 方案草稿。
+- **客户管理**：创建、编辑、删除、搜索、标签管理、CSV 导入、Public Pool 线索领取，并支持 List/Map 视图。Map 视图显示世界地图、国家数量，并支持点击国家筛选列表。
+- **统一收件箱**：集中管理 Email 和 WhatsApp 会话。支持 Inbox/Sent、固定 All/WhatsApp/Email 渠道筛选、搜索、批量删除、批量加标签、标记重要、删除、同步、负责人、内部评论和 AI 分析。
+- **WhatsApp 会话**：按 chatId 聚合同一个聊天窗口。消息气泡会区分我方和客户：我方靠右，客户靠左。输入框支持 emoji 和媒体素材库附件。
+- **WhatsApp Actor Hub 映射**：在 WhatsApp conversation 的 `From` 区域双击 `chatId -> mob` 字段，可 inline edit 映射关系。映射会保存到应用设置和 inbox 记录。
+- **智能体上下文与建议**：AI 分析结果会保存并复用。Options 包含 Draft AI Reply、Delete Spam、Tag Spam、Mark Important、Tag Follow-up、Assign Sales、Forward、Sender Manual Analysis 等。
+- **邮件集成**：IMAP 收信和 SMTP 发信支持 SSL/TLS、STARTTLS、无加密连接、TLS 证书校验，以及真实服务端连接测试。
+- **写信/回信**：支持 WYSIWYG 邮件编辑器、回复/转发、邮件签名、原邮件预览和发件箱保存。
 - **销售与报价**：管理产品、数量阶梯价格、报价草稿、折扣、费用和产品图片。
 - **智能体中心**：左右列配置智能体，可配置模型 Profile、工具、集成、工作流、执行周期和人工审批模式。
 - **智能体运行**：执行真实工作流工具，记录运行日志和追踪步骤，支持人工审批、防重复执行、删除和清空日志。
 - **知识库**：上传 PDF/TXT/DOC/DOCX/CSV 文件，执行向量化并查看知识切片数量。
-- **媒体库**：上传和管理媒体资源。
+- **媒体素材库**：上传和管理图片/文件，WhatsApp 消息可从媒体素材库选择附件。
 - **用户管理**：管理用户角色、权限和账号状态。
-- **系统设置**：配置主题、语言、时区、通知、模型服务商、Email/WhatsApp 集成、向量数据库和获客平台 API Key。
+- **系统设置**：配置主题、语言、时区、通知、模型服务商、Email/WhatsApp 集成、向量数据库、邮件签名和获客平台 API Key。
 
-### 模型 Profile
+### 统一收件箱使用
 
-模型 Profile 是可复用的模型连接配置，不包含智能体 Prompt。智能体在配置中选择一个 Profile 使用。
+1. 使用 **Inbox/Sent** 切换收件箱和发件箱。
+2. 使用搜索框上方固定的 **All / WhatsApp / Email** 筛选渠道。
+3. 勾选消息后，可以批量删除、批量加标签或标记重要。
+4. 打开 WhatsApp 会话后，可以查看按 chatId 聚合的聊天记录。
+5. 在 `From` 区域双击 `chatId -> mob` 字段，可以编辑 WhatsApp Actor Hub 映射。
+6. 使用底部 WhatsApp 输入框发送文字、emoji、图片或文件。
+7. 在“智能体上下文与建议”里点击 Analyze 分析消息，再使用 Options 快速处理。
+
+### 客户管理使用
+
+1. **My Customers** 用于管理已拥有客户。
+2. **Public Pool** 用于管理待领取的公共线索。
+3. **List** 视图用于表格管理。
+4. **Map** 视图用于查看客户/线索在世界地图上的分布。
+5. 点击地图上的国家点或右侧国家列表，会自动切回 List 并筛选该国家。
+6. 使用 **Import CSV** 导入客户或公共线索，弹窗中提供示例 CSV 下载。
+
+### 模型 Profiles
+
+模型 Profile 是可复用的模型连接配置，不包含智能体 prompt。智能体在配置中选择一个 Profile 使用。
 
 支持的服务商：
 
@@ -288,45 +317,45 @@ anthropic/claude-3.5-sonnet
 google/gemini-flash-1.5
 ```
 
-### 智能体
+### AI 智能体
 
-每个智能体可配置：
+每个智能体可以配置：
 
 - 角色说明
 - 模型 Profile
 - 可用业务工具
 - 可用获客平台集成
 - 可执行工作流
-- 执行护栏：自动执行或人工审批
+- 执行模式：自动或人工审批
 - 执行周期：
   - 每隔 N 秒/分钟/小时/天
   - 或每月第 N 日
-  - 可选最大执行次数；`0` 表示无限制
+  - 可选最大执行次数，`0` 表示无限制
 
-当网页打开且用户已登录时，浏览器会启动调度器，并把定时运行、追踪步骤和审批记录写入数据库。如果需要无人打开网页时也持续执行，应增加服务端 worker 或 cron，并基于同一套数据库规则执行。
+当 Web 应用打开时，浏览器会启动调度器，并将定时运行、追踪步骤和审批写入数据库。如果需要无人打开应用时也持续执行，需要增加服务端 worker 或 cron job，复用同一套数据库规则。
 
 ### 智能体工作流
 
 当前可执行工作流包括：
 
-- **AI Lead Analysis**：分析真实 Public Pool 线索，并写入评分、意向、风险、AI 分析和下一步建议。
-- **Lead Generation Platforms**：读取设置中已启用的平台 API 配置，将真实返回线索导入 Public Pool，不再生成 mock 数据。
-- **Customer Scoring**：刷新客户评分、意向、风险，并写入客户时间线。
-- **Quote Draft**：基于启用产品为指定客户创建报价草稿。
+- **AI Lead Analysis**：分析 Public Pool 线索，并保存 score、intent、risk、AI analysis 和推荐动作。
+- **Lead Generation Platforms**：使用设置中启用的平台 API 配置，将真实返回的线索导入 Public Pool。
+- **Customer Scoring**：刷新客户 score、intent、risk 和时间线日志。
+- **Quote Draft**：基于有效产品为指定客户创建报价草稿。
 
-不应重复执行的工作流会使用 operation key 防重复。同一个 lead/customer 已有待审批、运行中或已完成的同类操作时，不会重复执行。
+不可重复执行的工作流使用 operation key，避免同一个 lead/customer 在 pending、running 或 completed 状态下被重复处理。
 
-### 获客平台配置
+### Lead Generation Platforms
 
-在 **Settings > Integrations** 中配置平台凭据。平台配置只保存 API Key、认证 Header、Base URL、Endpoint Path、Method，以及 Apify Actor ID、PhantomBuster Agent ID 等平台标识。
+在 **Settings > Integrations** 中配置平台凭证。平台配置包含 API key、认证 header、base URL、endpoint path、method，以及 Apify Actor ID 或 PhantomBuster Agent ID 等平台字段。
 
 具体搜索请求由智能体根据 CRM/RAG/产品上下文生成，不作为静态平台配置保存。
 
 ### 自动部署
 
-项目包含 `.github/workflows/deploy.yml`，推送到 `main` 后会自动部署到 VPS。
+仓库包含 `.github/workflows/deploy.yml`，推送到 `main` 后会自动部署到 VPS。
 
-需要配置 GitHub Actions Secrets：
+需要配置的 GitHub Actions Secrets：
 
 - `VPS_HOST`
 - `VPS_USERNAME`
@@ -345,15 +374,15 @@ google/gemini-flash-1.5
 
 部署流程：
 
-1. SSH 连接 VPS。
-2. 将部署目录的 git remote 指向触发 workflow 的仓库。
-3. 拉取并重置到 `origin/main`。
+1. SSH 到 VPS。
+2. 将部署目录指向触发 workflow 的仓库。
+3. fetch 并 reset 到 `origin/main`。
 4. 保留 `.env`，清理旧的未跟踪文件。
-5. 写入运行环境变量，包括 `BUILD_SHA`、`BUILD_TIME`、`DEPLOY_REPOSITORY`。
+5. 写入运行环境变量。
 6. 执行 `npm install`。
 7. 执行 `npm run build`。
-8. 如果构建产物中发现旧 prompt UI 或旧后端标记，会中止部署。
-9. 使用 PM2 重启 `dist/server.cjs`。
+8. 如果发现旧版 prompt UI 或旧 backend marker，则中止部署。
+9. 使用 `dist/server.cjs` 重启 PM2。
 
 ### 部署验证
 
@@ -363,15 +392,4 @@ google/gemini-flash-1.5
 https://your-domain.com/api/deploy-info
 ```
 
-应看到：
-
-```json
-{
-  "marker": "crm-db-sync-v2-record-upsert-polling",
-  "gitSha": "...",
-  "buildTime": "...",
-  "repository": "..."
-}
-```
-
-如果没有该 marker，说明服务端不是最新代码。如果 marker 正确但界面仍旧，优先检查 CDN、反向代理或浏览器缓存。
+如果 backend marker 仍是旧的，说明服务端没有运行最新代码。如果 marker 正确但 UI 仍旧，通常是 CDN、反向代理或浏览器缓存了旧前端 bundle。
