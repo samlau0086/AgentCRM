@@ -12,6 +12,9 @@ import {
   Plus,
   Upload,
   Download,
+  List,
+  Map as MapIcon,
+  MapPin,
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
@@ -44,11 +47,125 @@ const CONTACT_TYPES = [
 ];
 
 type CsvImportTarget = "my-customers" | "public-pool";
+type CustomerViewMode = "list" | "map";
 
 type CsvImportPreview = {
   fileName: string;
   headers: string[];
   rows: Record<string, string>[];
+};
+
+type CountryStat = {
+  country: string;
+  count: number;
+  x: number;
+  y: number;
+};
+
+const COUNTRY_ALIASES: Record<string, string> = {
+  us: "United States",
+  usa: "United States",
+  u_s_a: "United States",
+  "u.s.a.": "United States",
+  "u.s.": "United States",
+  america: "United States",
+  united_states: "United States",
+  uk: "United Kingdom",
+  u_k: "United Kingdom",
+  "u.k.": "United Kingdom",
+  britain: "United Kingdom",
+  great_britain: "United Kingdom",
+  prc: "China",
+  cn: "China",
+  china: "China",
+  mainland_china: "China",
+  hk: "Hong Kong",
+  hong_kong: "Hong Kong",
+  singapore: "Singapore",
+  sg: "Singapore",
+  germany: "Germany",
+  de: "Germany",
+  france: "France",
+  fr: "France",
+  italy: "Italy",
+  it: "Italy",
+  spain: "Spain",
+  es: "Spain",
+  canada: "Canada",
+  ca_country: "Canada",
+  australia: "Australia",
+  au: "Australia",
+  japan: "Japan",
+  jp: "Japan",
+  korea: "South Korea",
+  south_korea: "South Korea",
+  kr: "South Korea",
+  india: "India",
+  in: "India",
+  brazil: "Brazil",
+  br: "Brazil",
+  mexico: "Mexico",
+  mx: "Mexico",
+  uae: "United Arab Emirates",
+  united_arab_emirates: "United Arab Emirates",
+};
+
+const LOCATION_HINTS: Record<string, string> = {
+  ca: "United States",
+  ny: "United States",
+  tx: "United States",
+  fl: "United States",
+  wa: "United States",
+  il: "United States",
+  ma: "United States",
+  san_francisco: "United States",
+  new_york: "United States",
+  los_angeles: "United States",
+  seattle: "United States",
+  chicago: "United States",
+  london: "United Kingdom",
+  manchester: "United Kingdom",
+  toronto: "Canada",
+  vancouver: "Canada",
+  sydney: "Australia",
+  melbourne: "Australia",
+  singapore: "Singapore",
+  shanghai: "China",
+  beijing: "China",
+  shenzhen: "China",
+  guangzhou: "China",
+  hong_kong: "Hong Kong",
+  tokyo: "Japan",
+  osaka: "Japan",
+  seoul: "South Korea",
+  mumbai: "India",
+  delhi: "India",
+  bangalore: "India",
+  paris: "France",
+  berlin: "Germany",
+  munich: "Germany",
+  dubai: "United Arab Emirates",
+};
+
+const COUNTRY_POINTS: Record<string, { x: number; y: number }> = {
+  "United States": { x: 19, y: 39 },
+  Canada: { x: 18, y: 25 },
+  Mexico: { x: 17, y: 52 },
+  Brazil: { x: 34, y: 70 },
+  "United Kingdom": { x: 46, y: 33 },
+  France: { x: 49, y: 41 },
+  Germany: { x: 52, y: 37 },
+  Italy: { x: 53, y: 46 },
+  Spain: { x: 47, y: 47 },
+  China: { x: 76, y: 45 },
+  "Hong Kong": { x: 78, y: 52 },
+  Singapore: { x: 74, y: 65 },
+  Japan: { x: 86, y: 44 },
+  "South Korea": { x: 82, y: 43 },
+  India: { x: 68, y: 56 },
+  Australia: { x: 83, y: 78 },
+  "United Arab Emirates": { x: 61, y: 54 },
+  Unknown: { x: 50, y: 82 },
 };
 
 function parseCsv(text: string) {
@@ -155,7 +272,7 @@ function rowToCustomer(row: Record<string, string>): Customer | null {
     address: pickCsv(row, ["address", "street"]),
     city: pickCsv(row, ["city"]),
     province: pickCsv(row, ["province", "state", "region"]),
-    country: pickCsv(row, ["country"]),
+    country: pickCsv(row, ["country"]) || inferCountryFromLocation(pickCsv(row, ["location", "address", "city"])),
     preferredLanguage: pickCsv(row, ["preferred_language", "language", "lang"]) || "en",
     description: pickCsv(row, ["description", "notes", "note", "summary"]),
     industry: pickCsv(row, ["industry", "category"]),
@@ -211,6 +328,63 @@ function downloadTextFile(filename: string, content: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function countryKey(value = "") {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function normalizeCountry(value = "") {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const key = countryKey(trimmed);
+  return COUNTRY_ALIASES[key] || COUNTRY_ALIASES[`${key}_country`] || trimmed.replace(/\s+/g, " ");
+}
+
+function inferCountryFromLocation(location = "") {
+  const parts = location
+    .split(/[,|/]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  for (const part of [...parts].reverse()) {
+    const normalized = normalizeCountry(part);
+    const key = countryKey(part);
+    if (COUNTRY_POINTS[normalized] || COUNTRY_ALIASES[key]) return normalized;
+    if (LOCATION_HINTS[key]) return LOCATION_HINTS[key];
+  }
+  for (const part of parts) {
+    const hint = LOCATION_HINTS[countryKey(part)];
+    if (hint) return hint;
+  }
+  return "";
+}
+
+function getCustomerCountry(customer: Customer) {
+  return normalizeCountry(customer.country || inferCountryFromLocation([customer.city, customer.province, customer.address].filter(Boolean).join(", "))) || "Unknown";
+}
+
+function getPublicLeadCountry(lead: PublicLead) {
+  return inferCountryFromLocation(lead.location || "") || "Unknown";
+}
+
+function getCountryStats<T>(items: T[], getCountry: (item: T) => string) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const country = getCountry(item);
+    counts.set(country, (counts.get(country) || 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .map(([country, count]) => ({
+      country,
+      count,
+      ...(COUNTRY_POINTS[country] || COUNTRY_POINTS.Unknown),
+    }))
+    .sort((a, b) => b.count - a.count || a.country.localeCompare(b.country));
+}
+
+function matchesCountryFilter(country: string, filter: string) {
+  if (!filter) return true;
+  return countryKey(country) === countryKey(filter);
 }
 
 function CustomerFormView({
@@ -617,6 +791,97 @@ function CustomerFormView({
   );
 }
 
+function CountryMapView({
+  stats,
+  activeCountry,
+  onCountryClick,
+  emptyText,
+}: {
+  stats: CountryStat[];
+  activeCountry: string;
+  onCountryClick: (country: string) => void;
+  emptyText: string;
+}) {
+  const maxCount = Math.max(1, ...stats.map((stat) => stat.count));
+
+  if (stats.length === 0) {
+    return (
+      <div className="flex h-full min-h-[420px] flex-col items-center justify-center text-center text-sm text-slate-500 dark:text-slate-400">
+        <MapIcon className="mb-3 h-9 w-9 text-slate-300 dark:text-slate-600" />
+        {emptyText}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid h-full min-h-[520px] grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="relative min-h-[420px] overflow-hidden bg-slate-50 dark:bg-black/20">
+        <div className="absolute inset-6 rounded-[32px] border border-slate-200 bg-white shadow-inner dark:border-white/10 dark:bg-white/[0.03]" />
+        <div className="absolute left-[8%] top-[18%] h-[44%] w-[25%] rounded-[50%] bg-slate-200/70 dark:bg-slate-700/50" />
+        <div className="absolute left-[39%] top-[21%] h-[36%] w-[17%] rounded-[48%] bg-slate-200/70 dark:bg-slate-700/50" />
+        <div className="absolute left-[51%] top-[18%] h-[53%] w-[34%] rounded-[50%] bg-slate-200/70 dark:bg-slate-700/50" />
+        <div className="absolute left-[73%] top-[66%] h-[21%] w-[17%] rounded-[50%] bg-slate-200/70 dark:bg-slate-700/50" />
+        <div className="absolute left-[28%] top-[57%] h-[27%] w-[16%] rounded-[50%] bg-slate-200/70 dark:bg-slate-700/50" />
+
+        {stats.map((stat, index) => {
+          const isActive = matchesCountryFilter(stat.country, activeCountry);
+          const size = 18 + Math.round((stat.count / maxCount) * 22);
+          const hasKnownPoint = Boolean(COUNTRY_POINTS[stat.country]);
+          const left = hasKnownPoint ? stat.x : 40 + (index % 6) * 6;
+          const top = hasKnownPoint ? stat.y : 82 + Math.floor(index / 6) * 5;
+          return (
+            <button
+              key={stat.country}
+              type="button"
+              onClick={() => onCountryClick(stat.country)}
+              className={cn(
+                "group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition-all hover:scale-110",
+                isActive
+                  ? "border-blue-200 bg-blue-600 text-white ring-4 ring-blue-500/20"
+                  : "border-white bg-emerald-500 text-white hover:bg-blue-600 dark:border-slate-900",
+              )}
+              style={{ left: `${left}%`, top: `${top}%`, width: size, height: size }}
+              title={`${stat.country}: ${stat.count}`}
+              aria-label={`${stat.country}: ${stat.count}`}
+            >
+              {stat.count}
+              <span className="pointer-events-none absolute left-1/2 top-full mt-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] font-medium text-white shadow-xl group-hover:block">
+                {stat.country}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="border-t border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-black/20 lg:border-l lg:border-t-0">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-white">
+          <MapPin className="h-4 w-4 text-blue-500" />
+          Countries
+        </div>
+        <div className="space-y-2">
+          {stats.map((stat) => (
+            <button
+              key={stat.country}
+              type="button"
+              onClick={() => onCountryClick(stat.country)}
+              className={cn(
+                "flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-colors",
+                matchesCountryFilter(stat.country, activeCountry)
+                  ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
+                  : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10",
+              )}
+            >
+              <span className="truncate">{stat.country}</span>
+              <span className="rounded bg-white px-2 py-0.5 text-xs font-mono text-slate-500 shadow-sm dark:bg-black/30 dark:text-slate-400">
+                {stat.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Customers() {
   const { t } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -627,6 +892,8 @@ export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>(getCustomers());
   const [publicLeads, setPublicLeads] = useState<PublicLead[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<CustomerViewMode>("list");
+  const [countryFilter, setCountryFilter] = useState("");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -742,6 +1009,7 @@ export default function Customers() {
       "website",
       "industry",
       "location",
+      "country",
       "tags",
       "score",
       "intent",
@@ -760,6 +1028,7 @@ export default function Customers() {
               website: "https://northstar.example.com",
               industry: "Healthcare",
               location: "San Francisco, CA",
+              country: "United States",
               tags: "clinic;high-fit",
               score: 78,
               intent: "Medium",
@@ -777,6 +1046,7 @@ export default function Customers() {
               website: "https://acme.example.com",
               industry: "Manufacturing",
               location: "New York, NY",
+              country: "United States",
               tags: "key-account;renewal",
               score: 86,
               intent: "High",
@@ -825,11 +1095,38 @@ export default function Customers() {
 
   const filteredCustomers = customers.filter((c) => {
     const q = searchQuery.toLowerCase();
+    const country = getCustomerCountry(c);
     return (
-      c.name.toLowerCase().includes(q) ||
-      (c.tags || []).some((t) => t.toLowerCase().includes(q))
+      matchesCountryFilter(country, countryFilter) &&
+      (c.name.toLowerCase().includes(q) ||
+        c.contact.toLowerCase().includes(q) ||
+        country.toLowerCase().includes(q) ||
+        (c.tags || []).some((t) => t.toLowerCase().includes(q)))
     );
   });
+
+  const filteredPublicLeads = publicLeads.filter((lead) => {
+    const q = searchQuery.toLowerCase();
+    const country = getPublicLeadCountry(lead);
+    return (
+      matchesCountryFilter(country, countryFilter) &&
+      (lead.name.toLowerCase().includes(q) ||
+        lead.source.toLowerCase().includes(q) ||
+        lead.contact.toLowerCase().includes(q) ||
+        (lead.location || "").toLowerCase().includes(q) ||
+        country.toLowerCase().includes(q))
+    );
+  });
+
+  const countryStats =
+    activeTab === "my-customers"
+      ? getCountryStats(customers, getCustomerCountry)
+      : getCountryStats(publicLeads, getPublicLeadCountry);
+
+  const selectCountryOnMap = (country: string) => {
+    setCountryFilter(country);
+    setViewMode("list");
+  };
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col gap-6 w-full">
@@ -845,7 +1142,10 @@ export default function Customers() {
         <div className="flex items-center gap-4">
           <div className="bg-slate-100 dark:bg-white/5 p-1 rounded-lg flex items-center gap-1 border border-slate-200 dark:border-white/10 shadow-inner">
             <button
-              onClick={() => setActiveTab("my-customers")}
+              onClick={() => {
+                setActiveTab("my-customers");
+                setCountryFilter("");
+              }}
               className={cn(
                 "px-4 py-1.5 text-sm font-medium rounded-md transition-all",
                 activeTab === "my-customers"
@@ -856,7 +1156,10 @@ export default function Customers() {
               My Customers
             </button>
             <button
-              onClick={() => setActiveTab("public-pool")}
+              onClick={() => {
+                setActiveTab("public-pool");
+                setCountryFilter("");
+              }}
               className={cn(
                 "px-4 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2",
                 activeTab === "public-pool"
@@ -912,15 +1215,67 @@ export default function Customers() {
               />
             </div>
             {!isModalOpen && (
-              <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 dark:border-white/10 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white dark:bg-white/5 shadow-sm dark:shadow-none transition-colors">
-                <Filter className="h-4 w-4" />
-                {t("cust.filters")}
-              </button>
+              <>
+                <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-white/10 dark:bg-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("list")}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all",
+                      viewMode === "list"
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10",
+                    )}
+                  >
+                    <List className="h-4 w-4" />
+                    List
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("map")}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all",
+                      viewMode === "map"
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10",
+                    )}
+                  >
+                    <MapIcon className="h-4 w-4" />
+                    Map
+                  </button>
+                </div>
+                <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 dark:border-white/10 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white dark:bg-white/5 shadow-sm dark:shadow-none transition-colors">
+                  <Filter className="h-4 w-4" />
+                  {t("cust.filters")}
+                </button>
+              </>
             )}
           </div>
+          {countryFilter && !isModalOpen && (
+            <div className="flex items-center gap-2 border-b border-slate-200 bg-blue-50 px-4 py-2 text-sm text-blue-700 dark:border-white/10 dark:bg-blue-500/10 dark:text-blue-300">
+              <MapPin className="h-4 w-4" />
+              <span>
+                Country: <strong>{countryFilter}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => setCountryFilter("")}
+                className="ml-auto rounded-md px-2 py-1 text-xs font-medium hover:bg-blue-100 dark:hover:bg-blue-500/20"
+              >
+                Clear
+              </button>
+            </div>
+          )}
 
           <div className="overflow-auto flex-1">
-            {activeTab === "my-customers" ? (
+            {viewMode === "map" && !isModalOpen ? (
+              <CountryMapView
+                stats={countryStats}
+                activeCountry={countryFilter}
+                onCountryClick={selectCountryOnMap}
+                emptyText={activeTab === "my-customers" ? "No customer country data yet." : "No public lead location data yet."}
+              />
+            ) : activeTab === "my-customers" ? (
               <table className="w-full text-left text-sm whitespace-nowrap">
                 <thead className="bg-white dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
                   <tr>
@@ -1088,6 +1443,18 @@ export default function Customers() {
                       )}
                     </tr>
                   ))}
+                  {filteredCustomers.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={isModalOpen ? 1 : 6}
+                        className="px-6 py-12 text-center text-slate-500"
+                      >
+                        {customers.length === 0
+                          ? "No customers yet."
+                          : "No customers match the current filters."}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             ) : (
@@ -1112,17 +1479,7 @@ export default function Customers() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {publicLeads
-                    .filter(
-                      (l) =>
-                        l.name
-                          .toLowerCase()
-                          .includes(searchQuery.toLowerCase()) ||
-                        l.source
-                          .toLowerCase()
-                          .includes(searchQuery.toLowerCase()),
-                    )
-                    .map((lead) => (
+                  {filteredPublicLeads.map((lead) => (
                       <tr
                         key={lead.id}
                         className="hover:bg-white/[0.04] transition-colors"
@@ -1196,14 +1553,15 @@ export default function Customers() {
                         </td>
                       </tr>
                     ))}
-                  {publicLeads.length === 0 && (
+                  {filteredPublicLeads.length === 0 && (
                     <tr>
                       <td
                         colSpan={5}
                         className="px-6 py-12 text-center text-slate-500"
                       >
-                        No leads currently available in the public pool. Let
-                        your Lead Generation agents gather more!
+                        {publicLeads.length === 0
+                          ? "No leads currently available in the public pool. Let your Lead Generation agents gather more!"
+                          : "No public leads match the current filters."}
                       </td>
                     </tr>
                   )}
