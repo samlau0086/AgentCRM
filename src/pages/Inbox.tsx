@@ -165,6 +165,7 @@ export default function Inbox() {
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
   const [whatsAppChatMobMappings, setWhatsAppChatMobMappings] = useState<Record<string, string>>(() => loadJsonMap<string>(WHATSAPP_CHAT_MOB_MAPPINGS_KEY));
   const [editingChatMob, setEditingChatMob] = useState("");
+  const [editingChatMobId, setEditingChatMobId] = useState("");
   const [replyText, setReplyText] = useState("");
   const [replyTo, setReplyTo] = useState<string[]>([]);
   const [replyCc, setReplyCc] = useState<string[]>([]);
@@ -602,6 +603,47 @@ export default function Inbox() {
 
   const activeMessage =
     messages.find((m) => m.id === activeMessageId) || messages[0] || null;
+
+  const getMessageChatId = (message: MessagePreview) =>
+    message.chatId || (message.id.startsWith("wa_chat_") ? message.id.replace(/^wa_chat_/, "") : "") || message.sender || message.target;
+
+  const saveWhatsAppChatMobMapping = (chatId: string, mob: string) => {
+    const normalizedChatId = chatId.trim();
+    const normalizedMob = mob.trim();
+    if (!normalizedChatId) {
+      notify(language === "zh" ? "缺少 WhatsApp chatId，无法保存映射。" : "WhatsApp chatId is missing, so the mapping cannot be saved.", "warning", language === "zh" ? "无法保存" : "Cannot save");
+      return;
+    }
+
+    const nextMappings = { ...whatsAppChatMobMappings };
+    if (normalizedMob) {
+      nextMappings[normalizedChatId] = normalizedMob;
+    } else {
+      delete nextMappings[normalizedChatId];
+    }
+
+    setWhatsAppChatMobMappings(nextMappings);
+    localStorage.setItem(WHATSAPP_CHAT_MOB_MAPPINGS_KEY, JSON.stringify(nextMappings));
+    saveAppSetting(WHATSAPP_CHAT_MOB_MAPPINGS_KEY, nextMappings);
+
+    const nextMessages = getInboxMessages().map((message) => {
+      if (message.channel !== "WhatsApp") return message;
+      const messageChatId = getMessageChatId(message);
+      if (messageChatId !== normalizedChatId) return message;
+      return {
+        ...message,
+        chatId: normalizedChatId,
+        mob: normalizedMob,
+        sender: message.direction === "outbound" ? message.sender : normalizedMob || message.sender,
+        target: message.direction === "outbound" ? normalizedMob || message.target : message.target,
+      };
+    });
+    saveInboxMessages(nextMessages);
+    setMessages(nextMessages);
+    setEditingChatMobId("");
+    setEditingChatMob("");
+    notify(language === "zh" ? "WhatsApp chatId 与 mob 映射已更新。" : "WhatsApp chatId to mob mapping updated.", "success", language === "zh" ? "映射已更新" : "Mapping updated");
+  };
 
   // Load draft when switching messages
   useEffect(() => {
@@ -1912,7 +1954,59 @@ export default function Inbox() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                   <span>From:</span>
-                  {(() => {
+                  {activeMessage.channel === "WhatsApp" ? (() => {
+                    const chatId = getMessageChatId(activeMessage);
+                    const mappedMob = whatsAppChatMobMappings[chatId] || activeMessage.mob || activeMessage.sender;
+                    const isEditing = editingChatMobId === chatId;
+                    return (
+                      <span className="flex min-w-0 flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onDoubleClick={() => {
+                            setEditingChatMobId(chatId);
+                            setEditingChatMob(mappedMob || "");
+                          }}
+                          className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-mono text-xs text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
+                          title={language === "zh" ? "双击编辑 chatId 到 mob 的映射" : "Double-click to edit chatId to mob mapping"}
+                        >
+                          chatId: {chatId}
+                        </button>
+                        <span className="text-xs text-slate-400">-&gt;</span>
+                        {isEditing ? (
+                          <input
+                            value={editingChatMob}
+                            onChange={(event) => setEditingChatMob(event.target.value)}
+                            onBlur={() => saveWhatsAppChatMobMapping(chatId, editingChatMob)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                saveWhatsAppChatMobMapping(chatId, editingChatMob);
+                              }
+                              if (event.key === "Escape") {
+                                setEditingChatMobId("");
+                                setEditingChatMob("");
+                              }
+                            }}
+                            autoFocus
+                            className="w-48 rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-slate-800 outline-none focus:border-emerald-500 dark:border-emerald-500/40 dark:bg-black/30 dark:text-slate-100"
+                            placeholder={language === "zh" ? "输入 mob/手机号" : "Enter mob / phone"}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onDoubleClick={() => {
+                              setEditingChatMobId(chatId);
+                              setEditingChatMob(mappedMob || "");
+                            }}
+                            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:border-emerald-500/40 dark:hover:text-emerald-300"
+                            title={language === "zh" ? "双击编辑 mob 映射" : "Double-click to edit mob mapping"}
+                          >
+                            mob: {mappedMob || (language === "zh" ? "未映射" : "Unmapped")}
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })() : (() => {
                     const c = customers.find((c) =>
                       c.contacts?.some(
                         (contact) =>
