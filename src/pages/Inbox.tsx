@@ -59,7 +59,7 @@ import {
 import { CommentSection } from "../components/CommentSection";
 import ConfirmModal from "../components/ConfirmModal";
 import { notify } from "../services/notifications";
-import { saveAppSetting } from "../services/appSettings";
+import { loadAppSettingsFromServer, saveAppSetting } from "../services/appSettings";
 
 interface InboxInsight {
   intent: string;
@@ -93,6 +93,7 @@ const INBOX_INSIGHTS_KEY = "crm_inbox_ai_insights";
 const SENDER_ANALYSIS_PREFS_KEY = "crm_inbox_sender_analysis_prefs";
 const LAST_SIGNATURE_BY_RECIPIENT_KEY = "crm_last_email_signature_by_recipient";
 const WHATSAPP_CHAT_MOB_MAPPINGS_KEY = "crm_whatsapp_chat_mob_mappings";
+const WHATSAPP_AUTO_TRANSLATE_KEY = "crm_whatsapp_auto_translate";
 const BULK_DELETE_SENTINEL = "__bulk_delete__";
 const WHATSAPP_EMOJIS = ["😀", "😂", "😊", "😍", "👍", "🙏", "🎉", "🔥", "✅", "💬", "📎", "❤️"];
 
@@ -188,7 +189,7 @@ export default function Inbox() {
   const [replyScheduleDate, setReplyScheduleDate] = useState("");
   const [replyScheduleTime, setReplyScheduleTime] = useState("");
   const [showReplySchedule, setShowReplySchedule] = useState(false);
-  const [autoTranslateWhatsApp, setAutoTranslateWhatsApp] = useState(false);
+  const [autoTranslateWhatsApp, setAutoTranslateWhatsApp] = useState(() => localStorage.getItem(WHATSAPP_AUTO_TRANSLATE_KEY) === "true");
   const [whatsAppTranslations, setWhatsAppTranslations] = useState<Record<string, WhatsAppTranslation>>({});
   const [translatingMessageIds, setTranslatingMessageIds] = useState<Set<string>>(() => new Set());
 
@@ -600,6 +601,7 @@ export default function Inbox() {
     Promise.allSettled([
       loadEmailConfigurationFromServer(),
       loadInboxMessagesFromServer(),
+      loadAppSettingsFromServer(),
     ])
       .then((results) => {
         const inboxResult = results[1];
@@ -607,6 +609,15 @@ export default function Inbox() {
           setMessages(inboxResult.value);
           if (inboxResult.value.length > 0) {
             setActiveMessageId((current) => current || inboxResult.value[0].id);
+          }
+        }
+        const settingsResult = results[2];
+        if (settingsResult.status === "fulfilled") {
+          const savedAutoTranslate = settingsResult.value[WHATSAPP_AUTO_TRANSLATE_KEY];
+          if (typeof savedAutoTranslate === "boolean") {
+            setAutoTranslateWhatsApp(savedAutoTranslate);
+          } else if (typeof savedAutoTranslate === "string") {
+            setAutoTranslateWhatsApp(savedAutoTranslate === "true");
           }
         }
       })
@@ -2377,7 +2388,12 @@ export default function Inbox() {
                     <input
                       type="checkbox"
                       checked={autoTranslateWhatsApp}
-                      onChange={(event) => setAutoTranslateWhatsApp(event.target.checked)}
+                      onChange={(event) => {
+                        const enabled = event.target.checked;
+                        setAutoTranslateWhatsApp(enabled);
+                        localStorage.setItem(WHATSAPP_AUTO_TRANSLATE_KEY, String(enabled));
+                        saveAppSetting(WHATSAPP_AUTO_TRANSLATE_KEY, enabled);
+                      }}
                       className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
                     {language === "zh" ? "自动翻译" : "Auto translate"}
