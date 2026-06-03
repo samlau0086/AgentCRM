@@ -1742,6 +1742,59 @@ Return only the reply body. Keep it concise, helpful, and under 3 paragraphs. Do
   }
 });
 
+app.post("/api/ai/translate-message", async (req, res) => {
+  const {
+    text = "",
+    targetLanguage = "en",
+    modelProfile = {},
+  } = req.body;
+  const sourceText = String(text || "").trim();
+  if (!sourceText) {
+    return res.status(400).json({ error: "text is required." });
+  }
+
+  try {
+    let selectedProfile = modelProfile as ModelProfile;
+    if (!selectedProfile || Object.keys(selectedProfile).length === 0) {
+      const profiles = hasDatabase ? await getRecordList("crm_model_profiles") : [];
+      selectedProfile = (profiles[0] || {}) as ModelProfile;
+    }
+    const profile = requireModelProfile(selectedProfile, res);
+    if (!profile) return;
+
+    const prompt = `Detect the source language and translate this WhatsApp customer message into the target system language only if needed.
+
+Target system language: ${targetLanguage}
+Message:
+${sourceText.slice(0, 4000)}
+
+Return strict JSON only:
+{
+  "sourceLanguage": "detected language name",
+  "targetLanguage": "target language name",
+  "shouldTranslate": true,
+  "translatedText": "translation in target language, or empty string when no translation is needed"
+}
+If the message is already in the target system language, set shouldTranslate to false and translatedText to an empty string. Preserve meaning. Do not add commentary.`;
+    const raw = await generateWithModelProfile(
+      profile,
+      "You are a precise CRM message translator. Return valid JSON only.",
+      prompt,
+    );
+    const data = parseAiJson(raw);
+    res.json({
+      sourceLanguage: String(data.sourceLanguage || "unknown"),
+      targetLanguage: String(data.targetLanguage || targetLanguage),
+      shouldTranslate: Boolean(data.shouldTranslate && data.translatedText),
+      translatedText: String(data.translatedText || "").trim(),
+      model: profile.model,
+      provider: profile.provider,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: `Message translation failed: ${err.message}` });
+  }
+});
+
 app.get("/api/ai/inbox-insights/:messageId", async (req, res) => {
   if (!requireDatabase(res)) return;
   try {

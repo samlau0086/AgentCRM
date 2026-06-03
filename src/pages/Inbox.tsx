@@ -82,6 +82,13 @@ interface SenderAnalysisPreference {
   updatedAt?: string;
 }
 
+interface WhatsAppTranslation {
+  sourceLanguage: string;
+  targetLanguage: string;
+  translatedText: string;
+  shouldTranslate: boolean;
+}
+
 const INBOX_INSIGHTS_KEY = "crm_inbox_ai_insights";
 const SENDER_ANALYSIS_PREFS_KEY = "crm_inbox_sender_analysis_prefs";
 const LAST_SIGNATURE_BY_RECIPIENT_KEY = "crm_last_email_signature_by_recipient";
@@ -181,6 +188,9 @@ export default function Inbox() {
   const [replyScheduleDate, setReplyScheduleDate] = useState("");
   const [replyScheduleTime, setReplyScheduleTime] = useState("");
   const [showReplySchedule, setShowReplySchedule] = useState(false);
+  const [autoTranslateWhatsApp, setAutoTranslateWhatsApp] = useState(false);
+  const [whatsAppTranslations, setWhatsAppTranslations] = useState<Record<string, WhatsAppTranslation>>({});
+  const [translatingMessageIds, setTranslatingMessageIds] = useState<Set<string>>(() => new Set());
 
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [isSending, setIsSending] = useState(false);
@@ -607,6 +617,8 @@ export default function Inbox() {
   const activeMessage =
     messages.find((m) => m.id === activeMessageId) || messages[0] || null;
 
+  const whatsappTranslationKey = (messageId: string, threadId: string) => `${messageId}:${threadId}`;
+
   const getMessageChatId = (message: MessagePreview) =>
     message.chatId || (message.id.startsWith("wa_chat_") ? message.id.replace(/^wa_chat_/, "") : "") || message.sender || message.target;
 
@@ -647,6 +659,67 @@ export default function Inbox() {
     setEditingChatMob("");
     notify(language === "zh" ? "WhatsApp chatId 与 mob 映射已更新。" : "WhatsApp chatId to mob mapping updated.", "success", language === "zh" ? "映射已更新" : "Mapping updated");
   };
+
+  useEffect(() => {
+    if (!autoTranslateWhatsApp || !activeMessage || activeMessage.channel !== "WhatsApp") return;
+    const modelProfile = getModelProfiles()[0] || {};
+    const targetLanguage = language === "zh" ? "Chinese" : "English";
+
+    activeMessage.thread
+      .filter((threadItem) => threadItem.sender !== "agent" && !threadItem.htmlContent && threadItem.content?.trim())
+      .forEach((threadItem) => {
+        const key = whatsappTranslationKey(activeMessage.id, threadItem.id);
+        if (whatsAppTranslations[key] || translatingMessageIds.has(key)) return;
+
+        setTranslatingMessageIds((prev) => new Set(prev).add(key));
+        fetch("/api/ai/translate-message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: threadItem.content,
+            targetLanguage,
+            modelProfile,
+          }),
+        })
+          .then(async (res) => {
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `Translation failed with HTTP ${res.status}.`);
+            setWhatsAppTranslations((prev) => ({
+              ...prev,
+              [key]: {
+                sourceLanguage: String(data.sourceLanguage || "unknown"),
+                targetLanguage: String(data.targetLanguage || targetLanguage),
+                translatedText: String(data.translatedText || ""),
+                shouldTranslate: Boolean(data.shouldTranslate && data.translatedText),
+              },
+            }));
+          })
+          .catch((err) => {
+            console.error(err);
+            setWhatsAppTranslations((prev) => ({
+              ...prev,
+              [key]: {
+                sourceLanguage: "unknown",
+                targetLanguage,
+                translatedText: "",
+                shouldTranslate: false,
+              },
+            }));
+            notify(
+              err instanceof Error ? err.message : "WhatsApp translation failed.",
+              "error",
+              language === "zh" ? "翻译失败" : "Translation failed",
+            );
+          })
+          .finally(() => {
+            setTranslatingMessageIds((prev) => {
+              const next = new Set(prev);
+              next.delete(key);
+              return next;
+            });
+          });
+      });
+  }, [activeMessage?.id, autoTranslateWhatsApp, language, whatsAppTranslations, translatingMessageIds]);
 
   // Load draft when switching messages
   useEffect(() => {
@@ -2299,6 +2372,17 @@ export default function Inbox() {
                       ))}
                     </select>
                   )}
+                {activeMessage.channel === "WhatsApp" && (
+                  <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={autoTranslateWhatsApp}
+                      onChange={(event) => setAutoTranslateWhatsApp(event.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    {language === "zh" ? "自动翻译" : "Auto translate"}
+                  </label>
+                )}
                 <div className="relative">
                   <select
                     value={activeMessage.assignee || ""}
@@ -2378,12 +2462,29 @@ export default function Inbox() {
                             className="w-full h-[520px] rounded-lg bg-white border border-slate-200"
                           />
                         ) : (
-                          tMsg.content.split("\n").map((line, i) => (
-                            <span key={i}>
-                              {line}
-                              <br />
-                            </span>
-                          ))
+                          (() => {
+                            const translationKey = whatsappTranslationKey(activeMessage.id, tMsg.id);
+                            const translation = whatsAppTranslations[translationKey];
+                            const isTranslating = translatingMessageIds.has(translationKey);
+                            return (
+                              <div className="whitespace-pre-wrap break-words">
+                                {tMsg.content}
+                                {isTranslating && tMsg.sender !== "agent" && autoTranslateWhatsApp && (
+                                  <div className="mt-3 border-t border-current/20 pt-2 text-xs opacity-75">
+                                    {language === "zh" ? "正在翻译..." : "Translating..."}
+                                  </div>
+                                )}
+                                {translation?.shouldTranslate && translation.translatedText && (
+                                  <div className="mt-3 border-t border-current/20 pt-2">
+                                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest opacity-60">
+                                      {language === "zh" ? "翻译" : "Translation"} · {translation.sourceLanguage}
+                                    </div>
+                                    {translation.translatedText}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()
                         )}
                       </div>
                     </div>
