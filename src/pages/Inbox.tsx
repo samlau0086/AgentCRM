@@ -1026,6 +1026,7 @@ export default function Inbox() {
     );
     const prefLanguage = customer?.preferredLanguage || "en";
     const currentSystemLanguage = language;
+    const modelProfile = getModelProfiles()[0] || {};
 
     try {
       const res = await fetch("/api/ai/draft-reply", {
@@ -1036,23 +1037,35 @@ export default function Inbox() {
           intent: activeMessage.intent,
           preferredLanguage: prefLanguage,
           systemLanguage: currentSystemLanguage,
+          channel: activeMessage.channel,
+          subject: activeMessage.subject,
+          thread: activeMessage.thread,
+          modelProfile,
         }),
       });
-      const data = await res.json();
-      const reply = data.reply || "Failed to generate reply.";
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `AI draft failed with HTTP ${res.status}.`);
+      }
+      const reply = String(data.reply || "").trim();
+      if (!reply) {
+        throw new Error("AI returned an empty reply.");
+      }
 
       setDrafts((prev) => ({ ...prev, [msgId]: reply }));
       if (activeMessageIdRef.current === msgId) {
         setReplyText(reply);
-        startReply(activeMessage, editorHtml(reply));
+        if (activeMessage.channel === "Email") {
+          startReply(activeMessage, editorHtml(reply));
+        }
       }
     } catch (err) {
       console.error(err);
-      const errorMsg = "Error reaching AI endpoint.";
-      setDrafts((prev) => ({ ...prev, [msgId]: errorMsg }));
-      if (activeMessageIdRef.current === msgId) {
-        setReplyText(errorMsg);
-      }
+      notify(
+        err instanceof Error ? err.message : "Error reaching AI endpoint.",
+        "error",
+        "Draft AI Reply failed",
+      );
     } finally {
       setIsDrafting(false);
     }

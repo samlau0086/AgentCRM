@@ -1695,16 +1695,48 @@ Write all human-facing values in this language: ${systemLanguage}. Do not invent
 });
 
 app.post("/api/ai/draft-reply", async (req, res) => {
-  if (!requireGemini(res)) return;
-  const { message, intent, preferredLanguage = "en" } = req.body;
+  const {
+    message,
+    intent,
+    preferredLanguage = "en",
+    systemLanguage = preferredLanguage,
+    channel = "Email",
+    subject = "",
+    thread = [],
+    modelProfile = {},
+  } = req.body;
 
   try {
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: `Draft a professional support reply to the following customer message summary: "${message}". The determined intent of the message is: ${intent}. Keep it concise, helpful, and under 3 paragraphs. Do not include placeholders like [Your Name]. PLEASE REPLY IN THIS LANGUAGE: ${preferredLanguage}`,
-      config: { temperature: 0.7 },
-    });
-    res.json({ reply: response.text });
+    let selectedProfile = modelProfile as ModelProfile;
+    if (!selectedProfile || Object.keys(selectedProfile).length === 0) {
+      const profiles = hasDatabase ? await getRecordList("crm_model_profiles") : [];
+      selectedProfile = (profiles[0] || {}) as ModelProfile;
+    }
+    const profile = requireModelProfile(selectedProfile, res);
+    if (!profile) return;
+
+    const threadText = Array.isArray(thread)
+      ? thread
+          .map((item: any) => `${item.sender || "sender"}: ${item.content || ""}`)
+          .join("\n")
+          .slice(0, 6000)
+      : "";
+    const prompt = `Draft a CRM reply.
+
+Channel: ${channel}
+Subject: ${subject}
+Intent: ${intent}
+Message summary: ${message}
+Conversation:
+${threadText}
+
+Return only the reply body. Keep it concise, helpful, and under 3 paragraphs. Do not include placeholders like [Your Name]. Write in this language: ${systemLanguage || preferredLanguage}.`;
+    const reply = await generateWithModelProfile(
+      profile,
+      "You are a CRM inbox assistant drafting practical customer replies. Do not invent facts, prices, files, or policies.",
+      prompt,
+    );
+    res.json({ reply: String(reply || "").trim(), model: profile.model, provider: profile.provider });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
