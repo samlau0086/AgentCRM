@@ -412,6 +412,7 @@ export default function Inbox() {
   const [channelFilter, setChannelFilter] = useState<InboxChannelFilter>("all");
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [bulkTag, setBulkTag] = useState("");
+  const [bulkFollowUpDueAt, setBulkFollowUpDueAt] = useState("");
 
   const [activeTab, setActiveTab] = useState<"inbox" | "compose">("inbox");
   const [composeTo, setComposeTo] = useState<string[]>([]);
@@ -1188,6 +1189,35 @@ export default function Inbox() {
     );
   };
 
+  const handleBulkAddFollowUp = () => {
+    if (!bulkFollowUpDueAt) {
+      notify(
+        language === "zh" ? "请先设置跟进到期时间。" : "Please set a follow-up due date first.",
+        "warning",
+        language === "zh" ? "需要到期时间" : "Due date required",
+      );
+      return;
+    }
+    const selectedIds = new Set(selectedMessageIds);
+    const nextMessages = getInboxMessages().map((message) => {
+      if (!selectedIds.has(message.id)) return message;
+      const tags = Array.from(new Set([...(message.tags || []), "follow-up"]));
+      return {
+        ...message,
+        tags,
+        followUpDueAt: new Date(bulkFollowUpDueAt).toISOString(),
+      };
+    });
+    saveInboxMessages(nextMessages);
+    setMessages(nextMessages);
+    setBulkFollowUpDueAt("");
+    notify(
+      language === "zh" ? "已将选中的消息加入跟进。" : "Selected messages added to follow-up.",
+      "success",
+      language === "zh" ? "已加入跟进" : "Follow-up added",
+    );
+  };
+
   useEffect(() => {
     setSelectedMessageIds([]);
   }, [selectedMailbox, channelFilter]);
@@ -1409,6 +1439,23 @@ export default function Inbox() {
                   <Star className="h-3.5 w-3.5" />
                   {language === "zh" ? "标记重要" : "Important"}
                 </button>
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50/60 px-2 py-1.5 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                  <Clock className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
+                  <input
+                    type="datetime-local"
+                    value={bulkFollowUpDueAt}
+                    onChange={(e) => setBulkFollowUpDueAt(e.target.value)}
+                    className="rounded border border-emerald-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-emerald-500 dark:border-emerald-500/30 dark:bg-black/30 dark:text-slate-200"
+                    aria-label={language === "zh" ? "跟进到期时间" : "Follow-up due date"}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleBulkAddFollowUp}
+                    className="rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
+                  >
+                    {language === "zh" ? "加入跟进" : "Follow up"}
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => setDeletingMessageId(BULK_DELETE_SENTINEL)}
@@ -1532,6 +1579,12 @@ export default function Inbox() {
                   {msg.assignee && (
                     <span className="px-2 py-1 bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 rounded text-[10px] font-mono">
                       {msg.assignee.split(" ")[0]}
+                    </span>
+                  )}
+                  {msg.followUpDueAt && (
+                    <span className="flex items-center gap-1 px-2 py-1 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-500/20 rounded text-[10px] font-mono">
+                      <Clock className="h-3 w-3" />
+                      {new Date(msg.followUpDueAt).toLocaleString()}
                     </span>
                   )}
                 </div>

@@ -1029,6 +1029,7 @@ export interface MessagePreview {
   date: string;
   read: boolean;
   important?: boolean;
+  followUpDueAt?: string;
   assignee?: string;
   thread: ThreadMessage[];
   comments?: UniversalComment[];
