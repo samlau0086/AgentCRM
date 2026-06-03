@@ -94,6 +94,7 @@ const SENDER_ANALYSIS_PREFS_KEY = "crm_inbox_sender_analysis_prefs";
 const LAST_SIGNATURE_BY_RECIPIENT_KEY = "crm_last_email_signature_by_recipient";
 const WHATSAPP_CHAT_MOB_MAPPINGS_KEY = "crm_whatsapp_chat_mob_mappings";
 const WHATSAPP_AUTO_TRANSLATE_PREFS_KEY = "crm_whatsapp_auto_translate_prefs";
+const WHATSAPP_OUTBOUND_AUTO_TRANSLATE_PREFS_KEY = "crm_whatsapp_outbound_auto_translate_prefs";
 const WHATSAPP_TRANSLATIONS_KEY = "crm_whatsapp_message_translations";
 const BULK_DELETE_SENTINEL = "__bulk_delete__";
 const WHATSAPP_EMOJIS = ["😀", "😂", "😊", "😍", "👍", "🙏", "🎉", "🔥", "✅", "💬", "📎", "❤️"];
@@ -157,6 +158,78 @@ function normalizeConversationAddress(value = "") {
   return value.trim().toLowerCase().replace(/[^\d+a-z@._-]/g, "");
 }
 
+function normalizeCountry(value = "") {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function languageName(value = "") {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return "";
+  const map: Record<string, string> = {
+    ar: "Arabic",
+    cn: "Chinese",
+    de: "German",
+    en: "English",
+    es: "Spanish",
+    fr: "French",
+    hi: "Hindi",
+    id: "Indonesian",
+    it: "Italian",
+    ja: "Japanese",
+    ko: "Korean",
+    nl: "Dutch",
+    pt: "Portuguese",
+    ru: "Russian",
+    th: "Thai",
+    tr: "Turkish",
+    vi: "Vietnamese",
+    zh: "Chinese",
+    "zh-cn": "Chinese",
+    "zh-hans": "Chinese",
+    "zh-tw": "Traditional Chinese",
+    "zh-hant": "Traditional Chinese",
+  };
+  return map[normalized] || value.trim();
+}
+
+function officialLanguageForCountry(country = "") {
+  const map: Record<string, string> = {
+    australia: "English",
+    brazil: "Portuguese",
+    canada: "English",
+    china: "Chinese",
+    cn: "Chinese",
+    france: "French",
+    germany: "German",
+    hong_kong: "Traditional Chinese",
+    india: "Hindi",
+    indonesia: "Indonesian",
+    italy: "Italian",
+    japan: "Japanese",
+    malaysia: "Malay",
+    mexico: "Spanish",
+    netherlands: "Dutch",
+    portugal: "Portuguese",
+    russia: "Russian",
+    saudi_arabia: "Arabic",
+    singapore: "English",
+    south_korea: "Korean",
+    spain: "Spanish",
+    taiwan: "Traditional Chinese",
+    thailand: "Thai",
+    turkey: "Turkish",
+    uae: "Arabic",
+    united_arab_emirates: "Arabic",
+    united_kingdom: "English",
+    uk: "English",
+    united_states: "English",
+    usa: "English",
+    us: "English",
+    vietnam: "Vietnamese",
+  };
+  return map[normalizeCountry(country)] || "";
+}
+
 function getWhatsAppChatId(msg: { chatId?: string; chat_id?: string; chatid?: string; sender?: string; recipient?: string; direction?: string }) {
   const explicit = msg.chatId || msg.chat_id || msg.chatid;
   if (explicit) return String(explicit);
@@ -191,6 +264,7 @@ export default function Inbox() {
   const [replyScheduleTime, setReplyScheduleTime] = useState("");
   const [showReplySchedule, setShowReplySchedule] = useState(false);
   const [autoTranslateWhatsAppPrefs, setAutoTranslateWhatsAppPrefs] = useState<Record<string, boolean>>(() => loadJsonMap<boolean>(WHATSAPP_AUTO_TRANSLATE_PREFS_KEY));
+  const [outboundAutoTranslateWhatsAppPrefs, setOutboundAutoTranslateWhatsAppPrefs] = useState<Record<string, boolean>>(() => loadJsonMap<boolean>(WHATSAPP_OUTBOUND_AUTO_TRANSLATE_PREFS_KEY));
   const [whatsAppTranslations, setWhatsAppTranslations] = useState<Record<string, WhatsAppTranslation>>(() => loadJsonMap<WhatsAppTranslation>(WHATSAPP_TRANSLATIONS_KEY));
   const [translatingMessageIds, setTranslatingMessageIds] = useState<Set<string>>(() => new Set());
   const [failedTranslationIds, setFailedTranslationIds] = useState<Set<string>>(() => new Set());
@@ -285,8 +359,13 @@ export default function Inbox() {
     try {
       if (composeChannel === "WhatsApp") {
         const target = extractRecipientValue(composeTo[0]);
+        const targetKey = normalizeConversationAddress(target);
+        const shouldTranslateOutbound = targetKey ? outboundAutoTranslateWhatsAppPrefs[targetKey] ?? false : false;
+        const outboundText = shouldTranslateOutbound
+          ? await translateOutboundWhatsAppText(composePlainText, getWhatsAppOutboundTargetLanguage(target))
+          : composePlainText;
         const mediaLines = selectedWhatsAppMedia.map((item) => `[${item.type}] ${item.name}`);
-        const finalWhatsAppText = [composePlainText, ...mediaLines].filter(Boolean).join("\n");
+        const finalWhatsAppText = [outboundText, ...mediaLines].filter(Boolean).join("\n");
         const attachments = selectedWhatsAppMedia.map((item) => ({
           name: item.name,
           type: item.type,
@@ -619,6 +698,10 @@ export default function Inbox() {
           if (savedPrefs && typeof savedPrefs === "object" && !Array.isArray(savedPrefs)) {
             setAutoTranslateWhatsAppPrefs(savedPrefs as Record<string, boolean>);
           }
+          const savedOutboundPrefs = settingsResult.value[WHATSAPP_OUTBOUND_AUTO_TRANSLATE_PREFS_KEY];
+          if (savedOutboundPrefs && typeof savedOutboundPrefs === "object" && !Array.isArray(savedOutboundPrefs)) {
+            setOutboundAutoTranslateWhatsAppPrefs(savedOutboundPrefs as Record<string, boolean>);
+          }
         }
       })
       .then(() => syncInboxMessages(true))
@@ -648,6 +731,73 @@ export default function Inbox() {
   const activeWhatsAppAutoTranslateEnabled = activeWhatsAppAutoTranslateKey
     ? autoTranslateWhatsAppPrefs[activeWhatsAppAutoTranslateKey] ?? false
     : false;
+  const activeWhatsAppOutboundTranslateEnabled = activeWhatsAppAutoTranslateKey
+    ? outboundAutoTranslateWhatsAppPrefs[activeWhatsAppAutoTranslateKey] ?? false
+    : false;
+  const findCustomerByWhatsAppAddress = (address = "", message?: MessagePreview | null) => {
+    const lookupValues = new Set(
+      [
+        address,
+        message?.mob,
+        message?.sender,
+        message?.target,
+        message ? getMessageChatId(message) : "",
+      ]
+        .filter(Boolean)
+        .map((value) => normalizeConversationAddress(String(value))),
+    );
+    return customers.find((customer) => {
+      const contactValues = [
+        customer.contact,
+        ...(customer.contacts || [])
+          .filter((contact) => ["whatsapp", "phone", "mobile"].includes(contact.type.toLowerCase()))
+          .map((contact) => contact.value),
+      ].map((value) => normalizeConversationAddress(value));
+      return contactValues.some((value) => value && lookupValues.has(value));
+    });
+  };
+
+  const getWhatsAppOutboundTargetLanguage = (address = "", message?: MessagePreview | null) => {
+    const customer = findCustomerByWhatsAppAddress(address, message);
+    return languageName(customer?.preferredLanguage || "") || officialLanguageForCountry(customer?.country || "") || "English";
+  };
+
+  const saveOutboundWhatsAppTranslatePref = (key: string, enabled: boolean) => {
+    if (!key) return;
+    const nextPrefs = {
+      ...outboundAutoTranslateWhatsAppPrefs,
+      [key]: enabled,
+    };
+    setOutboundAutoTranslateWhatsAppPrefs(nextPrefs);
+    localStorage.setItem(WHATSAPP_OUTBOUND_AUTO_TRANSLATE_PREFS_KEY, JSON.stringify(nextPrefs));
+    saveAppSetting(WHATSAPP_OUTBOUND_AUTO_TRANSLATE_PREFS_KEY, nextPrefs);
+  };
+
+  const translateOutboundWhatsAppText = async (text: string, targetLanguage: string) => {
+    const modelProfile = getModelProfiles()[0] || {};
+    const res = await fetch("/api/ai/translate-message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        targetLanguage,
+        modelProfile,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Translation failed with HTTP ${res.status}.`);
+    }
+    return data.shouldTranslate && data.translatedText ? String(data.translatedText).trim() : text;
+  };
+  const activeWhatsAppOutboundTargetLanguage = activeMessage?.channel === "WhatsApp"
+    ? getWhatsAppOutboundTargetLanguage(
+        activeMessage.mob ||
+          (activeMessage.direction === "outbound" ? activeMessage.target : activeMessage.sender) ||
+          activeMessage.target,
+        activeMessage,
+      )
+    : "English";
 
   const saveWhatsAppChatMobMapping = (chatId: string, mob: string) => {
     const normalizedChatId = chatId.trim();
@@ -941,20 +1091,27 @@ export default function Inbox() {
       }
 
       if (activeMessage.channel === "WhatsApp") {
+        const targetAddress =
+          activeMessage.mob ||
+          (activeMessage.direction === "outbound" ? activeMessage.target : activeMessage.sender) ||
+          activeMessage.target;
+        const outboundText = activeWhatsAppOutboundTranslateEnabled
+          ? await translateOutboundWhatsAppText(replyPlainText, getWhatsAppOutboundTargetLanguage(targetAddress, activeMessage))
+          : replyPlainText;
         const mediaLines = selectedWhatsAppMedia.map((item) => `[${item.type}] ${item.name}`);
-        const finalWhatsAppText = [replyPlainText, ...mediaLines].filter(Boolean).join("\n");
+        const finalWhatsAppText = [outboundText, ...mediaLines].filter(Boolean).join("\n");
         const attachments = selectedWhatsAppMedia.map((item) => ({
           name: item.name,
           type: item.type,
           url: item.url,
           size: item.size,
         }));
-        await sendMessage(activeMessage.target, finalWhatsAppText, selectedClientId, attachments);
+        await sendMessage(targetAddress, finalWhatsAppText, selectedClientId, attachments);
         addOutboundMessage({
           sender: "agent",
-          target: activeMessage.target,
+          target: targetAddress,
           chatId: activeMessage.chatId,
-          mob: activeMessage.mob || activeMessage.target,
+          mob: activeMessage.mob || targetAddress,
           intent: "Outbound",
           subject: activeMessage.subject,
           summary: finalWhatsAppText.slice(0, 140),
@@ -1350,6 +1507,10 @@ export default function Inbox() {
     ? extractRecipientValue(composeTo[0])
     : "";
   const activeWhatsAppTargetKey = normalizeConversationAddress(activeWhatsAppTarget);
+  const activeComposeWhatsAppOutboundTranslateEnabled = activeWhatsAppTargetKey
+    ? outboundAutoTranslateWhatsAppPrefs[activeWhatsAppTargetKey] ?? false
+    : false;
+  const activeComposeWhatsAppTargetLanguage = getWhatsAppOutboundTargetLanguage(activeWhatsAppTarget);
   const whatsappConversationItems = activeWhatsAppTargetKey
     ? messages
         .filter((msg) => {
@@ -1967,6 +2128,20 @@ export default function Inbox() {
                       placeholder={language === "zh" ? "输入 WhatsApp 消息..." : "Type a WhatsApp message..."}
                       className="min-h-[92px] w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
                     />
+                    {activeWhatsAppTargetKey && (
+                      <label className="mt-3 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={activeComposeWhatsAppOutboundTranslateEnabled}
+                          onChange={(event) => saveOutboundWhatsAppTranslatePref(activeWhatsAppTargetKey, event.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span>{language === "zh" ? "发送前自动翻译" : "Translate before sending"}</span>
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
+                          {activeComposeWhatsAppTargetLanguage}
+                        </span>
+                      </label>
+                    )}
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                       <div className="relative flex items-center gap-2">
                         <button
@@ -2764,6 +2939,20 @@ export default function Inbox() {
                           </div>
                         ))}
                       </div>
+                    )}
+                    {activeWhatsAppAutoTranslateKey && (
+                      <label className="mb-3 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={activeWhatsAppOutboundTranslateEnabled}
+                          onChange={(event) => saveOutboundWhatsAppTranslatePref(activeWhatsAppAutoTranslateKey, event.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span>{language === "zh" ? "发送前自动翻译" : "Translate before sending"}</span>
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
+                          {activeWhatsAppOutboundTargetLanguage}
+                        </span>
+                      </label>
                     )}
                     <div className="flex items-end gap-2">
                       <div className="relative flex items-center gap-1 pb-1">
