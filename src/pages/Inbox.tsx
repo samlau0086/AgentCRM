@@ -74,6 +74,7 @@ interface InboxInsight {
 }
 
 type SenderAnalysisMode = "auto" | "manual";
+type InboxChannelFilter = "all" | "WhatsApp" | "Email";
 
 interface SenderAnalysisPreference {
   sender: string;
@@ -408,6 +409,7 @@ export default function Inbox() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMailbox, setSelectedMailbox] = useState<"inbox" | "sent">("inbox");
+  const [channelFilter, setChannelFilter] = useState<InboxChannelFilter>("all");
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [bulkTag, setBulkTag] = useState("");
 
@@ -1061,7 +1063,11 @@ export default function Inbox() {
       : msg.direction !== "outbound" && msg.intent !== "Outbound",
   );
 
-  const filteredMessages = mailboxMessages.filter((msg) => {
+  const channelMessages = mailboxMessages.filter((msg) =>
+    channelFilter === "all" ? true : msg.channel === channelFilter,
+  );
+
+  const filteredMessages = channelMessages.filter((msg) => {
     const q = searchQuery.toLowerCase();
     return (
       msg.subject.toLowerCase().includes(q) ||
@@ -1132,7 +1138,7 @@ export default function Inbox() {
 
   useEffect(() => {
     setSelectedMessageIds([]);
-  }, [selectedMailbox]);
+  }, [selectedMailbox, channelFilter]);
 
   const activeWhatsAppTarget = composeChannel === "WhatsApp" && composeTo[0]
     ? extractRecipientValue(composeTo[0])
@@ -1166,9 +1172,22 @@ export default function Inbox() {
     setSelectedMailbox(mailbox);
     setActiveTab("inbox");
     const nextMessage = messages.find((msg) =>
-      mailbox === "sent"
+      (mailbox === "sent"
         ? msg.direction === "outbound" || msg.intent === "Outbound"
-        : msg.direction !== "outbound" && msg.intent !== "Outbound",
+        : msg.direction !== "outbound" && msg.intent !== "Outbound") &&
+      (channelFilter === "all" || msg.channel === channelFilter),
+    );
+    setActiveMessageId(nextMessage?.id || "");
+  };
+
+  const switchChannelFilter = (nextFilter: InboxChannelFilter) => {
+    setChannelFilter(nextFilter);
+    setActiveTab("inbox");
+    const nextMessage = messages.find((msg) =>
+      (selectedMailbox === "sent"
+        ? msg.direction === "outbound" || msg.intent === "Outbound"
+        : msg.direction !== "outbound" && msg.intent !== "Outbound") &&
+      (nextFilter === "all" || msg.channel === nextFilter),
     );
     setActiveMessageId(nextMessage?.id || "");
   };
@@ -1246,6 +1265,34 @@ export default function Inbox() {
               <Send className="h-4 w-4" />
               {language === "zh" ? "发件箱" : "Sent"}
             </button>
+          </div>
+          <div className="mb-3 rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-white/10 dark:bg-white/5">
+            <div className="grid grid-cols-3 gap-1">
+              {[
+                { value: "all" as const, label: "All", icon: InboxTray },
+                { value: "WhatsApp" as const, label: "WhatsApp", icon: MessageCircle },
+                { value: "Email" as const, label: "Email", icon: Mail },
+              ].map((item) => {
+                const Icon = item.icon;
+                const active = channelFilter === item.value;
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => switchChannelFilter(item.value)}
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-all",
+                      active
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 dark:text-slate-500" />
