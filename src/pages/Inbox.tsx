@@ -93,7 +93,7 @@ const INBOX_INSIGHTS_KEY = "crm_inbox_ai_insights";
 const SENDER_ANALYSIS_PREFS_KEY = "crm_inbox_sender_analysis_prefs";
 const LAST_SIGNATURE_BY_RECIPIENT_KEY = "crm_last_email_signature_by_recipient";
 const WHATSAPP_CHAT_MOB_MAPPINGS_KEY = "crm_whatsapp_chat_mob_mappings";
-const WHATSAPP_AUTO_TRANSLATE_KEY = "crm_whatsapp_auto_translate";
+const WHATSAPP_AUTO_TRANSLATE_PREFS_KEY = "crm_whatsapp_auto_translate_prefs";
 const WHATSAPP_TRANSLATIONS_KEY = "crm_whatsapp_message_translations";
 const BULK_DELETE_SENTINEL = "__bulk_delete__";
 const WHATSAPP_EMOJIS = ["😀", "😂", "😊", "😍", "👍", "🙏", "🎉", "🔥", "✅", "💬", "📎", "❤️"];
@@ -190,7 +190,7 @@ export default function Inbox() {
   const [replyScheduleDate, setReplyScheduleDate] = useState("");
   const [replyScheduleTime, setReplyScheduleTime] = useState("");
   const [showReplySchedule, setShowReplySchedule] = useState(false);
-  const [autoTranslateWhatsApp, setAutoTranslateWhatsApp] = useState(() => localStorage.getItem(WHATSAPP_AUTO_TRANSLATE_KEY) === "true");
+  const [autoTranslateWhatsAppPrefs, setAutoTranslateWhatsAppPrefs] = useState<Record<string, boolean>>(() => loadJsonMap<boolean>(WHATSAPP_AUTO_TRANSLATE_PREFS_KEY));
   const [whatsAppTranslations, setWhatsAppTranslations] = useState<Record<string, WhatsAppTranslation>>(() => loadJsonMap<WhatsAppTranslation>(WHATSAPP_TRANSLATIONS_KEY));
   const [translatingMessageIds, setTranslatingMessageIds] = useState<Set<string>>(() => new Set());
   const [failedTranslationIds, setFailedTranslationIds] = useState<Set<string>>(() => new Set());
@@ -615,11 +615,9 @@ export default function Inbox() {
         }
         const settingsResult = results[2];
         if (settingsResult.status === "fulfilled") {
-          const savedAutoTranslate = settingsResult.value[WHATSAPP_AUTO_TRANSLATE_KEY];
-          if (typeof savedAutoTranslate === "boolean") {
-            setAutoTranslateWhatsApp(savedAutoTranslate);
-          } else if (typeof savedAutoTranslate === "string") {
-            setAutoTranslateWhatsApp(savedAutoTranslate === "true");
+          const savedPrefs = settingsResult.value[WHATSAPP_AUTO_TRANSLATE_PREFS_KEY];
+          if (savedPrefs && typeof savedPrefs === "object" && !Array.isArray(savedPrefs)) {
+            setAutoTranslateWhatsAppPrefs(savedPrefs as Record<string, boolean>);
           }
         }
       })
@@ -634,6 +632,22 @@ export default function Inbox() {
 
   const getMessageChatId = (message: MessagePreview) =>
     message.chatId || (message.id.startsWith("wa_chat_") ? message.id.replace(/^wa_chat_/, "") : "") || message.sender || message.target;
+
+  const whatsappAutoTranslatePrefKey = (message: MessagePreview | null) => {
+    if (!message || message.channel !== "WhatsApp") return "";
+    const contactValue =
+      message.mob ||
+      (message.direction === "outbound" ? message.target : message.sender) ||
+      message.target ||
+      message.sender ||
+      getMessageChatId(message);
+    return normalizeConversationAddress(contactValue);
+  };
+
+  const activeWhatsAppAutoTranslateKey = whatsappAutoTranslatePrefKey(activeMessage);
+  const activeWhatsAppAutoTranslateEnabled = activeWhatsAppAutoTranslateKey
+    ? autoTranslateWhatsAppPrefs[activeWhatsAppAutoTranslateKey] ?? false
+    : false;
 
   const saveWhatsAppChatMobMapping = (chatId: string, mob: string) => {
     const normalizedChatId = chatId.trim();
@@ -674,7 +688,7 @@ export default function Inbox() {
   };
 
   useEffect(() => {
-    if (!autoTranslateWhatsApp || !activeMessage || activeMessage.channel !== "WhatsApp") return;
+    if (!activeWhatsAppAutoTranslateEnabled || !activeMessage || activeMessage.channel !== "WhatsApp") return;
     const modelProfile = getModelProfiles()[0] || {};
     const targetLanguage = language === "zh" ? "Chinese" : "English";
 
@@ -739,7 +753,7 @@ export default function Inbox() {
             });
           });
       });
-  }, [activeMessage?.id, autoTranslateWhatsApp, language, whatsAppTranslations, translatingMessageIds, failedTranslationIds]);
+  }, [activeMessage?.id, activeWhatsAppAutoTranslateEnabled, language, whatsAppTranslations, translatingMessageIds, failedTranslationIds]);
 
   useEffect(() => {
     localStorage.setItem(WHATSAPP_TRANSLATIONS_KEY, JSON.stringify(whatsAppTranslations));
@@ -2400,13 +2414,18 @@ export default function Inbox() {
                   <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
                     <input
                       type="checkbox"
-                      checked={autoTranslateWhatsApp}
+                      checked={activeWhatsAppAutoTranslateEnabled}
                       onChange={(event) => {
                         const enabled = event.target.checked;
-                        setAutoTranslateWhatsApp(enabled);
+                        if (!activeWhatsAppAutoTranslateKey) return;
                         if (enabled) setFailedTranslationIds(new Set());
-                        localStorage.setItem(WHATSAPP_AUTO_TRANSLATE_KEY, String(enabled));
-                        saveAppSetting(WHATSAPP_AUTO_TRANSLATE_KEY, enabled);
+                        const nextPrefs = {
+                          ...autoTranslateWhatsAppPrefs,
+                          [activeWhatsAppAutoTranslateKey]: enabled,
+                        };
+                        setAutoTranslateWhatsAppPrefs(nextPrefs);
+                        localStorage.setItem(WHATSAPP_AUTO_TRANSLATE_PREFS_KEY, JSON.stringify(nextPrefs));
+                        saveAppSetting(WHATSAPP_AUTO_TRANSLATE_PREFS_KEY, nextPrefs);
                       }}
                       className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
@@ -2499,7 +2518,7 @@ export default function Inbox() {
                             return (
                               <div className="whitespace-pre-wrap break-words">
                                 {tMsg.content}
-                                {isTranslating && tMsg.sender !== "agent" && autoTranslateWhatsApp && (
+                                {isTranslating && tMsg.sender !== "agent" && activeWhatsAppAutoTranslateEnabled && (
                                   <div className="mt-3 border-t border-current/20 pt-2 text-xs opacity-75">
                                     {language === "zh" ? "正在翻译..." : "Translating..."}
                                   </div>
