@@ -817,11 +817,35 @@ function CountryMapView({
     <div className="grid h-full min-h-[520px] grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div className="relative min-h-[420px] overflow-hidden bg-slate-50 dark:bg-black/20">
         <div className="absolute inset-6 rounded-[32px] border border-slate-200 bg-white shadow-inner dark:border-white/10 dark:bg-white/[0.03]" />
-        <div className="absolute left-[8%] top-[18%] h-[44%] w-[25%] rounded-[50%] bg-slate-200/70 dark:bg-slate-700/50" />
-        <div className="absolute left-[39%] top-[21%] h-[36%] w-[17%] rounded-[48%] bg-slate-200/70 dark:bg-slate-700/50" />
-        <div className="absolute left-[51%] top-[18%] h-[53%] w-[34%] rounded-[50%] bg-slate-200/70 dark:bg-slate-700/50" />
-        <div className="absolute left-[73%] top-[66%] h-[21%] w-[17%] rounded-[50%] bg-slate-200/70 dark:bg-slate-700/50" />
-        <div className="absolute left-[28%] top-[57%] h-[27%] w-[16%] rounded-[50%] bg-slate-200/70 dark:bg-slate-700/50" />
+        <svg
+          viewBox="0 0 1000 520"
+          aria-hidden="true"
+          className="absolute inset-8 h-[calc(100%-4rem)] w-[calc(100%-4rem)]"
+          preserveAspectRatio="xMidYMid meet"
+        >
+          <defs>
+            <pattern id="world-grid" width="100" height="65" patternUnits="userSpaceOnUse">
+              <path d="M100 0H0V65" fill="none" stroke="currentColor" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width="1000" height="520" rx="24" className="fill-sky-50 text-sky-100 dark:fill-slate-950 dark:text-white/5" />
+          <rect width="1000" height="520" rx="24" fill="url(#world-grid)" className="text-sky-200/60 dark:text-white/5" />
+          <g className="fill-slate-200 stroke-white stroke-[2] dark:fill-slate-700/70 dark:stroke-slate-900">
+            <path d="M131 167l34-43 62-29 76 11 47 34 42 21 19 47-25 34-52 12-24 40-54 8-33-37-50-12-44-39z" />
+            <path d="M248 65l52-24 82 16 18 31-31 29-68-3-57 18-34-31z" />
+            <path d="M298 302l47 23 29 64-19 73-49 25-31-51 9-63-31-38z" />
+            <path d="M468 139l51-20 54 18 25 34-24 30-56-4-47 16-30-34z" />
+            <path d="M520 210l69 7 52 46 12 77-41 83-73 10-50-52-7-90z" />
+            <path d="M603 126l93-35 118 24 81 54 45 84-41 52-93-15-62 36-82-30-36-74-70-28z" />
+            <path d="M710 333l45 14 36 35-18 38-56 4-33-30z" />
+            <path d="M780 394l96 20 44 41-38 39-109-17-43-42z" />
+            <path d="M875 318l53 16 34 41-34 34-61-14-24-45z" />
+          </g>
+          <g className="fill-slate-300/70 dark:fill-slate-600/70">
+            <path d="M421 92l32-11 38 12 4 24-34 12-38-9z" />
+            <path d="M905 73l35 8 20 21-22 22-37-5-14-23z" />
+          </g>
+        </svg>
 
         {stats.map((stat, index) => {
           const isActive = matchesCountryFilter(stat.country, activeCountry);
