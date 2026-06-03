@@ -58,6 +58,7 @@ Database-backed data includes:
 - Customers and Public Pool leads
 - Unified inbox Email/WhatsApp messages
 - WhatsApp chatId to mob mappings
+- WhatsApp message translation cache
 - Model Profiles
 - Agents, agent runs, trace steps, and approvals
 - System users
@@ -69,8 +70,9 @@ Database-backed data includes:
 
 - **Dashboard**: CRM metrics, unread messages, estimated revenue, pending work, and a GitHub-style contribution chart.
 - **Customer Management**: Create, edit, delete, search, tag, CSV import, Public Pool lead claiming, and List/Map views. The Map view shows a world map, country counts, and click-to-filter behavior.
-- **Unified Inbox**: Manage Email and WhatsApp conversations in one place. Supports Inbox/Sent views, fixed channel filters for All/WhatsApp/Email, search, bulk delete, bulk tag, mark important, delete, sync, assignee, internal comments, and AI analysis.
+- **Unified Inbox**: Manage Email and WhatsApp conversations in one place. Supports Inbox/Sent views, fixed channel filters for All/WhatsApp/Email, search, bulk delete, bulk tag, bulk follow-up with due date, mark important, delete, sync, assignee, internal comments, and AI analysis.
 - **WhatsApp Conversations**: WhatsApp messages are grouped by chatId into one conversation. The message view uses left/right chat bubbles to distinguish customer and agent messages. The input box supports emoji and media library attachments.
+- **WhatsApp Auto Translation**: Optional, disabled by default. Customer messages can be translated into the system language inside the same bubble. Translation reads from browser cache first, then database cache, then AI only when needed.
 - **WhatsApp Actor Hub Mapping**: In a WhatsApp conversation, double-click the `chatId -> mob` field in the `From` area to inline edit the mapping. The mapping is saved to app settings and inbox records.
 - **Inbox AI Context & Suggestions**: Run AI analysis once and reuse stored results. Options include Draft AI Reply, Delete Spam, Tag Spam, Mark Important, Tag Follow-up, Assign Sales, Forward, and Sender Manual Analysis where applicable.
 - **Email**: IMAP receive and SMTP send profiles support SSL/TLS, STARTTLS, plain connections, TLS certificate verification, and real server-side connection tests.
@@ -87,11 +89,12 @@ Database-backed data includes:
 
 1. Use **Inbox/Sent** to switch between received and sent conversations.
 2. Use the fixed **All / WhatsApp / Email** filter above search to filter by channel.
-3. Use checkboxes to select messages, then bulk delete, add tags, or mark important.
+3. Use checkboxes to select messages, then bulk delete, add tags, mark important, or add follow-up with a due date.
 4. Open a WhatsApp conversation to see grouped chat bubbles by chatId.
 5. Double-click the `chatId -> mob` field in the `From` area to edit WhatsApp Actor Hub mappings.
 6. Use the bottom WhatsApp input box to send text, emoji, images, or files.
-7. Run **Analyze** in Agent Context & Suggestions, then use the generated options to process the message efficiently.
+7. Enable **Auto translate** when you want customer messages translated into the system language. Translation cache order is browser cache, database cache, then AI.
+8. Run **Analyze** in Agent Context & Suggestions, then use the generated options to process the message efficiently.
 
 ### Customer Management Usage
 
@@ -253,6 +256,7 @@ ANTHROPIC_API_KEY=...
 - 客户和 Public Pool 线索
 - 统一收件箱 Email/WhatsApp 消息
 - WhatsApp chatId 到 mob 的映射
+- WhatsApp 消息翻译缓存
 - 模型 Profiles
 - 智能体、运行日志、追踪步骤和人工审批
 - 系统用户
@@ -264,8 +268,9 @@ ANTHROPIC_API_KEY=...
 
 - **仪表盘**：CRM 指标、未读消息、预计收入、待处理工作，以及类似 GitHub Contributions 的事件图表。
 - **客户管理**：创建、编辑、删除、搜索、标签管理、CSV 导入、Public Pool 线索领取，并支持 List/Map 视图。Map 视图显示世界地图、国家数量，并支持点击国家筛选列表。
-- **统一收件箱**：集中管理 Email 和 WhatsApp 会话。支持 Inbox/Sent、固定 All/WhatsApp/Email 渠道筛选、搜索、批量删除、批量加标签、标记重要、删除、同步、负责人、内部评论和 AI 分析。
+- **统一收件箱**：集中管理 Email 和 WhatsApp 会话。支持 Inbox/Sent、固定 All/WhatsApp/Email 渠道筛选、搜索、批量删除、批量加标签、批量加入跟进并设置到期时间、标记重要、删除、同步、负责人、内部评论和 AI 分析。
 - **WhatsApp 会话**：按 chatId 聚合同一个聊天窗口。消息气泡会区分我方和客户：我方靠右，客户靠左。输入框支持 emoji 和媒体素材库附件。
+- **WhatsApp 自动翻译**：可选功能，默认关闭。客人的非系统语言消息可在同一个气泡内翻译为系统语言。翻译读取顺序为浏览器缓存、数据库缓存，最后才调用 AI。
 - **WhatsApp Actor Hub 映射**：在 WhatsApp conversation 的 `From` 区域双击 `chatId -> mob` 字段，可 inline edit 映射关系。映射会保存到应用设置和 inbox 记录。
 - **智能体上下文与建议**：AI 分析结果会保存并复用。Options 包含 Draft AI Reply、Delete Spam、Tag Spam、Mark Important、Tag Follow-up、Assign Sales、Forward、Sender Manual Analysis 等。
 - **邮件集成**：IMAP 收信和 SMTP 发信支持 SSL/TLS、STARTTLS、无加密连接、TLS 证书校验，以及真实服务端连接测试。
@@ -282,11 +287,12 @@ ANTHROPIC_API_KEY=...
 
 1. 使用 **Inbox/Sent** 切换收件箱和发件箱。
 2. 使用搜索框上方固定的 **All / WhatsApp / Email** 筛选渠道。
-3. 勾选消息后，可以批量删除、批量加标签或标记重要。
+3. 勾选消息后，可以批量删除、批量加标签、标记重要，或加入跟进并设置到期时间。
 4. 打开 WhatsApp 会话后，可以查看按 chatId 聚合的聊天记录。
 5. 在 `From` 区域双击 `chatId -> mob` 字段，可以编辑 WhatsApp Actor Hub 映射。
 6. 使用底部 WhatsApp 输入框发送文字、emoji、图片或文件。
-7. 在“智能体上下文与建议”里点击 Analyze 分析消息，再使用 Options 快速处理。
+7. 需要翻译客户消息时开启 **自动翻译**。翻译缓存读取顺序为浏览器缓存、数据库缓存，最后才调用 AI。
+8. 在“智能体上下文与建议”里点击 Analyze 分析消息，再使用 Options 快速处理。
 
 ### 客户管理使用
 

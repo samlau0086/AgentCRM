@@ -5,6 +5,7 @@ import express from "express";
 import path from "path";
 import net from "net";
 import tls from "tls";
+import { createHash } from "crypto";
 import { createServer as createViteServer } from "vite";
 import cookieParser from "cookie-parser";
 import bcrypt from "bcrypt";
@@ -1742,8 +1743,41 @@ Return only the reply body. Keep it concise, helpful, and under 3 paragraphs. Do
   }
 });
 
+function messageTranslationId(messageId: string, threadId: string, targetLanguage: string) {
+  return Buffer.from(`${messageId}|${threadId}|${targetLanguage}`.toLowerCase()).toString("base64url").slice(0, 120);
+}
+
+function textHash(text: string) {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+app.get("/api/ai/message-translation", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  const messageId = String(req.query.messageId || "").trim();
+  const threadId = String(req.query.threadId || "").trim();
+  const targetLanguage = String(req.query.targetLanguage || "").trim();
+  const text = String(req.query.text || "");
+  if (!messageId || !threadId || !targetLanguage) {
+    return res.status(400).json({ error: "messageId, threadId, and targetLanguage are required." });
+  }
+
+  try {
+    const id = messageTranslationId(messageId, threadId, targetLanguage);
+    const translation = await getRecord("message_translations", id);
+    if (!translation) return res.json({ translation: null });
+    if (text && translation.sourceTextHash && translation.sourceTextHash !== textHash(text)) {
+      return res.json({ translation: null });
+    }
+    res.json({ translation });
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to load message translation: ${err.message}` });
+  }
+});
+
 app.post("/api/ai/translate-message", async (req, res) => {
   const {
+    messageId = "",
+    threadId = "",
     text = "",
     targetLanguage = "en",
     modelProfile = {},
@@ -1754,6 +1788,20 @@ app.post("/api/ai/translate-message", async (req, res) => {
   }
 
   try {
+    const normalizedMessageId = String(messageId || "").trim();
+    const normalizedThreadId = String(threadId || "").trim();
+    const normalizedTargetLanguage = String(targetLanguage || "").trim();
+    const cacheId = normalizedMessageId && normalizedThreadId
+      ? messageTranslationId(normalizedMessageId, normalizedThreadId, normalizedTargetLanguage)
+      : "";
+    const sourceTextHash = textHash(sourceText);
+    if (cacheId && hasDatabase) {
+      const existing = await getRecord("message_translations", cacheId);
+      if (existing?.sourceTextHash === sourceTextHash) {
+        return res.json(existing);
+      }
+    }
+
     let selectedProfile = modelProfile as ModelProfile;
     if (!selectedProfile || Object.keys(selectedProfile).length === 0) {
       const profiles = hasDatabase ? await getRecordList("crm_model_profiles") : [];
@@ -1782,14 +1830,24 @@ If the message is already in the target system language, set shouldTranslate to 
       prompt,
     );
     const data = parseAiJson(raw);
-    res.json({
+    const translation = {
+      id: cacheId || `message_translation_${Date.now()}`,
+      messageId: normalizedMessageId,
+      threadId: normalizedThreadId,
+      targetLanguageKey: normalizedTargetLanguage,
+      sourceTextHash,
       sourceLanguage: String(data.sourceLanguage || "unknown"),
       targetLanguage: String(data.targetLanguage || targetLanguage),
       shouldTranslate: Boolean(data.shouldTranslate && data.translatedText),
       translatedText: String(data.translatedText || "").trim(),
       model: profile.model,
       provider: profile.provider,
-    });
+      translatedAt: new Date().toISOString(),
+    };
+    if (cacheId && hasDatabase) {
+      await upsertRecord("message_translations", cacheId, translation);
+    }
+    res.json(translation);
   } catch (err: any) {
     res.status(500).json({ error: `Message translation failed: ${err.message}` });
   }

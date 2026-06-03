@@ -94,6 +94,7 @@ const SENDER_ANALYSIS_PREFS_KEY = "crm_inbox_sender_analysis_prefs";
 const LAST_SIGNATURE_BY_RECIPIENT_KEY = "crm_last_email_signature_by_recipient";
 const WHATSAPP_CHAT_MOB_MAPPINGS_KEY = "crm_whatsapp_chat_mob_mappings";
 const WHATSAPP_AUTO_TRANSLATE_KEY = "crm_whatsapp_auto_translate";
+const WHATSAPP_TRANSLATIONS_KEY = "crm_whatsapp_message_translations";
 const BULK_DELETE_SENTINEL = "__bulk_delete__";
 const WHATSAPP_EMOJIS = ["😀", "😂", "😊", "😍", "👍", "🙏", "🎉", "🔥", "✅", "💬", "📎", "❤️"];
 
@@ -190,8 +191,9 @@ export default function Inbox() {
   const [replyScheduleTime, setReplyScheduleTime] = useState("");
   const [showReplySchedule, setShowReplySchedule] = useState(false);
   const [autoTranslateWhatsApp, setAutoTranslateWhatsApp] = useState(() => localStorage.getItem(WHATSAPP_AUTO_TRANSLATE_KEY) === "true");
-  const [whatsAppTranslations, setWhatsAppTranslations] = useState<Record<string, WhatsAppTranslation>>({});
+  const [whatsAppTranslations, setWhatsAppTranslations] = useState<Record<string, WhatsAppTranslation>>(() => loadJsonMap<WhatsAppTranslation>(WHATSAPP_TRANSLATIONS_KEY));
   const [translatingMessageIds, setTranslatingMessageIds] = useState<Set<string>>(() => new Set());
+  const [failedTranslationIds, setFailedTranslationIds] = useState<Set<string>>(() => new Set());
 
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [isSending, setIsSending] = useState(false);
@@ -628,7 +630,7 @@ export default function Inbox() {
   const activeMessage =
     messages.find((m) => m.id === activeMessageId) || messages[0] || null;
 
-  const whatsappTranslationKey = (messageId: string, threadId: string) => `${messageId}:${threadId}`;
+  const whatsappTranslationKey = (messageId: string, threadId: string, targetLanguage: string) => `${messageId}:${threadId}:${targetLanguage}`;
 
   const getMessageChatId = (message: MessagePreview) =>
     message.chatId || (message.id.startsWith("wa_chat_") ? message.id.replace(/^wa_chat_/, "") : "") || message.sender || message.target;
@@ -679,22 +681,37 @@ export default function Inbox() {
     activeMessage.thread
       .filter((threadItem) => threadItem.sender !== "agent" && !threadItem.htmlContent && threadItem.content?.trim())
       .forEach((threadItem) => {
-        const key = whatsappTranslationKey(activeMessage.id, threadItem.id);
-        if (whatsAppTranslations[key] || translatingMessageIds.has(key)) return;
+        const key = whatsappTranslationKey(activeMessage.id, threadItem.id, targetLanguage);
+        if (whatsAppTranslations[key] || translatingMessageIds.has(key) || failedTranslationIds.has(key)) return;
 
         setTranslatingMessageIds((prev) => new Set(prev).add(key));
-        fetch("/api/ai/translate-message", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: threadItem.content,
-            targetLanguage,
-            modelProfile,
-          }),
-        })
+        const params = new URLSearchParams({
+          messageId: activeMessage.id,
+          threadId: threadItem.id,
+          targetLanguage,
+          text: threadItem.content,
+        });
+        fetch(`/api/ai/message-translation?${params.toString()}`)
           .then(async (res) => {
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || `Translation failed with HTTP ${res.status}.`);
+            if (!res.ok) throw new Error(data.error || `Translation cache lookup failed with HTTP ${res.status}.`);
+            if (data.translation) return data.translation;
+            const translateRes = await fetch("/api/ai/translate-message", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messageId: activeMessage.id,
+                threadId: threadItem.id,
+                text: threadItem.content,
+                targetLanguage,
+                modelProfile,
+              }),
+            });
+            const translated = await translateRes.json().catch(() => ({}));
+            if (!translateRes.ok) throw new Error(translated.error || `Translation failed with HTTP ${translateRes.status}.`);
+            return translated;
+          })
+          .then((data) => {
             setWhatsAppTranslations((prev) => ({
               ...prev,
               [key]: {
@@ -707,15 +724,7 @@ export default function Inbox() {
           })
           .catch((err) => {
             console.error(err);
-            setWhatsAppTranslations((prev) => ({
-              ...prev,
-              [key]: {
-                sourceLanguage: "unknown",
-                targetLanguage,
-                translatedText: "",
-                shouldTranslate: false,
-              },
-            }));
+            setFailedTranslationIds((prev) => new Set(prev).add(key));
             notify(
               err instanceof Error ? err.message : "WhatsApp translation failed.",
               "error",
@@ -730,7 +739,11 @@ export default function Inbox() {
             });
           });
       });
-  }, [activeMessage?.id, autoTranslateWhatsApp, language, whatsAppTranslations, translatingMessageIds]);
+  }, [activeMessage?.id, autoTranslateWhatsApp, language, whatsAppTranslations, translatingMessageIds, failedTranslationIds]);
+
+  useEffect(() => {
+    localStorage.setItem(WHATSAPP_TRANSLATIONS_KEY, JSON.stringify(whatsAppTranslations));
+  }, [whatsAppTranslations]);
 
   // Load draft when switching messages
   useEffect(() => {
@@ -2391,6 +2404,7 @@ export default function Inbox() {
                       onChange={(event) => {
                         const enabled = event.target.checked;
                         setAutoTranslateWhatsApp(enabled);
+                        if (enabled) setFailedTranslationIds(new Set());
                         localStorage.setItem(WHATSAPP_AUTO_TRANSLATE_KEY, String(enabled));
                         saveAppSetting(WHATSAPP_AUTO_TRANSLATE_KEY, enabled);
                       }}
@@ -2479,7 +2493,7 @@ export default function Inbox() {
                           />
                         ) : (
                           (() => {
-                            const translationKey = whatsappTranslationKey(activeMessage.id, tMsg.id);
+                            const translationKey = whatsappTranslationKey(activeMessage.id, tMsg.id, language === "zh" ? "Chinese" : "English");
                             const translation = whatsAppTranslations[translationKey];
                             const isTranslating = translatingMessageIds.has(translationKey);
                             return (
