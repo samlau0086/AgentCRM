@@ -55,6 +55,7 @@ import {
   addOutboundMessage,
   deleteInboxMessage,
   getModelProfiles,
+  updateCustomer,
 } from "../services/db";
 import { CommentSection } from "../components/CommentSection";
 import ConfirmModal from "../components/ConfirmModal";
@@ -98,6 +99,25 @@ const WHATSAPP_OUTBOUND_AUTO_TRANSLATE_PREFS_KEY = "crm_whatsapp_outbound_auto_t
 const WHATSAPP_TRANSLATIONS_KEY = "crm_whatsapp_message_translations";
 const BULK_DELETE_SENTINEL = "__bulk_delete__";
 const WHATSAPP_EMOJIS = ["😀", "😂", "😊", "😍", "👍", "🙏", "🎉", "🔥", "✅", "💬", "📎", "❤️"];
+const CUSTOMER_LANGUAGE_OPTIONS = [
+  { value: "en", label: "English" },
+  { value: "zh", label: "Chinese" },
+  { value: "zh-hant", label: "Traditional Chinese" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+  { value: "de", label: "German" },
+  { value: "it", label: "Italian" },
+  { value: "pt", label: "Portuguese" },
+  { value: "ja", label: "Japanese" },
+  { value: "ko", label: "Korean" },
+  { value: "ar", label: "Arabic" },
+  { value: "hi", label: "Hindi" },
+  { value: "id", label: "Indonesian" },
+  { value: "th", label: "Thai" },
+  { value: "vi", label: "Vietnamese" },
+  { value: "tr", label: "Turkish" },
+  { value: "ru", label: "Russian" },
+];
 
 function loadJsonMap<T>(key: string): Record<string, T> {
   try {
@@ -868,6 +888,10 @@ export default function Inbox() {
     ? outboundAutoTranslateWhatsAppPrefs[activeWhatsAppAutoTranslateKey] ?? false
     : false;
   const findCustomerByWhatsAppAddress = (address = "", message?: MessagePreview | null) => {
+    if (message?.customerId) {
+      const customer = customers.find((item) => item.id === message.customerId);
+      if (customer) return customer;
+    }
     const lookupValues = new Set(
       [
         address,
@@ -893,6 +917,24 @@ export default function Inbox() {
   const getWhatsAppOutboundTargetLanguage = (address = "", message?: MessagePreview | null) => {
     const customer = findCustomerByWhatsAppAddress(address, message);
     return languageName(customer?.preferredLanguage || "") || officialLanguageForCountry(customer?.country || "") || "English";
+  };
+
+  const saveCustomerPreferredLanguage = (customer: Customer | undefined, preferredLanguage: string) => {
+    if (!customer) {
+      notify(
+        language === "zh" ? "当前 WhatsApp 号码未匹配到客户，无法保存客户偏好语言。" : "This WhatsApp number is not matched to a customer, so the preferred language cannot be saved.",
+        "warning",
+        language === "zh" ? "未匹配客户" : "Customer not matched",
+      );
+      return;
+    }
+    updateCustomer(customer.id, { preferredLanguage });
+    setCustomers(getCustomers());
+    notify(
+      language === "zh" ? "客户偏好语言已更新。" : "Customer preferred language updated.",
+      "success",
+      language === "zh" ? "语言已保存" : "Language saved",
+    );
   };
 
   const saveOutboundWhatsAppTranslatePref = (key: string, enabled: boolean) => {
@@ -931,6 +973,14 @@ export default function Inbox() {
         activeMessage,
       )
     : "English";
+  const activeWhatsAppOutboundCustomer = activeMessage?.channel === "WhatsApp"
+    ? findCustomerByWhatsAppAddress(
+        activeMessage.mob ||
+          (activeMessage.direction === "outbound" ? activeMessage.target : activeMessage.sender) ||
+          activeMessage.target,
+        activeMessage,
+      )
+    : undefined;
 
   const saveWhatsAppChatMobMapping = (chatId: string, mob: string) => {
     const normalizedChatId = chatId.trim();
@@ -1639,6 +1689,7 @@ export default function Inbox() {
   const activeComposeWhatsAppOutboundTranslateEnabled = activeWhatsAppTargetKey
     ? outboundAutoTranslateWhatsAppPrefs[activeWhatsAppTargetKey] ?? false
     : false;
+  const activeComposeWhatsAppCustomer = findCustomerByWhatsAppAddress(activeWhatsAppTarget);
   const activeComposeWhatsAppTargetLanguage = getWhatsAppOutboundTargetLanguage(activeWhatsAppTarget);
   const whatsappConversationItems = activeWhatsAppTargetKey
     ? messages
@@ -2273,9 +2324,21 @@ export default function Inbox() {
                           className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                         />
                         <span>{language === "zh" ? "发送前自动翻译" : "Translate before sending"}</span>
-                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
-                          {activeComposeWhatsAppTargetLanguage}
-                        </span>
+                        <span>{language === "zh" ? "目标语言" : "Target language"}</span>
+                        <select
+                          value={activeComposeWhatsAppCustomer?.preferredLanguage || ""}
+                          onChange={(event) => saveCustomerPreferredLanguage(activeComposeWhatsAppCustomer, event.target.value)}
+                          disabled={!activeComposeWhatsAppCustomer}
+                          className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200"
+                          title={!activeComposeWhatsAppCustomer ? (language === "zh" ? "当前号码未匹配到客户" : "No matched customer for this number") : undefined}
+                        >
+                          <option value="">{activeComposeWhatsAppTargetLanguage}</option>
+                          {CUSTOMER_LANGUAGE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                     )}
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -3088,9 +3151,21 @@ export default function Inbox() {
                           className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                         />
                         <span>{language === "zh" ? "发送前自动翻译" : "Translate before sending"}</span>
-                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
-                          {activeWhatsAppOutboundTargetLanguage}
-                        </span>
+                        <span>{language === "zh" ? "目标语言" : "Target language"}</span>
+                        <select
+                          value={activeWhatsAppOutboundCustomer?.preferredLanguage || ""}
+                          onChange={(event) => saveCustomerPreferredLanguage(activeWhatsAppOutboundCustomer, event.target.value)}
+                          disabled={!activeWhatsAppOutboundCustomer}
+                          className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200"
+                          title={!activeWhatsAppOutboundCustomer ? (language === "zh" ? "当前号码未匹配到客户" : "No matched customer for this number") : undefined}
+                        >
+                          <option value="">{activeWhatsAppOutboundTargetLanguage}</option>
+                          {CUSTOMER_LANGUAGE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                     )}
                     <div className="flex items-end gap-2">
