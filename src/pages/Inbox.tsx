@@ -670,6 +670,7 @@ export default function Inbox() {
   const [senderAnalysisPrefs, setSenderAnalysisPrefs] = useState<Record<string, SenderAnalysisPreference>>(() => loadJsonMap<SenderAnalysisPreference>(SENDER_ANALYSIS_PREFS_KEY));
   const [checkedSenderPrefKeys, setCheckedSenderPrefKeys] = useState<Set<string>>(() => new Set());
   const [loadingSenderPrefKey, setLoadingSenderPrefKey] = useState<string | null>(null);
+  const [detailCustomerId, setDetailCustomerId] = useState<string | null>(null);
 
   const syncInboxMessages = async (silent = false) => {
     if (!silent) setIsSyncing(true);
@@ -734,19 +735,28 @@ export default function Inbox() {
       });
       const emailPreviews: MessagePreview[] = emails
         .filter((email) => !existingIds.has(email.id))
-        .map((email) => ({
-          ...email,
-          direction: "inbound",
-          thread: [
-            {
-              id: `t_${email.id}`,
-              sender: "user",
-              content: email.summary,
-              htmlContent: email.bodyHtml,
-              time: email.date,
-            },
-          ],
-        }));
+        .map((email) => {
+          const matchedCustomer = findCustomerForMessage({
+            ...email,
+            direction: "inbound",
+            channel: "Email",
+            thread: [],
+          } as MessagePreview);
+          return {
+            ...email,
+            customerId: matchedCustomer?.id,
+            direction: "inbound",
+            thread: [
+              {
+                id: `t_${email.id}`,
+                sender: "user",
+                content: email.summary,
+                htmlContent: email.bodyHtml,
+                time: email.date,
+              },
+            ],
+          };
+        });
       emailPreviews.forEach((message) => existingIds.add(message.id));
 
       const waGroups = new Map<string, typeof waMessages>();
@@ -764,11 +774,13 @@ export default function Inbox() {
         const latestBody = getWhatsAppBody(latest);
         const latestAttachments = getWhatsAppMediaAttachments(latest);
         const summary = latestBody || latestAttachments[0]?.name || (latest.message_type === "media" ? "WhatsApp media" : "");
+        const matchedCustomer = findCustomerByWhatsAppAddress(mappedMob || chatId);
         return {
           ...(existingPreview || {}),
           id: previewId,
           chatId,
           mob: mappedMob,
+          customerId: matchedCustomer?.id || existingPreview?.customerId,
           sender: mappedMob || latest.sender,
           target: mappedMob || latest.recipient,
           intent: "WhatsApp",
@@ -981,6 +993,66 @@ export default function Inbox() {
         activeMessage,
       )
     : undefined;
+
+  const findCustomerForMessage = (message: MessagePreview | null) => {
+    if (!message) return undefined;
+    if (message.customerId) {
+      const customer = customers.find((item) => item.id === message.customerId);
+      if (customer) return customer;
+    }
+    if (message.channel === "WhatsApp") {
+      return findCustomerByWhatsAppAddress(
+        message.mob ||
+          (message.direction === "outbound" ? message.target : message.sender) ||
+          message.sender ||
+          message.target,
+        message,
+      );
+    }
+    const values = new Set(
+      [message.sender, message.target]
+        .flatMap((value) => String(value || "").split(","))
+        .map(extractRecipientValue)
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    return customers.find((customer) => {
+      const contactValues = [customer.contact, ...(customer.contacts || []).map((contact) => contact.value)]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean);
+      return contactValues.some((value) => values.has(value));
+    });
+  };
+
+  const getMessageMappedPhone = (message: MessagePreview | null) => {
+    if (!message || message.channel !== "WhatsApp") return "";
+    const chatId = getMessageChatId(message);
+    return whatsAppChatMobMappings[chatId] || message.mob || (message.direction === "outbound" ? message.target : message.sender) || message.sender || message.target;
+  };
+
+  const getMessageContactLabel = (message: MessagePreview) => {
+    const customer = findCustomerForMessage(message);
+    if (message.channel === "WhatsApp") {
+      const phone = getMessageMappedPhone(message);
+      return customer ? `${customer.name}${phone ? ` (${phone})` : ""}` : phone || getMessageChatId(message);
+    }
+    if (customer) return customer.name;
+    return message.direction === "outbound" || message.intent === "Outbound" ? `To: ${message.target}` : message.sender;
+  };
+
+  const getMessageTitle = (message: MessagePreview) => {
+    const customer = findCustomerForMessage(message);
+    if (message.channel === "WhatsApp") return customer?.name || getMessageContactLabel(message);
+    return customer?.name || message.subject;
+  };
+
+  const getListTitle = (message: MessagePreview) => {
+    if (message.channel === "WhatsApp") {
+      const lastThread = message.thread?.[message.thread.length - 1];
+      return message.summary || lastThread?.content || "WhatsApp media";
+    }
+    return message.subject;
+  };
 
   const saveWhatsAppChatMobMapping = (chatId: string, mob: string) => {
     const normalizedChatId = chatId.trim();
@@ -1717,6 +1789,23 @@ export default function Inbox() {
         )
     : [];
 
+  const activeMessageCustomer = findCustomerForMessage(activeMessage);
+  const activeMessageTitle = activeMessage ? getMessageTitle(activeMessage) : "";
+  const detailCustomer = detailCustomerId ? customers.find((customer) => customer.id === detailCustomerId) : undefined;
+
+  const linkMessageToCustomer = (message: MessagePreview, customerId: string) => {
+    updateInboxMessage(message.id, { customerId: customerId || undefined });
+    const nextMessages = getInboxMessages();
+    setMessages(nextMessages);
+    notify(
+      customerId
+        ? language === "zh" ? "消息已关联客户。" : "Message linked to customer."
+        : language === "zh" ? "已取消客户关联。" : "Customer link removed.",
+      "success",
+      language === "zh" ? "关联已更新" : "Link updated",
+    );
+  };
+
   const switchMailbox = (mailbox: "inbox" | "sent") => {
     setSelectedMailbox(mailbox);
     setActiveTab("inbox");
@@ -1951,7 +2040,10 @@ export default function Inbox() {
               )}
             </div>
           )}
-          {filteredMessages.map((msg) => (
+          {filteredMessages.map((msg) => {
+            const contactLabel = getMessageContactLabel(msg);
+            const listTitle = getListTitle(msg);
+            return (
             <div
               key={msg.id}
               onClick={() => handleSelectMessage(msg)}
@@ -2000,13 +2092,7 @@ export default function Inbox() {
                         : "font-medium text-slate-600 dark:text-slate-300",
                     )}
                   >
-                    {selectedMailbox === "sent" ? `To: ${msg.target}` : customers.find((c) =>
-                      c.contacts?.some(
-                        (contact) =>
-                          contact.value.toLowerCase() ===
-                          msg.sender.toLowerCase(),
-                      ),
-                    )?.name || msg.sender}
+                    {contactLabel}
                   </span>
                 </div>
               </div>
@@ -2017,9 +2103,9 @@ export default function Inbox() {
                     ? "font-semibold text-slate-800 dark:text-slate-200"
                     : "text-slate-700 dark:text-slate-300",
                 )}
-                title={msg.subject}
+                title={listTitle}
               >
-                {msg.subject}
+                {listTitle}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed mb-2">
                 {msg.summary}
@@ -2097,7 +2183,8 @@ export default function Inbox() {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -2595,9 +2682,20 @@ export default function Inbox() {
             <div className="p-6 border-b border-slate-200 dark:border-white/10 flex justify-between items-start shrink-0 bg-slate-50/50 dark:bg-black/20">
               <div className="min-w-0 flex-1 pr-4">
                 <div className="flex items-start gap-3 mb-2">
-                  <h2 className="text-xl font-semibold text-slate-900 dark:text-white tracking-tight whitespace-normal break-words leading-snug" title={activeMessage.subject}>
-                    {activeMessage.subject}
-                  </h2>
+                  {activeMessageCustomer ? (
+                    <button
+                      type="button"
+                      onClick={() => setDetailCustomerId(activeMessageCustomer.id)}
+                      className="text-left text-xl font-semibold tracking-tight text-blue-700 underline-offset-4 hover:underline dark:text-blue-300"
+                      title={activeMessageCustomer.name}
+                    >
+                      {activeMessageTitle}
+                    </button>
+                  ) : (
+                    <h2 className="text-xl font-semibold text-slate-900 dark:text-white tracking-tight whitespace-normal break-words leading-snug" title={activeMessageTitle}>
+                      {activeMessageTitle}
+                    </h2>
+                  )}
                   <span className="px-2 py-1 bg-white dark:bg-white/10 shadow-sm border border-slate-200 dark:border-white/20 text-slate-700 dark:text-slate-300 rounded text-[10px] font-mono tracking-widest uppercase shrink-0">
                     {activeMessage.intent}
                   </span>
@@ -2665,8 +2763,9 @@ export default function Inbox() {
                       ),
                     );
                     return c ? (
-                      <Link
-                        to={`/customers/${c.id}`}
+                      <button
+                        type="button"
+                        onClick={() => setDetailCustomerId(c.id)}
                         className="font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline underline-offset-2 flex items-center gap-1"
                       >
                         <User className="w-3 h-3" />
@@ -2674,7 +2773,7 @@ export default function Inbox() {
                         <span className="text-slate-400 dark:text-slate-500 no-underline text-xs">
                           ({activeMessage.sender})
                         </span>
-                      </Link>
+                      </button>
                     ) : (
                       <span className="font-medium text-slate-800 dark:text-slate-200">
                         {activeMessage.sender}
@@ -2688,6 +2787,31 @@ export default function Inbox() {
                         {activeMessage.target}
                       </span>
                     </span>
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                  <span>{language === "zh" ? "关联客户:" : "Linked customer:"}</span>
+                  <select
+                    value={activeMessage.customerId || activeMessageCustomer?.id || ""}
+                    onChange={(event) => linkMessageToCustomer(activeMessage, event.target.value)}
+                    className="max-w-[280px] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
+                  >
+                    <option value="">{language === "zh" ? "未关联客户" : "No linked customer"}</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}
+                      </option>
+                    ))}
+                  </select>
+                  {activeMessageCustomer && (
+                    <button
+                      type="button"
+                      onClick={() => setDetailCustomerId(activeMessageCustomer.id)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
+                    >
+                      <User className="h-3.5 w-3.5" />
+                      {activeMessageCustomer.name}
+                    </button>
                   )}
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2 items-center">
@@ -3512,6 +3636,86 @@ export default function Inbox() {
         onConfirm={handleConfirmDeleteMessage}
         onCancel={() => setDeletingMessageId(null)}
       />
+      {detailCustomer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-slate-950">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4 dark:border-white/10 dark:bg-white/5">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-blue-600 dark:text-blue-300">
+                  <User className="h-4 w-4" />
+                  {language === "zh" ? "客户详情" : "Customer Detail"}
+                </div>
+                <h3 className="mt-1 text-xl font-semibold text-slate-900 dark:text-white">{detailCustomer.name}</h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  {[detailCustomer.industry, detailCustomer.city, detailCustomer.country].filter(Boolean).join(" · ") || detailCustomer.contact}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailCustomerId(null)}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-slate-200"
+                aria-label={language === "zh" ? "关闭" : "Close"}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto p-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
+                  <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">{language === "zh" ? "阶段" : "Stage"}</div>
+                  <div className="mt-2 text-sm font-semibold text-slate-800 dark:text-slate-100">{detailCustomer.stage}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
+                  <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">{language === "zh" ? "评分 / 风险" : "Score / Risk"}</div>
+                  <div className="mt-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    {detailCustomer.score} · {detailCustomer.risk}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/5">
+                <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">{language === "zh" ? "联系方式" : "Contacts"}</div>
+                <div className="space-y-2">
+                  {(detailCustomer.contacts?.length ? detailCustomer.contacts : [{ id: "primary", type: "Primary", value: detailCustomer.contact }]).map((contact) => (
+                    <div key={contact.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-black/20">
+                      <span className="font-medium text-slate-500 dark:text-slate-400">{contact.type}</span>
+                      <span className="min-w-0 truncate text-slate-800 dark:text-slate-100">{contact.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {detailCustomer.description && (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                  {detailCustomer.description}
+                </div>
+              )}
+              {detailCustomer.tags && detailCustomer.tags.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {detailCustomer.tags.map((tag) => (
+                    <span key={tag} className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-white/10 dark:bg-white/5">
+              <button
+                type="button"
+                onClick={() => setDetailCustomerId(null)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10"
+              >
+                {language === "zh" ? "关闭" : "Close"}
+              </button>
+              <Link
+                to={`/customers/${detailCustomer.id}`}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+              >
+                {language === "zh" ? "打开完整详情" : "Open Full Detail"}
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
