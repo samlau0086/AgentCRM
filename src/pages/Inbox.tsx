@@ -1347,6 +1347,7 @@ export default function Inbox() {
 
       if (activeMessage.channel === "WhatsApp") {
         const targetAddress =
+          getMessageMappedPhone(activeMessage) ||
           activeMessage.mob ||
           (activeMessage.direction === "outbound" ? activeMessage.target : activeMessage.sender) ||
           activeMessage.target;
