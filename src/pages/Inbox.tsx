@@ -2706,20 +2706,9 @@ export default function Inbox() {
                     const chatId = getMessageChatId(activeMessage);
                     const mappedMob = whatsAppChatMobMappings[chatId] || activeMessage.mob || activeMessage.sender;
                     const isEditing = editingChatMobId === chatId;
+                    const displayAddress = mappedMob || chatId;
                     return (
                       <span className="flex min-w-0 flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onDoubleClick={() => {
-                            setEditingChatMobId(chatId);
-                            setEditingChatMob(mappedMob || "");
-                          }}
-                          className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-mono text-xs text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
-                          title={language === "zh" ? "双击编辑 chatId 到 mob 的映射" : "Double-click to edit chatId to mob mapping"}
-                        >
-                          chatId: {chatId}
-                        </button>
-                        <span className="text-xs text-slate-400">-&gt;</span>
                         {isEditing ? (
                           <input
                             value={editingChatMob}
@@ -2746,10 +2735,10 @@ export default function Inbox() {
                               setEditingChatMobId(chatId);
                               setEditingChatMob(mappedMob || "");
                             }}
-                            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:border-emerald-500/40 dark:hover:text-emerald-300"
-                            title={language === "zh" ? "双击编辑 mob 映射" : "Double-click to edit mob mapping"}
+                            className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
+                            title={language === "zh" ? "双击编辑 WhatsApp 手机号映射" : "Double-click to edit WhatsApp phone mapping"}
                           >
-                            mob: {mappedMob || (language === "zh" ? "未映射" : "Unmapped")}
+                            {displayAddress}
                           </button>
                         )}
                       </span>
@@ -2780,7 +2769,7 @@ export default function Inbox() {
                       </span>
                     );
                   })()}
-                  {activeMessage.target && (
+                  {activeMessage.channel !== "WhatsApp" && activeMessage.target && (
                     <span className="ml-2">
                       To:{" "}
                       <span className="font-medium text-slate-800 dark:text-slate-200">
@@ -2791,18 +2780,15 @@ export default function Inbox() {
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                   <span>{language === "zh" ? "关联客户:" : "Linked customer:"}</span>
-                  <select
-                    value={activeMessage.customerId || activeMessageCustomer?.id || ""}
-                    onChange={(event) => linkMessageToCustomer(activeMessage, event.target.value)}
-                    className="max-w-[280px] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
-                  >
-                    <option value="">{language === "zh" ? "未关联客户" : "No linked customer"}</option>
-                    {customers.map((customer) => (
-                      <option key={customer.id} value={customer.id}>
-                        {customer.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="w-full max-w-[360px]">
+                    <CustomerSearchDropdown
+                      customers={customers}
+                      value={activeMessage.customerId || activeMessageCustomer?.id || ""}
+                      onChange={(customerId) => linkMessageToCustomer(activeMessage, customerId)}
+                      placeholder={language === "zh" ? "搜索客户名称、联系人或标签..." : "Search customer, contact, or tag..."}
+                      emptyLabel={language === "zh" ? "未关联客户" : "No linked customer"}
+                    />
+                  </div>
                   {activeMessageCustomer && (
                     <button
                       type="button"
@@ -3860,6 +3846,162 @@ function TaggedEmailInput({
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerSearchDropdown({
+  customers,
+  value,
+  onChange,
+  placeholder,
+  emptyLabel,
+}: {
+  customers: Customer[];
+  value: string;
+  onChange: (customerId: string) => void;
+  placeholder: string;
+  emptyLabel: string;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selectedCustomer = customers.find((customer) => customer.id === value);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredCustomers = customers
+    .filter((customer) => {
+      if (!normalizedQuery) return true;
+      const haystack = [
+        customer.name,
+        customer.contact,
+        customer.industry,
+        customer.country,
+        ...(customer.tags || []),
+        ...(customer.contacts || []).flatMap((contact) => [contact.type, contact.value]),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedQuery);
+    })
+    .slice(0, 8);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query]);
+
+  const selectCustomer = (customerId: string) => {
+    onChange(customerId);
+    setQuery("");
+    setOpen(false);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((index) => Math.min(index + 1, filteredCustomers.length - 1));
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((index) => Math.max(index - 1, 0));
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const selected = filteredCustomers[activeIndex];
+      if (selected) selectCustomer(selected.id);
+    }
+    if (event.key === "Escape") {
+      setOpen(false);
+      setQuery("");
+    }
+  };
+
+  return (
+    <div className="relative">
+      <div
+        className="flex min-h-[38px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm transition-colors focus-within:border-blue-500 dark:border-white/10 dark:bg-white/5"
+        onClick={() => {
+          setOpen(true);
+          inputRef.current?.focus();
+        }}
+      >
+        {selectedCustomer && !query && (
+          <span className="flex max-w-[150px] items-center gap-1.5 truncate rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+            <User className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{selectedCustomer.name}</span>
+          </span>
+        )}
+        {!selectedCustomer && !query && (
+          <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-500 dark:bg-white/10 dark:text-slate-400">
+            {emptyLabel}
+          </span>
+        )}
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          className="min-w-[120px] flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              selectCustomer("");
+            }}
+            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-500 dark:hover:bg-white/10"
+            aria-label="Clear customer"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-slate-900">
+          {filteredCustomers.length === 0 ? (
+            <div className="px-3 py-3 text-sm text-slate-400">No customers found</div>
+          ) : (
+            filteredCustomers.map((customer, index) => {
+              const primaryContact =
+                customer.contacts?.find((contact) => ["Email", "WhatsApp", "Mobile", "Phone"].includes(contact.type))?.value ||
+                customer.contact;
+              const active = index === activeIndex;
+              return (
+                <button
+                  key={customer.id}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectCustomer(customer.id)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors",
+                    active ? "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300" : "hover:bg-slate-50 dark:hover:bg-white/10",
+                  )}
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
+                    <User className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{customer.name}</div>
+                    <div className="truncate text-xs text-slate-500 dark:text-slate-400">{primaryContact}</div>
+                  </div>
+                  {customer.id === value && (
+                    <CheckSquare className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-300" />
+                  )}
+                </button>
+              );
+            })
+          )}
         </div>
       )}
     </div>
