@@ -158,6 +158,10 @@ function filterMessagesForCurrentWhatsAppActors(messages: MessagePreview[]) {
   });
 }
 
+function getVisibleInboxMessages() {
+  return filterMessagesForCurrentWhatsAppActors(getInboxMessages());
+}
+
 function senderPreferenceKey(sender = "") {
   return sender.trim().toLowerCase() || "unknown";
 }
@@ -284,8 +288,8 @@ function officialLanguageForCountry(country = "") {
   return map[normalizeCountry(country)] || "";
 }
 
-function getWhatsAppChatId(msg: { chatId?: string; chat_id?: string; chatid?: string; sender?: string; recipient?: string; direction?: string }) {
-  const explicit = msg.chatId || msg.chat_id || msg.chatid;
+function getWhatsAppChatId(msg: { chatId?: string; chat_id?: string; chatid?: string; raw_chat_id?: string; sender?: string; recipient?: string; direction?: string }) {
+  const explicit = msg.chatId || msg.chat_id || msg.chatid || msg.raw_chat_id;
   if (explicit) return String(explicit);
   return msg.direction === "outbound"
     ? String(msg.recipient || msg.sender || "unknown")
@@ -293,7 +297,7 @@ function getWhatsAppChatId(msg: { chatId?: string; chat_id?: string; chatid?: st
 }
 
 function getWhatsAppConversationKey(msg: WaMessage) {
-  return msg.conversation_key || msg.conversation_id || msg.mob || msg.mobile || getWhatsAppChatId(msg);
+  return msg.contact_phone || msg.conversation_key || msg.conversation_id || msg.mob || msg.mobile || getWhatsAppChatId(msg);
 }
 
 function getWhatsAppBody(msg: WaMessage) {
@@ -562,7 +566,7 @@ export default function Inbox() {
           ],
           tags: selectedWhatsAppMedia.length ? ["media"] : [],
         });
-        setMessages(getInboxMessages());
+        setMessages(getVisibleInboxMessages());
         setActiveMessageId(sentMessage.id);
         setComposeBody("");
         setSelectedWhatsAppMedia([]);
@@ -598,7 +602,7 @@ export default function Inbox() {
         ],
         tags: composeAttachments.length ? ["attachments"] : [],
       });
-      setMessages(getInboxMessages());
+      setMessages(getVisibleInboxMessages());
       resetCompose();
       setSelectedMailbox("sent");
       setActiveMessageId(sentMessage.id);
@@ -662,7 +666,7 @@ export default function Inbox() {
   const handleSelectMessage = (message: MessagePreview) => {
     if (!message.read) {
       markMessageRead(message.id);
-      setMessages(getInboxMessages());
+        setMessages(getVisibleInboxMessages());
     }
     setActiveMessageId(message.id);
     setActiveTab("inbox");
@@ -815,7 +819,7 @@ export default function Inbox() {
         const conversationKey = getWhatsAppConversationKey(latest);
         const previewId = `wa_chat_${chatId}`;
         const existingPreview = existingById.get(previewId);
-        const mappedMob = whatsAppChatMobMappings[conversationKey] || whatsAppChatMobMappings[chatId] || latest.mob || latest.mobile || (latest.direction === "outbound" ? latest.recipient : latest.sender);
+        const mappedMob = whatsAppChatMobMappings[conversationKey] || whatsAppChatMobMappings[chatId] || latest.contact_phone || latest.mob || latest.mobile || (latest.direction === "outbound" ? latest.recipient : latest.sender);
         const latestBody = getWhatsAppBody(latest);
         const latestAttachments = getWhatsAppMediaAttachments(latest);
         const summary = latestBody || latestAttachments[0]?.name || (latest.message_type === "media" ? "WhatsApp media" : "");
@@ -855,7 +859,7 @@ export default function Inbox() {
       if (addedCount > 0 || updatedCount > 0) {
         saveInboxMessages(merged);
       }
-      const hydratedMessages = filterMessagesForCurrentWhatsAppActors(getInboxMessages());
+      const hydratedMessages = getVisibleInboxMessages();
       setMessages(hydratedMessages);
       if (!activeMessageIdRef.current && hydratedMessages.length > 0) {
         setActiveMessageId(hydratedMessages[0].id);
@@ -884,7 +888,7 @@ export default function Inbox() {
     getMedias().then(setMediaItems).catch(console.error);
 
     setCustomers(getCustomers());
-    const initialMessages = filterMessagesForCurrentWhatsAppActors(getInboxMessages());
+    const initialMessages = getVisibleInboxMessages();
     setMessages(initialMessages);
     if (initialMessages.length > 0) {
       setActiveMessageId(initialMessages[0].id);
@@ -1171,7 +1175,7 @@ export default function Inbox() {
       };
     });
     saveInboxMessages(nextMessages);
-    setMessages(nextMessages);
+    setMessages(filterMessagesForCurrentWhatsAppActors(nextMessages));
     setEditingChatMobId("");
     setEditingChatMob("");
     notify(language === "zh" ? "WhatsApp chatId 与 mob 映射已更新。" : "WhatsApp chatId to mob mapping updated.", "success", language === "zh" ? "映射已更新" : "Mapping updated");
@@ -1497,7 +1501,7 @@ export default function Inbox() {
         addDraftToThread(activeMessage.id, replyPlainText);
       }
 
-      setMessages(getInboxMessages());
+      setMessages(getVisibleInboxMessages());
 
       setReplyText("");
       setSelectedWhatsAppMedia([]);
@@ -1554,7 +1558,7 @@ export default function Inbox() {
     }
 
     updateInboxMessage(activeMessage.id, { comments: newComments });
-    setMessages(getInboxMessages());
+      setMessages(getVisibleInboxMessages());
   };
 
   const handleConfirmDeleteMessage = () => {
@@ -1579,7 +1583,7 @@ export default function Inbox() {
     }
 
     const nextMessages = getInboxMessages();
-    setMessages(nextMessages);
+    setMessages(filterMessagesForCurrentWhatsAppActors(nextMessages));
     setDrafts((prev) => {
       const next = { ...prev };
       idsToDelete.forEach((messageId) => delete next[messageId]);
@@ -1705,7 +1709,7 @@ export default function Inbox() {
   const addMessageTag = (message: MessagePreview, tag: string) => {
     const tags = Array.from(new Set([...(message.tags || []), tag]));
     updateInboxMessage(message.id, { tags });
-    setMessages(getInboxMessages());
+    setMessages(getVisibleInboxMessages());
     notify(
       language === "zh" ? `已添加标签：${tag}` : `Tag added: ${tag}`,
       "success",
@@ -1715,7 +1719,7 @@ export default function Inbox() {
 
   const markMessageImportant = (message: MessagePreview) => {
     updateInboxMessage(message.id, { important: true });
-    setMessages(getInboxMessages());
+    setMessages(getVisibleInboxMessages());
     notify(
       language === "zh" ? "已标记为重要。" : "Marked as important.",
       "success",
@@ -1725,7 +1729,7 @@ export default function Inbox() {
 
   const assignMessageToSales = (message: MessagePreview) => {
     updateInboxMessage(message.id, { assignee: "Alice Chen" });
-    setMessages(getInboxMessages());
+    setMessages(getVisibleInboxMessages());
     notify(
       language === "zh" ? "已分配给 Alice Chen。" : "Assigned to Alice Chen.",
       "success",
@@ -1783,7 +1787,7 @@ export default function Inbox() {
       selectedIds.has(message.id) ? { ...message, ...updates } : message,
     );
     saveInboxMessages(nextMessages);
-    setMessages(nextMessages);
+    setMessages(filterMessagesForCurrentWhatsAppActors(nextMessages));
     notify(successMessage, "success", language === "zh" ? "批量操作完成" : "Bulk action completed");
   };
 
@@ -1800,7 +1804,7 @@ export default function Inbox() {
       return { ...message, tags };
     });
     saveInboxMessages(nextMessages);
-    setMessages(nextMessages);
+    setMessages(filterMessagesForCurrentWhatsAppActors(nextMessages));
     setBulkTag("");
     notify(language === "zh" ? "已为选中的消息添加标签。" : "Tag added to selected messages.", "success", language === "zh" ? "标签已添加" : "Tag added");
   };
@@ -1832,7 +1836,7 @@ export default function Inbox() {
       };
     });
     saveInboxMessages(nextMessages);
-    setMessages(nextMessages);
+    setMessages(filterMessagesForCurrentWhatsAppActors(nextMessages));
     setBulkFollowUpDueAt("");
     notify(
       language === "zh" ? "已将选中的消息加入跟进。" : "Selected messages added to follow-up.",
@@ -1887,7 +1891,7 @@ export default function Inbox() {
   const linkMessageToCustomer = (message: MessagePreview, customerId: string) => {
     updateInboxMessage(message.id, { customerId: customerId || undefined });
     const nextMessages = getInboxMessages();
-    setMessages(nextMessages);
+    setMessages(filterMessagesForCurrentWhatsAppActors(nextMessages));
     notify(
       customerId
         ? language === "zh" ? "消息已关联客户。" : "Message linked to customer."
@@ -2246,7 +2250,7 @@ export default function Inbox() {
                     onClick={(e) => {
                       e.stopPropagation();
                       updateInboxMessage(msg.id, { important: !msg.important });
-                      setMessages(getInboxMessages());
+                      setMessages(getVisibleInboxMessages());
                     }}
                     className={cn(
                       "p-1 rounded transition-colors",
@@ -2906,7 +2910,7 @@ export default function Inbox() {
                           updateInboxMessage(activeMessage.id, {
                             tags: newTags,
                           });
-                          setMessages(getInboxMessages());
+                          setMessages(getVisibleInboxMessages());
                         }}
                         className="hover:text-amber-500 ml-1"
                       >
@@ -2924,7 +2928,7 @@ export default function Inbox() {
                           updateInboxMessage(activeMessage.id, {
                             tags: newTags,
                           });
-                          setMessages(getInboxMessages());
+                          setMessages(getVisibleInboxMessages());
                           e.currentTarget.value = "";
                         }
                       }

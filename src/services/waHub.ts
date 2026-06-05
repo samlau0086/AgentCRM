@@ -39,8 +39,10 @@ export interface WaMessage {
   chatId?: string;
   chat_id?: string;
   chatid?: string;
+  raw_chat_id?: string;
   conversation_key?: string;
   conversation_id?: string;
+  contact_phone?: string;
   mob?: string;
   mobile?: string;
   direction: 'inbound' | 'outbound';
@@ -94,8 +96,17 @@ export function parseWaHubActors(value: unknown): WaHubActor[] {
 
 export function getConfiguredWaHubActors(userId?: string) {
   const userKey = waHubActorsKeyForUser(userId);
+  const hasUserScopedValue = userId && localStorage.getItem(userKey) !== null;
   const userActors = parseWaHubActors(localStorage.getItem(userKey));
-  if (userId) return userActors;
+  if (userId) {
+    if (hasUserScopedValue) return userActors;
+    const legacyActors = parseWaHubActors(localStorage.getItem(WA_HUB_ACTORS_KEY));
+    if (legacyActors.length > 0) {
+      localStorage.setItem(userKey, JSON.stringify(legacyActors));
+      return legacyActors;
+    }
+    return [];
+  }
   return userActors.length > 0 ? userActors : parseWaHubActors(localStorage.getItem(WA_HUB_ACTORS_KEY));
 }
 
