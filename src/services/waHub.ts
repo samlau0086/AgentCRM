@@ -16,6 +16,10 @@ export interface WaHubActor {
 
 export const WA_HUB_ACTORS_KEY = 'wa_hub_actors';
 
+export function waHubActorsKeyForUser(userId?: string) {
+  return userId ? `${WA_HUB_ACTORS_KEY}:${userId}` : WA_HUB_ACTORS_KEY;
+}
+
 export interface WaMediaPayload {
   id?: string;
   originalName?: string;
@@ -31,6 +35,7 @@ export interface WaMediaPayload {
 export interface WaMessage {
   id: string;
   client_id: string;
+  clientId?: string;
   chatId?: string;
   chat_id?: string;
   chatid?: string;
@@ -87,8 +92,11 @@ export function parseWaHubActors(value: unknown): WaHubActor[] {
   }
 }
 
-export function getConfiguredWaHubActors() {
-  return parseWaHubActors(localStorage.getItem(WA_HUB_ACTORS_KEY));
+export function getConfiguredWaHubActors(userId?: string) {
+  const userKey = waHubActorsKeyForUser(userId);
+  const userActors = parseWaHubActors(localStorage.getItem(userKey));
+  if (userId) return userActors;
+  return userActors.length > 0 ? userActors : parseWaHubActors(localStorage.getItem(WA_HUB_ACTORS_KEY));
 }
 
 export const getHubConfig = () => {
@@ -145,18 +153,33 @@ export async function fetchClients(): Promise<WaClient[]> {
   return data.clients;
 }
 
-export async function fetchMessages(limit: number = 50): Promise<WaMessage[]> {
+async function fetchMessagesForClient(limit: number, clientId?: string): Promise<WaMessage[]> {
   const { url, token } = getHubConfig();
   if (!url || !token) {
     return [];
   }
 
-  const res = await fetch(`${url}/api/messages?limit=${limit}`, {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (clientId) params.set('clientId', clientId);
+  const res = await fetch(`${url}/api/messages?${params.toString()}`, {
     headers: authHeaders(token)
   });
   if (!res.ok) throw new Error('Failed to fetch messages');
   const data = await res.json();
-  return data.messages;
+  return data.messages || [];
+}
+
+export async function fetchMessages(limit: number = 50, clientIds: string[] = []): Promise<WaMessage[]> {
+  const uniqueClientIds = Array.from(new Set(clientIds.filter(Boolean)));
+  if (uniqueClientIds.length === 0) return fetchMessagesForClient(limit);
+  const results = await Promise.all(uniqueClientIds.map((clientId) => fetchMessagesForClient(limit, clientId)));
+  const seen = new Set<string>();
+  return results.flat().filter((message) => {
+    const key = `${message.client_id || message.clientId || ''}:${message.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function isWhatsAppChatId(value: string) {

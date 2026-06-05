@@ -1020,6 +1020,7 @@ export interface MessagePreview {
   target: string;
   chatId?: string;
   mob?: string;
+  waClientId?: string;
   direction?: "inbound" | "outbound";
   customerId?: string;
   userId?: string;

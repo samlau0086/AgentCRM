@@ -4,11 +4,11 @@ import { useTheme } from '../theme';
 import { Sliders, Cpu, GitMerge, Check, Plus, Trash2, X, Save, KeyRound, Link2, ToggleLeft, ToggleRight, Loader2, PlugZap } from 'lucide-react';
 import { cn } from '../Layout';
 import { ReceiveProfile, SendProfile, EmailMapping, EmailSignature, getReceiveProfiles, saveReceiveProfiles, getSendProfiles, saveSendProfiles, getEmailMappings, saveEmailMappings, getEmailSignatures, saveEmailSignatures, loadEmailConfigurationFromServer, saveEmailConfigurationToServer } from '../services/emailSync';
-import { Agent, ModelProfile, getAgents, getModelProfiles, loadModelProfilesFromServer, saveModelProfiles, updateAgent } from '../services/db';
+import { Agent, ModelProfile, getAgents, getModelProfiles, loadModelProfilesFromServer, saveModelProfiles, updateAgent, getCurrentUser } from '../services/db';
 import { notify } from '../services/notifications';
 import PasswordInput from '../components/PasswordInput';
 import { loadAppSettingsFromServer, saveAppSetting } from '../services/appSettings';
-import { parseWaHubActors, WA_HUB_ACTORS_KEY, WaHubActor } from '../services/waHub';
+import { parseWaHubActors, WA_HUB_ACTORS_KEY, waHubActorsKeyForUser, WaHubActor } from '../services/waHub';
 
 type Tab = 'general' | 'agents' | 'integrations';
 
@@ -85,6 +85,8 @@ const leadGenerationPlatforms: LeadPlatform[] = [
 export default function Settings() {
   const { t, language, setLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
+  const currentUser = getCurrentUser();
+  const userWaHubActorsKey = waHubActorsKeyForUser(currentUser.id);
   const [activeTab, setActiveTab] = useState<Tab>('general');
 
   const [receiveProfiles, setReceiveProfiles] = useState<ReceiveProfile[]>([]);
@@ -133,7 +135,7 @@ export default function Settings() {
           ? JSON.parse(leadConfigs || '{}')
           : (leadConfigs as Record<string, LeadPlatformConfig>),
       );
-      setWaHubActors(parseWaHubActors(settings[WA_HUB_ACTORS_KEY] || localStorage.getItem(WA_HUB_ACTORS_KEY)));
+      setWaHubActors(parseWaHubActors(settings[userWaHubActorsKey] || localStorage.getItem(userWaHubActorsKey) || settings[WA_HUB_ACTORS_KEY] || localStorage.getItem(WA_HUB_ACTORS_KEY)));
       setAppSettingsLoaded(true);
     }).catch(() => {
       setTimezone(localStorage.getItem('crm_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -144,7 +146,7 @@ export default function Settings() {
       } catch (e) {
         setLeadPlatformConfigs({});
       }
-      setWaHubActors(parseWaHubActors(localStorage.getItem(WA_HUB_ACTORS_KEY)));
+      setWaHubActors(parseWaHubActors(localStorage.getItem(userWaHubActorsKey) || localStorage.getItem(WA_HUB_ACTORS_KEY)));
       setAppSettingsLoaded(true);
     });
     setReceiveProfiles(getReceiveProfiles());
@@ -332,8 +334,8 @@ export default function Settings() {
 
   const saveWaHubActors = (actors: WaHubActor[]) => {
     setWaHubActors(actors);
-    localStorage.setItem(WA_HUB_ACTORS_KEY, JSON.stringify(actors));
-    saveAppSetting(WA_HUB_ACTORS_KEY, actors);
+    localStorage.setItem(userWaHubActorsKey, JSON.stringify(actors));
+    saveAppSetting(userWaHubActorsKey, actors);
   };
 
   const addWaHubActor = (client: WaHubClientOption) => {
@@ -1107,7 +1109,7 @@ export default function Settings() {
                   <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <div>
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Actors</h4>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Each actor maps to one WhatsApp Hub clientId. Test the Hub connection first, then choose clients from the dropdown.</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">This is your personal actor pool. Each actor maps to one WhatsApp Hub clientId; only messages from these clients will sync into your inbox.</p>
                     </div>
                     <button
                       type="button"

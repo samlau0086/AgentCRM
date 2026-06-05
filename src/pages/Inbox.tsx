@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
-import { fetchClients, fetchHubMediaBlob, fetchMessages, getConfiguredWaHubActors, parseWaHubActors, resolveHubMediaUrl, sendMessage, WA_HUB_ACTORS_KEY, WaClient, WaHubActor, WaMessage } from "../services/waHub";
+import { fetchClients, fetchHubMediaBlob, fetchMessages, getConfiguredWaHubActors, parseWaHubActors, resolveHubMediaUrl, sendMessage, WA_HUB_ACTORS_KEY, waHubActorsKeyForUser, WaClient, WaHubActor, WaMessage } from "../services/waHub";
 import { fetchEmails, sendEmail, getEmailMappings, getEmailSignatures, loadEmailConfigurationFromServer } from "../services/emailSync";
 import { getMedias, MediaItem } from "../services/media";
 import {
@@ -129,7 +129,7 @@ function loadJsonMap<T>(key: string): Record<string, T> {
 }
 
 function clientsFromActors(clients: WaClient[], actors: WaHubActor[]): WaClient[] {
-  if (actors.length === 0) return clients;
+  if (actors.length === 0) return [];
   const byId = new Map(clients.map((client) => [client.id, client]));
   return actors.map((actor) => {
     const client = byId.get(actor.clientId);
@@ -144,6 +144,18 @@ function clientsFromActors(clients: WaClient[], actors: WaHubActor[]): WaClient[
 
 function defaultWaClientId(clients: WaClient[]) {
   return clients.find((client) => client.status === "online")?.id || clients[0]?.id || "";
+}
+
+function messageClientId(message: WaMessage) {
+  return message.client_id || message.clientId || "";
+}
+
+function filterMessagesForCurrentWhatsAppActors(messages: MessagePreview[]) {
+  const actorClientIds = new Set(getConfiguredWaHubActors(getCurrentUser().id).map((actor) => actor.clientId).filter(Boolean));
+  return messages.filter((message) => {
+    if (message.channel !== "WhatsApp") return true;
+    return actorClientIds.size > 0 && Boolean(message.waClientId) && actorClientIds.has(message.waClientId);
+  });
 }
 
 function senderPreferenceKey(sender = "") {
@@ -518,6 +530,10 @@ export default function Inbox() {
     setIsSending(true);
     try {
       if (composeChannel === "WhatsApp") {
+        if (!selectedClientId) {
+          notify(language === "zh" ? "请先在系统设置里为当前用户配置 WhatsApp Actor。" : "Configure a WhatsApp Actor for your user before sending.", "warning", language === "zh" ? "缺少 WhatsApp Actor" : "WhatsApp Actor required");
+          return;
+        }
         const target = resolveWhatsAppSendTarget(composeTo[0]);
         const targetKey = normalizeConversationAddress(target);
         const shouldTranslateOutbound = targetKey ? outboundAutoTranslateWhatsAppPrefs[targetKey] ?? false : false;
@@ -700,9 +716,12 @@ export default function Inbox() {
     let addedCount = 0;
 
     try {
+      const currentUser = getCurrentUser();
+      const actorPool = getConfiguredWaHubActors(currentUser.id);
+      const actorClientIds = actorPool.map((actor) => actor.clientId).filter(Boolean);
       const [emailResult, waResult] = await Promise.allSettled([
         fetchEmails(),
-        fetchMessages(50),
+        actorClientIds.length > 0 ? fetchMessages(50, actorClientIds) : Promise.resolve([]),
       ]);
       const emails = emailResult.status === "fulfilled" ? emailResult.value : [];
       const waMessages = waResult.status === "fulfilled" ? waResult.value : [];
@@ -717,6 +736,7 @@ export default function Inbox() {
       const existing = getInboxMessages();
       const existingIds = new Set(existing.map((m) => m.id));
       const emailById = new Map(emails.map((email) => [email.id, email]));
+      const allowedClientIds = new Set(actorClientIds);
       const waConversationKeys = new Set(
         waMessages.flatMap((msg) =>
           [getWhatsAppConversationKey(msg), getWhatsAppChatId(msg), msg.mob, msg.mobile, msg.sender, msg.recipient]
@@ -728,6 +748,7 @@ export default function Inbox() {
       const refreshedExisting = existing
         .filter((message) => {
           if (message.channel !== "WhatsApp") return true;
+          if (allowedClientIds.size > 0 && message.waClientId && !allowedClientIds.has(message.waClientId)) return false;
           const existingKeys = [message.chatId, message.mob, message.sender, message.target]
             .filter(Boolean)
             .map((value) => normalizeConversationAddress(String(value)));
@@ -783,16 +804,18 @@ export default function Inbox() {
 
       const waGroups = new Map<string, typeof waMessages>();
       waMessages.forEach((msg) => {
-        const chatId = getWhatsAppConversationKey(msg);
+        const chatId = `${messageClientId(msg)}:${getWhatsAppConversationKey(msg)}`;
         waGroups.set(chatId, [...(waGroups.get(chatId) || []), msg]);
       });
       const existingById = new Map(existing.map((message) => [message.id, message]));
       const waPreviews: MessagePreview[] = Array.from(waGroups.entries()).map(([chatId, group]) => {
         const sorted = group.sort((a, b) => Date.parse(a.created_at || "") - Date.parse(b.created_at || ""));
         const latest = sorted[sorted.length - 1];
+        const clientId = messageClientId(latest);
+        const conversationKey = getWhatsAppConversationKey(latest);
         const previewId = `wa_chat_${chatId}`;
         const existingPreview = existingById.get(previewId);
-        const mappedMob = whatsAppChatMobMappings[chatId] || latest.mob || latest.mobile || (latest.direction === "outbound" ? latest.recipient : latest.sender);
+        const mappedMob = whatsAppChatMobMappings[conversationKey] || whatsAppChatMobMappings[chatId] || latest.mob || latest.mobile || (latest.direction === "outbound" ? latest.recipient : latest.sender);
         const latestBody = getWhatsAppBody(latest);
         const latestAttachments = getWhatsAppMediaAttachments(latest);
         const summary = latestBody || latestAttachments[0]?.name || (latest.message_type === "media" ? "WhatsApp media" : "");
@@ -800,7 +823,9 @@ export default function Inbox() {
         return {
           ...(existingPreview || {}),
           id: previewId,
-          chatId,
+          chatId: conversationKey,
+          waClientId: clientId,
+          userId: currentUser.id,
           mob: mappedMob,
           customerId: matchedCustomer?.id || existingPreview?.customerId,
           sender: mappedMob || latest.sender,
@@ -830,7 +855,7 @@ export default function Inbox() {
       if (addedCount > 0 || updatedCount > 0) {
         saveInboxMessages(merged);
       }
-      const hydratedMessages = getInboxMessages();
+      const hydratedMessages = filterMessagesForCurrentWhatsAppActors(getInboxMessages());
       setMessages(hydratedMessages);
       if (!activeMessageIdRef.current && hydratedMessages.length > 0) {
         setActiveMessageId(hydratedMessages[0].id);
@@ -851,7 +876,7 @@ export default function Inbox() {
   useEffect(() => {
     fetchClients()
       .then((clients) => {
-        const actorClients = clientsFromActors(clients, getConfiguredWaHubActors());
+        const actorClients = clientsFromActors(clients, getConfiguredWaHubActors(getCurrentUser().id));
         setWaClients(actorClients);
         setSelectedClientId(defaultWaClientId(actorClients));
       })
@@ -859,7 +884,7 @@ export default function Inbox() {
     getMedias().then(setMediaItems).catch(console.error);
 
     setCustomers(getCustomers());
-    const initialMessages = getInboxMessages();
+    const initialMessages = filterMessagesForCurrentWhatsAppActors(getInboxMessages());
     setMessages(initialMessages);
     if (initialMessages.length > 0) {
       setActiveMessageId(initialMessages[0].id);
@@ -873,14 +898,16 @@ export default function Inbox() {
       .then((results) => {
         const inboxResult = results[1];
         if (inboxResult.status === "fulfilled") {
-          setMessages(inboxResult.value);
-          if (inboxResult.value.length > 0) {
-            setActiveMessageId((current) => current || inboxResult.value[0].id);
+          const visibleMessages = filterMessagesForCurrentWhatsAppActors(inboxResult.value);
+          setMessages(visibleMessages);
+          if (visibleMessages.length > 0) {
+            setActiveMessageId((current) => current || visibleMessages[0].id);
           }
         }
         const settingsResult = results[2];
         if (settingsResult.status === "fulfilled") {
-          const savedActors = parseWaHubActors(settingsResult.value[WA_HUB_ACTORS_KEY]);
+          const userActorKey = waHubActorsKeyForUser(getCurrentUser().id);
+          const savedActors = parseWaHubActors(settingsResult.value[userActorKey] || settingsResult.value[WA_HUB_ACTORS_KEY]);
           if (savedActors.length > 0) {
             setWaClients((currentClients) => {
               const actorClients = clientsFromActors(currentClients, savedActors);
@@ -1404,6 +1431,10 @@ export default function Inbox() {
       }
 
       if (activeMessage.channel === "WhatsApp") {
+        if (!selectedClientId) {
+          notify(language === "zh" ? "请先在系统设置里为当前用户配置 WhatsApp Actor。" : "Configure a WhatsApp Actor for your user before sending.", "warning", language === "zh" ? "缺少 WhatsApp Actor" : "WhatsApp Actor required");
+          return;
+        }
         const targetAddress = resolveWhatsAppSendTarget(
           activeMessage.mob ||
             (activeMessage.direction === "outbound" ? activeMessage.target : activeMessage.sender) ||
