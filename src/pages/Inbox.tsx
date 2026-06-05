@@ -178,6 +178,10 @@ function normalizeConversationAddress(value = "") {
   return value.trim().toLowerCase().replace(/[^\d+a-z@._-]/g, "");
 }
 
+function isWhatsAppChatAddress(value = "") {
+  return /@(c\.us|g\.us|lid)$/i.test(value.trim());
+}
+
 function normalizeCountry(value = "") {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
@@ -496,7 +500,7 @@ export default function Inbox() {
     setIsSending(true);
     try {
       if (composeChannel === "WhatsApp") {
-        const target = extractRecipientValue(composeTo[0]);
+        const target = resolveWhatsAppSendTarget(composeTo[0]);
         const targetKey = normalizeConversationAddress(target);
         const shouldTranslateOutbound = targetKey ? outboundAutoTranslateWhatsAppPrefs[targetKey] ?? false : false;
         const outboundText = shouldTranslateOutbound
@@ -1027,7 +1031,36 @@ export default function Inbox() {
   const getMessageMappedPhone = (message: MessagePreview | null) => {
     if (!message || message.channel !== "WhatsApp") return "";
     const chatId = getMessageChatId(message);
-    return whatsAppChatMobMappings[chatId] || message.mob || (message.direction === "outbound" ? message.target : message.sender) || message.sender || message.target;
+    const customer = findCustomerByWhatsAppAddress("", message);
+    const customerPhone = customer?.contacts?.find((contact) =>
+      ["whatsapp", "mobile", "phone"].includes(contact.type.toLowerCase()),
+    )?.value || "";
+    const candidates = [
+      whatsAppChatMobMappings[chatId],
+      message.mob,
+      customerPhone,
+      message.direction === "outbound" ? message.target : message.sender,
+      message.sender,
+      message.target,
+    ];
+    return candidates
+      .map((value) => extractRecipientValue(String(value || "")).trim())
+      .find((value) => value && !isWhatsAppChatAddress(value)) || "";
+  };
+
+  const resolveWhatsAppSendTarget = (target: string, message?: MessagePreview | null) => {
+    const cleanTarget = extractRecipientValue(target).trim();
+    if (message?.channel === "WhatsApp") {
+      const mappedPhone = getMessageMappedPhone(message);
+      if (mappedPhone) return mappedPhone;
+    }
+    if (whatsAppChatMobMappings[cleanTarget]) return whatsAppChatMobMappings[cleanTarget];
+    const normalizedTarget = normalizeConversationAddress(cleanTarget);
+    const mappedEntry = Object.entries(whatsAppChatMobMappings).find(
+      ([chatId]) => normalizeConversationAddress(chatId) === normalizedTarget,
+    );
+    if (mappedEntry?.[1]) return mappedEntry[1];
+    return cleanTarget;
   };
 
   const getMessageContactLabel = (message: MessagePreview) => {
@@ -1346,11 +1379,12 @@ export default function Inbox() {
       }
 
       if (activeMessage.channel === "WhatsApp") {
-        const targetAddress =
-          getMessageMappedPhone(activeMessage) ||
+        const targetAddress = resolveWhatsAppSendTarget(
           activeMessage.mob ||
-          (activeMessage.direction === "outbound" ? activeMessage.target : activeMessage.sender) ||
-          activeMessage.target;
+            (activeMessage.direction === "outbound" ? activeMessage.target : activeMessage.sender) ||
+            activeMessage.target,
+          activeMessage,
+        );
         const outboundText = activeWhatsAppOutboundTranslateEnabled
           ? await translateOutboundWhatsAppText(replyPlainText, getWhatsAppOutboundTargetLanguage(targetAddress, activeMessage))
           : replyPlainText;
@@ -1362,7 +1396,7 @@ export default function Inbox() {
           sender: "agent",
           target: targetAddress,
           chatId: activeMessage.chatId,
-          mob: activeMessage.mob || targetAddress,
+          mob: isWhatsAppChatAddress(activeMessage.mob || "") ? targetAddress : activeMessage.mob || targetAddress,
           intent: "Outbound",
           subject: activeMessage.subject,
           summary: finalWhatsAppText.slice(0, 140),
@@ -1756,7 +1790,7 @@ export default function Inbox() {
   }, [selectedMailbox, channelFilter]);
 
   const activeWhatsAppTarget = composeChannel === "WhatsApp" && composeTo[0]
-    ? extractRecipientValue(composeTo[0])
+    ? resolveWhatsAppSendTarget(composeTo[0])
     : "";
   const activeWhatsAppTargetKey = normalizeConversationAddress(activeWhatsAppTarget);
   const activeComposeWhatsAppOutboundTranslateEnabled = activeWhatsAppTargetKey
