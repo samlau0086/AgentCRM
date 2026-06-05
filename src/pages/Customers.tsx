@@ -147,56 +147,41 @@ const LOCATION_HINTS: Record<string, string> = {
   dubai: "United Arab Emirates",
 };
 
-const COUNTRY_POINTS: Record<string, { x: number; y: number }> = {
-  "United States": { x: 19, y: 39 },
-  Canada: { x: 18, y: 25 },
-  Mexico: { x: 17, y: 52 },
-  Brazil: { x: 34, y: 70 },
-  "United Kingdom": { x: 46, y: 33 },
-  France: { x: 49, y: 41 },
-  Germany: { x: 52, y: 37 },
-  Italy: { x: 53, y: 46 },
-  Spain: { x: 47, y: 47 },
-  China: { x: 76, y: 45 },
-  "Hong Kong": { x: 78, y: 52 },
-  Singapore: { x: 74, y: 65 },
-  Japan: { x: 86, y: 44 },
-  "South Korea": { x: 82, y: 43 },
-  India: { x: 68, y: 56 },
-  Australia: { x: 83, y: 78 },
-  "United Arab Emirates": { x: 61, y: 54 },
-  Unknown: { x: 50, y: 82 },
+const COUNTRY_COORDS: Record<string, { lat: number; lon: number }> = {
+  "United States": { lat: 39.8, lon: -98.6 },
+  Canada: { lat: 56.1, lon: -106.3 },
+  Mexico: { lat: 23.6, lon: -102.6 },
+  Brazil: { lat: -14.2, lon: -51.9 },
+  "United Kingdom": { lat: 55.4, lon: -3.4 },
+  France: { lat: 46.2, lon: 2.2 },
+  Germany: { lat: 51.2, lon: 10.5 },
+  Italy: { lat: 41.9, lon: 12.6 },
+  Spain: { lat: 40.5, lon: -3.7 },
+  China: { lat: 35.9, lon: 104.2 },
+  "Hong Kong": { lat: 22.3, lon: 114.2 },
+  Singapore: { lat: 1.35, lon: 103.8 },
+  Japan: { lat: 36.2, lon: 138.3 },
+  "South Korea": { lat: 36.5, lon: 127.8 },
+  India: { lat: 20.6, lon: 78.9 },
+  Indonesia: { lat: -2.5, lon: 118.0 },
+  Malaysia: { lat: 4.2, lon: 102.0 },
+  Netherlands: { lat: 52.1, lon: 5.3 },
+  Portugal: { lat: 39.4, lon: -8.2 },
+  Russia: { lat: 61.5, lon: 105.3 },
+  "Saudi Arabia": { lat: 23.9, lon: 45.1 },
+  Thailand: { lat: 15.9, lon: 101.0 },
+  Turkey: { lat: 39.0, lon: 35.2 },
+  Vietnam: { lat: 14.1, lon: 108.3 },
+  Australia: { lat: -25.3, lon: 133.8 },
+  "United Arab Emirates": { lat: 24.0, lon: 54.0 },
+  Unknown: { lat: -58, lon: 0 },
 };
 
-const WORLD_LAND_PATHS = [
-  // North America
-  "M154 119l39-29 55-20 64-1 63 19 38 36 22 47-30 28-49-8-35 28-56-8-35 23-42-6-30 31-35-3-10 43-32-27-5-51 23-33z",
-  "M126 196l35-20 28 16-9 45-35 14-23-20z",
-  "M219 272l41-3 33 18 37 6 18 26-39 16-41-21-35-4-28-22z",
-  // Greenland
-  "M292 51l68-24 81 16 28 37-37 39-85 2-66-25z",
-  // South America
-  "M300 323l46 17 28 54 31 54-17 67-48 41-31-50 10-66-28-50z",
-  // Europe
-  "M480 155l38-16 52 8 36 22-9 33-47 3-24 28-46-7-30-28z",
-  // Africa
-  "M526 237l66 1 53 40 31 79-24 86-50 56-69-18-45-62-10-88 28-56z",
-  // Asia
-  "M589 166l73-39 100-22 119 25 84 55 53 72-24 64-64 7-75-34-66 21-66-20-43-50-77-28z",
-  "M719 340l54 20 50 47-23 51-64 4-36-46z",
-  // Australia and Oceania
-  "M823 399l92 18 48 45-44 43-106-17-46-48z",
-  "M930 351l52 20 25 38-41 31-61-18-18-39z",
-  "M868 118l45 9 28 32-29 30-51-8-17-34z",
-];
-
-const WORLD_LABELS = [
-  { label: "North America", x: 22, y: 34 },
-  { label: "South America", x: 34, y: 73 },
-  { label: "Europe", x: 52, y: 37 },
-  { label: "Africa", x: 56, y: 62 },
-  { label: "Asia", x: 76, y: 39 },
-  { label: "Oceania", x: 86, y: 80 },
+const OSM_WORLD_TILES = [
+  "https://tile.openstreetmap.org/1/0/0.png",
+  "https://tile.openstreetmap.org/1/1/0.png",
+  "https://tile.openstreetmap.org/1/0/1.png",
+  "https://tile.openstreetmap.org/1/1/1.png",
 ];
 
 function parseCsv(text: string) {
@@ -380,7 +365,7 @@ function inferCountryFromLocation(location = "") {
   for (const part of [...parts].reverse()) {
     const normalized = normalizeCountry(part);
     const key = countryKey(part);
-    if (COUNTRY_POINTS[normalized] || COUNTRY_ALIASES[key]) return normalized;
+    if (COUNTRY_COORDS[normalized] || COUNTRY_ALIASES[key]) return normalized;
     if (LOCATION_HINTS[key]) return LOCATION_HINTS[key];
   }
   for (const part of parts) {
@@ -398,6 +383,15 @@ function getPublicLeadCountry(lead: PublicLead) {
   return inferCountryFromLocation(lead.location || "") || "Unknown";
 }
 
+function projectCountryPoint(country: string) {
+  const coord = COUNTRY_COORDS[country] || COUNTRY_COORDS.Unknown;
+  const sinLat = Math.sin((Math.max(-85.0511, Math.min(85.0511, coord.lat)) * Math.PI) / 180);
+  return {
+    x: ((coord.lon + 180) / 360) * 100,
+    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * 100,
+  };
+}
+
 function getCountryStats<T>(items: T[], getCountry: (item: T) => string) {
   const counts = new Map<string, number>();
   items.forEach((item) => {
@@ -408,7 +402,7 @@ function getCountryStats<T>(items: T[], getCountry: (item: T) => string) {
     .map(([country, count]) => ({
       country,
       count,
-      ...(COUNTRY_POINTS[country] || COUNTRY_POINTS.Unknown),
+      ...projectCountryPoint(country),
     }))
     .sort((a, b) => b.count - a.count || a.country.localeCompare(b.country));
 }
@@ -846,74 +840,58 @@ function CountryMapView({
 
   return (
     <div className="grid h-full min-h-[520px] grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_280px]">
-      <div className="relative min-h-[420px] overflow-hidden bg-slate-50 dark:bg-black/20">
-        <div className="absolute inset-6 rounded-[28px] border border-slate-200 bg-gradient-to-b from-sky-50 to-white shadow-inner dark:border-white/10 dark:from-slate-950 dark:to-slate-900" />
-        <svg
-          viewBox="0 0 1000 520"
-          aria-hidden="true"
-          className="absolute inset-8 h-[calc(100%-4rem)] w-[calc(100%-4rem)]"
-          preserveAspectRatio="xMidYMid meet"
-        >
-          <defs>
-            <pattern id="world-grid" width="100" height="65" patternUnits="userSpaceOnUse">
-              <path d="M100 0H0V65" fill="none" stroke="currentColor" strokeWidth="0.7" />
-            </pattern>
-            <filter id="land-shadow" x="-10%" y="-10%" width="120%" height="120%">
-              <feDropShadow dx="0" dy="1" stdDeviation="1.2" floodOpacity="0.08" />
-            </filter>
-          </defs>
-          <rect width="1000" height="520" rx="24" className="fill-sky-50 text-sky-100 dark:fill-slate-950 dark:text-white/5" />
-          <rect width="1000" height="520" rx="24" fill="url(#world-grid)" className="text-sky-200/45 dark:text-white/5" />
-          <g className="stroke-sky-200/80 dark:stroke-white/10" strokeWidth="1" fill="none">
-            {[80, 180, 280, 380, 480, 580, 680, 780, 880].map((x) => (
-              <path key={`lon-${x}`} d={`M${x} 28v464`} />
+      <div className="relative min-h-[420px] overflow-hidden bg-slate-100 dark:bg-black/30">
+        <div className="absolute inset-6 overflow-hidden rounded-[24px] border border-slate-200 bg-sky-50 shadow-inner dark:border-white/10 dark:bg-slate-950">
+          <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 opacity-95 dark:opacity-75">
+            {OSM_WORLD_TILES.map((tile) => (
+              <img
+                key={tile}
+                src={tile}
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+                className="h-full w-full object-fill"
+              />
             ))}
-            {[92, 184, 276, 368, 460].map((y) => (
-              <path key={`lat-${y}`} d={`M35 ${y}h930`} />
-            ))}
-          </g>
-          <g filter="url(#land-shadow)" className="fill-slate-200 stroke-white stroke-[2.5] dark:fill-slate-700/80 dark:stroke-slate-900">
-            {WORLD_LAND_PATHS.map((path) => (
-              <path key={path} d={path} />
-            ))}
-          </g>
-          <g className="fill-slate-400/70 text-[11px] font-medium dark:fill-slate-500/80">
-            {WORLD_LABELS.map((item) => (
-              <text key={item.label} x={`${item.x}%`} y={`${item.y}%`} textAnchor="middle">
-                {item.label}
-              </text>
-            ))}
-          </g>
-        </svg>
-
-        {stats.map((stat, index) => {
-          const isActive = matchesCountryFilter(stat.country, activeCountry);
-          const size = 18 + Math.round((stat.count / maxCount) * 22);
-          const hasKnownPoint = Boolean(COUNTRY_POINTS[stat.country]);
-          const left = hasKnownPoint ? stat.x : 8 + (index % 4) * 5;
-          const top = hasKnownPoint ? stat.y : 91;
-          return (
-            <button
-              key={stat.country}
-              type="button"
-              onClick={() => onCountryClick(stat.country)}
-              className={cn(
-                "group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition-all hover:scale-110",
-                isActive
-                  ? "border-blue-200 bg-blue-600 text-white ring-4 ring-blue-500/20"
-                  : "border-white bg-emerald-500 text-white hover:bg-blue-600 dark:border-slate-900",
-              )}
-              style={{ left: `${left}%`, top: `${top}%`, width: size, height: size }}
-              title={`${stat.country}: ${stat.count}`}
-              aria-label={`${stat.country}: ${stat.count}`}
-            >
-              {stat.count}
-              <span className="pointer-events-none absolute left-1/2 top-full mt-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] font-medium text-white shadow-xl group-hover:block">
-                {stat.country}
-              </span>
-            </button>
-          );
-        })}
+          </div>
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/5 via-transparent to-white/10 dark:from-slate-950/20 dark:via-slate-950/5 dark:to-slate-950/40" />
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noreferrer"
+            className="absolute bottom-2 right-2 rounded bg-white/90 px-2 py-1 text-[10px] font-medium text-slate-600 shadow-sm hover:text-blue-600 dark:bg-slate-900/90 dark:text-slate-300"
+          >
+            OpenStreetMap
+          </a>
+          {stats.map((stat, index) => {
+            const isActive = matchesCountryFilter(stat.country, activeCountry);
+            const size = 18 + Math.round((stat.count / maxCount) * 22);
+            const hasKnownPoint = Boolean(COUNTRY_COORDS[stat.country]);
+            const left = hasKnownPoint ? stat.x : 8 + (index % 4) * 5;
+            const top = hasKnownPoint ? stat.y : 91;
+            return (
+              <button
+                key={stat.country}
+                type="button"
+                onClick={() => onCountryClick(stat.country)}
+                className={cn(
+                  "group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition-all hover:scale-110",
+                  isActive
+                    ? "border-blue-200 bg-blue-600 text-white ring-4 ring-blue-500/20"
+                    : "border-white bg-emerald-500 text-white hover:bg-blue-600 dark:border-slate-900",
+                )}
+                style={{ left: `${left}%`, top: `${top}%`, width: size, height: size }}
+                title={`${stat.country}: ${stat.count}`}
+                aria-label={`${stat.country}: ${stat.count}`}
+              >
+                {stat.count}
+                <span className="pointer-events-none absolute left-1/2 top-full mt-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] font-medium text-white shadow-xl group-hover:block">
+                  {stat.country}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="border-t border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-black/20 lg:border-l lg:border-t-0">
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-white">
