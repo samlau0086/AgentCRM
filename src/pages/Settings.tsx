@@ -8,6 +8,7 @@ import { Agent, ModelProfile, getAgents, getModelProfiles, loadModelProfilesFrom
 import { notify } from '../services/notifications';
 import PasswordInput from '../components/PasswordInput';
 import { loadAppSettingsFromServer, saveAppSetting } from '../services/appSettings';
+import { parseWaHubActors, WA_HUB_ACTORS_KEY, WaHubActor } from '../services/waHub';
 
 type Tab = 'general' | 'agents' | 'integrations';
 
@@ -32,6 +33,13 @@ type LeadPlatformConfig = {
   authScheme?: string;
   notes: string;
   updatedAt?: string;
+};
+
+type WaHubClientOption = {
+  id: string;
+  name?: string;
+  phone?: string;
+  status?: string;
 };
 
 const providers = [
@@ -96,6 +104,10 @@ export default function Settings() {
   const [editingLeadPlatform, setEditingLeadPlatform] = useState<LeadPlatform | null>(null);
   const [testingEmailKey, setTestingEmailKey] = useState<string | null>(null);
   const [isTestingWaHub, setIsTestingWaHub] = useState(false);
+  const [waHubClients, setWaHubClients] = useState<WaHubClientOption[]>([]);
+  const [waHubActors, setWaHubActors] = useState<WaHubActor[]>([]);
+  const [waActorSearch, setWaActorSearch] = useState('');
+  const [isWaActorDropdownOpen, setIsWaActorDropdownOpen] = useState(false);
   const [leadPlatformDraft, setLeadPlatformDraft] = useState<LeadPlatformConfig>({
     enabled: false,
     apiKey: '',
@@ -121,6 +133,7 @@ export default function Settings() {
           ? JSON.parse(leadConfigs || '{}')
           : (leadConfigs as Record<string, LeadPlatformConfig>),
       );
+      setWaHubActors(parseWaHubActors(settings[WA_HUB_ACTORS_KEY] || localStorage.getItem(WA_HUB_ACTORS_KEY)));
       setAppSettingsLoaded(true);
     }).catch(() => {
       setTimezone(localStorage.getItem('crm_timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -131,6 +144,7 @@ export default function Settings() {
       } catch (e) {
         setLeadPlatformConfigs({});
       }
+      setWaHubActors(parseWaHubActors(localStorage.getItem(WA_HUB_ACTORS_KEY)));
       setAppSettingsLoaded(true);
     });
     setReceiveProfiles(getReceiveProfiles());
@@ -290,26 +304,76 @@ export default function Settings() {
     const token = (document.getElementById('hub_token') as HTMLInputElement | null)?.value || '';
     if (!url || !token) {
       notify('Please enter Hub URL and API Token first.', 'warning', 'WhatsApp Hub configuration required');
-      return;
+      return [];
     }
 
     setIsTestingWaHub(true);
     try {
       const res = await fetch(`${url}/api/clients`, {
-        headers: { 'x-hub-token': token },
+        headers: { 'x-hub-token': token, Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || data.message || `Hub returned HTTP ${res.status}.`);
       }
       const clients = Array.isArray(data.clients) ? data.clients : [];
+      setWaHubClients(clients);
+      refreshWaHubActorStatuses(clients);
       const onlineCount = clients.filter((client: any) => client.status === 'online').length;
       notify(`Connected to WhatsApp Hub. ${clients.length} client(s), ${onlineCount} online.`, 'success', 'WhatsApp Hub connected');
+      return clients;
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to connect to WhatsApp Hub.', 'error', 'WhatsApp Hub test failed');
+      return [];
     } finally {
       setIsTestingWaHub(false);
     }
+  };
+
+  const saveWaHubActors = (actors: WaHubActor[]) => {
+    setWaHubActors(actors);
+    localStorage.setItem(WA_HUB_ACTORS_KEY, JSON.stringify(actors));
+    saveAppSetting(WA_HUB_ACTORS_KEY, actors);
+  };
+
+  const addWaHubActor = (client: WaHubClientOption) => {
+    if (!client.id) return;
+    if (waHubActors.some((actor) => actor.clientId === client.id)) {
+      notify('This WhatsApp client is already configured as an actor.', 'warning', 'Actor already exists');
+      return;
+    }
+    const nextActors = [
+      ...waHubActors,
+      {
+        id: `wa_actor_${client.id}`,
+        clientId: client.id,
+        name: client.name || client.id,
+        phone: client.phone,
+        status: client.status,
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    saveWaHubActors(nextActors);
+    setWaActorSearch('');
+    setIsWaActorDropdownOpen(false);
+    notify('WhatsApp Actor added.', 'success', 'Actor saved');
+  };
+
+  const removeWaHubActor = (actorId: string) => {
+    saveWaHubActors(waHubActors.filter((actor) => actor.id !== actorId));
+    notify('WhatsApp Actor removed.', 'success', 'Actor removed');
+  };
+
+  const refreshWaHubActorStatuses = (clients: WaHubClientOption[]) => {
+    if (clients.length === 0 || waHubActors.length === 0) return;
+    const byId = new Map(clients.map((client) => [client.id, client]));
+    const nextActors = waHubActors.map((actor) => {
+      const client = byId.get(actor.clientId);
+      return client
+        ? { ...actor, name: client.name || actor.name, phone: client.phone || actor.phone, status: client.status, updatedAt: new Date().toISOString() }
+        : actor;
+    });
+    saveWaHubActors(nextActors);
   };
 
   const handleSaveModelProfiles = async () => {
@@ -421,6 +485,19 @@ export default function Settings() {
     { id: 'agents', label: t('set.tab.agents'), icon: Cpu },
     { id: 'integrations', label: t('set.tab.integrations'), icon: GitMerge },
   ];
+
+  const filteredWaHubClients = waHubClients
+    .filter((client) => !waHubActors.some((actor) => actor.clientId === client.id))
+    .filter((client) => {
+      const q = waActorSearch.trim().toLowerCase();
+      if (!q) return true;
+      return [client.id, client.name, client.phone, client.status]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(q);
+    })
+    .slice(0, 8);
 
   return (
     <div className="w-full p-4 md:p-6 lg:p-8 h-full flex flex-col">
@@ -995,6 +1072,7 @@ export default function Settings() {
                       onClick={() => {
                         saveAppSetting('wa_hub_url', (document.getElementById('hub_url') as HTMLInputElement).value);
                         saveAppSetting('wa_hub_token', (document.getElementById('hub_token') as HTMLInputElement).value);
+                        saveWaHubActors(waHubActors);
                         notify('Saved WhatsApp Actor Hub configuration', 'success', 'WhatsApp settings saved');
                       }}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded transition-colors shadow-sm"
@@ -1023,6 +1101,96 @@ export default function Settings() {
                       className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 text-sm focus:border-blue-500 outline-none" 
                     />
                     </div>
+                  </div>
+                </div>
+                <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-black/20">
+                  <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Actors</h4>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Each actor maps to one WhatsApp Hub clientId. Test the Hub connection first, then choose clients from the dropdown.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={testWaHubConnection}
+                      disabled={isTestingWaHub}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                    >
+                      {isTestingWaHub ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+                      Load clients
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      value={waActorSearch}
+                      onChange={(event) => {
+                        setWaActorSearch(event.target.value);
+                        setIsWaActorDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsWaActorDropdownOpen(true)}
+                      placeholder={waHubClients.length ? "Search client id / name / phone..." : "Connect to WhatsApp Hub to load clients..."}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition-colors focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-slate-200"
+                    />
+                    {isWaActorDropdownOpen && waHubClients.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-white/10 dark:bg-slate-900">
+                        {filteredWaHubClients.length > 0 ? filteredWaHubClients.map((client) => (
+                          <button
+                            key={client.id}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => addWaHubActor(client)}
+                            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-white/10"
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate font-medium text-slate-800 dark:text-slate-100">{client.name || client.id}</span>
+                              <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{client.id}{client.phone ? ` - ${client.phone}` : ''}</span>
+                            </span>
+                            <span className={cn(
+                              "shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold",
+                              client.status === 'online'
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                                : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400",
+                            )}>
+                              {client.status || 'unknown'}
+                            </span>
+                          </button>
+                        )) : (
+                          <div className="px-3 py-3 text-sm text-slate-500 dark:text-slate-400">No available clients match the search.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {waHubActors.map((actor) => (
+                      <span
+                        key={actor.id}
+                        className="inline-flex max-w-full items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
+                      >
+                        <span className="max-w-[220px] truncate">{actor.name}</span>
+                        <span className="rounded bg-white/80 px-1.5 py-0.5 font-mono text-[10px] text-blue-600 dark:bg-black/20 dark:text-blue-300">{actor.clientId}</span>
+                        {actor.status && (
+                          <span className={cn(
+                            "rounded px-1.5 py-0.5 text-[10px]",
+                            actor.status === 'online' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400",
+                          )}>
+                            {actor.status}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeWaHubActor(actor.id)}
+                          className="rounded-full p-0.5 text-blue-500 hover:bg-blue-100 hover:text-red-600 dark:hover:bg-white/10"
+                          title="Remove actor"
+                          aria-label={`Remove actor ${actor.name}`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ))}
+                    {waHubActors.length === 0 && (
+                      <span className="text-xs text-slate-500 dark:text-slate-400">No actors configured yet.</span>
+                    )}
                   </div>
                 </div>
               </div>

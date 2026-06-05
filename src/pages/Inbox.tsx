@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
-import { fetchClients, fetchHubMediaBlob, fetchMessages, resolveHubMediaUrl, sendMessage, WaClient, WaMessage } from "../services/waHub";
+import { fetchClients, fetchHubMediaBlob, fetchMessages, getConfiguredWaHubActors, parseWaHubActors, resolveHubMediaUrl, sendMessage, WA_HUB_ACTORS_KEY, WaClient, WaHubActor, WaMessage } from "../services/waHub";
 import { fetchEmails, sendEmail, getEmailMappings, getEmailSignatures, loadEmailConfigurationFromServer } from "../services/emailSync";
 import { getMedias, MediaItem } from "../services/media";
 import {
@@ -126,6 +126,24 @@ function loadJsonMap<T>(key: string): Record<string, T> {
   } catch {
     return {};
   }
+}
+
+function clientsFromActors(clients: WaClient[], actors: WaHubActor[]): WaClient[] {
+  if (actors.length === 0) return clients;
+  const byId = new Map(clients.map((client) => [client.id, client]));
+  return actors.map((actor) => {
+    const client = byId.get(actor.clientId);
+    return client || {
+      id: actor.clientId,
+      name: actor.name,
+      phone: actor.phone || "",
+      status: actor.status === "online" ? "online" : "offline",
+    };
+  });
+}
+
+function defaultWaClientId(clients: WaClient[]) {
+  return clients.find((client) => client.status === "online")?.id || clients[0]?.id || "";
 }
 
 function senderPreferenceKey(sender = "") {
@@ -833,10 +851,9 @@ export default function Inbox() {
   useEffect(() => {
     fetchClients()
       .then((clients) => {
-        setWaClients(clients);
-        const onlineClient = clients.find((c) => c.status === "online");
-        if (onlineClient) setSelectedClientId(onlineClient.id);
-        else if (clients.length > 0) setSelectedClientId(clients[0].id);
+        const actorClients = clientsFromActors(clients, getConfiguredWaHubActors());
+        setWaClients(actorClients);
+        setSelectedClientId(defaultWaClientId(actorClients));
       })
       .catch(console.error);
     getMedias().then(setMediaItems).catch(console.error);
@@ -863,6 +880,14 @@ export default function Inbox() {
         }
         const settingsResult = results[2];
         if (settingsResult.status === "fulfilled") {
+          const savedActors = parseWaHubActors(settingsResult.value[WA_HUB_ACTORS_KEY]);
+          if (savedActors.length > 0) {
+            setWaClients((currentClients) => {
+              const actorClients = clientsFromActors(currentClients, savedActors);
+              setSelectedClientId((current) => actorClients.some((client) => client.id === current) ? current : defaultWaClientId(actorClients));
+              return actorClients;
+            });
+          }
           const savedPrefs = settingsResult.value[WHATSAPP_AUTO_TRANSLATE_PREFS_KEY];
           if (savedPrefs && typeof savedPrefs === "object" && !Array.isArray(savedPrefs)) {
             setAutoTranslateWhatsAppPrefs(savedPrefs as Record<string, boolean>);

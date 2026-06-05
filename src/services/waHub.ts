@@ -5,6 +5,17 @@ export interface WaClient {
   status: 'online' | 'offline';
 }
 
+export interface WaHubActor {
+  id: string;
+  clientId: string;
+  name: string;
+  phone?: string;
+  status?: string;
+  updatedAt?: string;
+}
+
+export const WA_HUB_ACTORS_KEY = 'wa_hub_actors';
+
 export interface WaMediaPayload {
   id?: string;
   originalName?: string;
@@ -55,6 +66,30 @@ type WaAttachment = {
   url: string;
   size: number;
 };
+
+export function parseWaHubActors(value: unknown): WaHubActor[] {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value || '[]') : value;
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((actor) => actor?.clientId)
+          .map((actor) => ({
+            id: String(actor.id || `wa_actor_${actor.clientId}`),
+            clientId: String(actor.clientId),
+            name: String(actor.name || actor.clientId),
+            phone: actor.phone ? String(actor.phone) : undefined,
+            status: actor.status ? String(actor.status) : undefined,
+            updatedAt: actor.updatedAt ? String(actor.updatedAt) : undefined,
+          }))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getConfiguredWaHubActors() {
+  return parseWaHubActors(localStorage.getItem(WA_HUB_ACTORS_KEY));
+}
 
 export const getHubConfig = () => {
   return {
