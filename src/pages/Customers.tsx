@@ -177,12 +177,7 @@ const COUNTRY_COORDS: Record<string, { lat: number; lon: number }> = {
   Unknown: { lat: -58, lon: 0 },
 };
 
-const OSM_WORLD_TILES = [
-  "https://tile.openstreetmap.org/1/0/0.png",
-  "https://tile.openstreetmap.org/1/1/0.png",
-  "https://tile.openstreetmap.org/1/0/1.png",
-  "https://tile.openstreetmap.org/1/1/1.png",
-];
+const WORLD_MAP_SVG_URL = "https://upload.wikimedia.org/wikipedia/commons/5/51/BlankMap-Equirectangular.svg";
 
 function parseCsv(text: string) {
   const rows: string[][] = [];
@@ -385,10 +380,9 @@ function getPublicLeadCountry(lead: PublicLead) {
 
 function projectCountryPoint(country: string) {
   const coord = COUNTRY_COORDS[country] || COUNTRY_COORDS.Unknown;
-  const sinLat = Math.sin((Math.max(-85.0511, Math.min(85.0511, coord.lat)) * Math.PI) / 180);
   return {
     x: ((coord.lon + 180) / 360) * 100,
-    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * 100,
+    y: ((90 - coord.lat) / 180) * 100,
   };
 }
 
@@ -841,56 +835,53 @@ function CountryMapView({
   return (
     <div className="grid h-full min-h-[520px] grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div className="relative min-h-[420px] overflow-hidden bg-slate-100 dark:bg-black/30">
-        <div className="absolute inset-6 overflow-hidden rounded-[24px] border border-slate-200 bg-sky-50 shadow-inner dark:border-white/10 dark:bg-slate-950">
-          <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 opacity-95 dark:opacity-75">
-            {OSM_WORLD_TILES.map((tile) => (
-              <img
-                key={tile}
-                src={tile}
-                alt=""
-                aria-hidden="true"
-                draggable={false}
-                className="h-full w-full object-fill"
-              />
-            ))}
+        <div className="absolute inset-6 flex items-center justify-center">
+          <div className="relative aspect-[2/1] w-full max-h-full overflow-hidden rounded-[24px] border border-slate-200 bg-sky-50 shadow-inner dark:border-white/10 dark:bg-slate-950">
+            <img
+              src={WORLD_MAP_SVG_URL}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+              className="absolute inset-0 h-full w-full object-fill opacity-95 dark:opacity-75"
+            />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/5 via-transparent to-white/10 dark:from-slate-950/20 dark:via-slate-950/5 dark:to-slate-950/40" />
+            <a
+              href="https://commons.wikimedia.org/wiki/File:BlankMap-Equirectangular.svg"
+              target="_blank"
+              rel="noreferrer"
+              className="absolute bottom-2 right-2 rounded bg-white/90 px-2 py-1 text-[10px] font-medium text-slate-600 shadow-sm hover:text-blue-600 dark:bg-slate-900/90 dark:text-slate-300"
+            >
+              Wikimedia Commons
+            </a>
+            {stats.map((stat, index) => {
+              const isActive = matchesCountryFilter(stat.country, activeCountry);
+              const size = 18 + Math.round((stat.count / maxCount) * 22);
+              const hasKnownPoint = Boolean(COUNTRY_COORDS[stat.country]);
+              const left = hasKnownPoint ? stat.x : 8 + (index % 4) * 5;
+              const top = hasKnownPoint ? stat.y : 91;
+              return (
+                <button
+                  key={stat.country}
+                  type="button"
+                  onClick={() => onCountryClick(stat.country)}
+                  className={cn(
+                    "group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition-all hover:scale-110",
+                    isActive
+                      ? "border-blue-200 bg-blue-600 text-white ring-4 ring-blue-500/20"
+                      : "border-white bg-emerald-500 text-white hover:bg-blue-600 dark:border-slate-900",
+                  )}
+                  style={{ left: `${left}%`, top: `${top}%`, width: size, height: size }}
+                  title={`${stat.country}: ${stat.count}`}
+                  aria-label={`${stat.country}: ${stat.count}`}
+                >
+                  {stat.count}
+                  <span className="pointer-events-none absolute left-1/2 top-full mt-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] font-medium text-white shadow-xl group-hover:block">
+                    {stat.country}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/5 via-transparent to-white/10 dark:from-slate-950/20 dark:via-slate-950/5 dark:to-slate-950/40" />
-          <a
-            href="https://www.openstreetmap.org/copyright"
-            target="_blank"
-            rel="noreferrer"
-            className="absolute bottom-2 right-2 rounded bg-white/90 px-2 py-1 text-[10px] font-medium text-slate-600 shadow-sm hover:text-blue-600 dark:bg-slate-900/90 dark:text-slate-300"
-          >
-            OpenStreetMap
-          </a>
-          {stats.map((stat, index) => {
-            const isActive = matchesCountryFilter(stat.country, activeCountry);
-            const size = 18 + Math.round((stat.count / maxCount) * 22);
-            const hasKnownPoint = Boolean(COUNTRY_COORDS[stat.country]);
-            const left = hasKnownPoint ? stat.x : 8 + (index % 4) * 5;
-            const top = hasKnownPoint ? stat.y : 91;
-            return (
-              <button
-                key={stat.country}
-                type="button"
-                onClick={() => onCountryClick(stat.country)}
-                className={cn(
-                  "group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition-all hover:scale-110",
-                  isActive
-                    ? "border-blue-200 bg-blue-600 text-white ring-4 ring-blue-500/20"
-                    : "border-white bg-emerald-500 text-white hover:bg-blue-600 dark:border-slate-900",
-                )}
-                style={{ left: `${left}%`, top: `${top}%`, width: size, height: size }}
-                title={`${stat.country}: ${stat.count}`}
-                aria-label={`${stat.country}: ${stat.count}`}
-              >
-                {stat.count}
-                <span className="pointer-events-none absolute left-1/2 top-full mt-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] font-medium text-white shadow-xl group-hover:block">
-                  {stat.country}
-                </span>
-              </button>
-            );
-          })}
         </div>
       </div>
       <div className="border-t border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-black/20 lg:border-l lg:border-t-0">
