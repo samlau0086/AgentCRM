@@ -573,6 +573,188 @@ crudRoutes("email_send_profiles", "/api/email/send-profiles");
 crudRoutes("email_signatures", "/api/email/signatures");
 crudRoutes("email_mappings", "/api/email/mappings");
 
+const inboxEventClients = new Set<express.Response>();
+
+function broadcastInboxEvent(payload: unknown) {
+  const data = JSON.stringify(payload);
+  inboxEventClients.forEach((client) => {
+    client.write(`event: inbox.updated\n`);
+    client.write(`data: ${data}\n\n`);
+  });
+}
+
+function webhookMessageClientId(message: any) {
+  return String(message?.client_id || message?.clientId || "");
+}
+
+function webhookMessageChatId(message: any) {
+  return String(
+    message?.chatId ||
+      message?.chat_id ||
+      message?.chatid ||
+      message?.raw_chat_id ||
+      message?.sender ||
+      message?.recipient ||
+      "unknown",
+  );
+}
+
+function webhookMessageConversationKey(message: any) {
+  return String(
+    message?.contact_phone ||
+      message?.conversation_key ||
+      message?.conversation_id ||
+      message?.mob ||
+      message?.mobile ||
+      webhookMessageChatId(message),
+  );
+}
+
+function webhookMessageBody(message: any) {
+  return String(message?.body || message?.payload?.caption || "");
+}
+
+function webhookMessageAttachments(message: any) {
+  const media = message?.payload?.media;
+  if (!media?.url) return [];
+  const mimeType = String(media.mimeType || media.type || "application/octet-stream");
+  return [
+    {
+      id: String(media.id || media.whatsappMessageId || message.id || media.url),
+      name: String(media.originalName || media.name || (mimeType.startsWith("image/") ? "WhatsApp image" : "WhatsApp media")),
+      url: String(media.url),
+      type: mimeType,
+      mimeType,
+      size: Number(media.size || 0),
+    },
+  ];
+}
+
+async function getWaHubUserIdsForClient(clientId: string) {
+  if (!clientId) return [];
+  return withDb(async (client) => {
+    const result = await client.query(
+      "SELECT id, data FROM crm_records WHERE entity = 'app_settings' AND id LIKE 'wa_hub_actors:%'",
+    );
+    return result.rows
+      .filter((row) => {
+        const actors = row.data?.value;
+        return Array.isArray(actors) && actors.some((actor) => String(actor?.clientId || "") === clientId);
+      })
+      .map((row) => String(row.id).replace(/^wa_hub_actors:/, ""))
+      .filter(Boolean);
+  });
+}
+
+async function upsertWhatsAppWebhookInboxMessage(message: any, userId: string, sentAt?: string) {
+  const clientId = webhookMessageClientId(message);
+  const conversationKey = webhookMessageConversationKey(message);
+  const previewId = `wa_chat_${clientId}:${conversationKey}`;
+  const createdAt = String(message?.created_at || message?.createdAt || message?.timestamp || sentAt || new Date().toISOString());
+  const timestamp = Date.parse(createdAt) || Date.now();
+  const attachments = webhookMessageAttachments(message);
+  const body = webhookMessageBody(message);
+  const summary = body || attachments[0]?.name || (message?.message_type === "media" ? "WhatsApp media" : "");
+  const existing = await getRecord("inbox_messages", previewId);
+  const threadId = `t_${String(message?.id || createHash("sha1").update(`${clientId}:${conversationKey}:${createdAt}:${body}`).digest("hex"))}`;
+  const existingThread = Array.isArray(existing?.thread) ? existing.thread : [];
+  const thread = existingThread.some((item: any) => item?.id === threadId)
+    ? existingThread
+    : [
+        ...existingThread,
+        {
+          id: threadId,
+          sender: message?.direction === "outbound" ? "agent" : "user",
+          content: body,
+          attachments,
+          time: new Date(timestamp).toLocaleTimeString(),
+        },
+      ];
+
+  const mappedMob =
+    message?.contact_phone ||
+    message?.mob ||
+    message?.mobile ||
+    (message?.direction === "outbound" ? message?.recipient : message?.sender) ||
+    conversationKey;
+
+  const next = {
+    ...(existing || {}),
+    id: previewId,
+    chatId: conversationKey,
+    waClientId: clientId,
+    userId,
+    mob: mappedMob,
+    sender: mappedMob || message?.sender || conversationKey,
+    target: mappedMob || message?.recipient || conversationKey,
+    intent: "WhatsApp",
+    subject: "WhatsApp conversation",
+    summary,
+    channel: "WhatsApp",
+    date: new Date(timestamp).toLocaleString(),
+    direction: message?.direction === "outbound" ? "outbound" : "inbound",
+    read: existing?.read ?? message?.direction === "outbound",
+    thread,
+  };
+
+  await upsertRecord("inbox_messages", previewId, next);
+  return next;
+}
+
+app.post("/api/webhooks/whatsapp-hub", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  const expectedSecret = process.env.WA_HUB_WEBHOOK_SECRET || "";
+  const receivedSecret = String(req.header("x-hub-signature") || "");
+  if (expectedSecret && receivedSecret !== expectedSecret) {
+    res.status(401).json({ error: "Invalid WhatsApp Hub webhook signature." });
+    return;
+  }
+
+  try {
+    const event = String(req.body?.event || "");
+    if (event !== "message.created") {
+      res.json({ success: true, ignored: true });
+      return;
+    }
+
+    const message = req.body?.data || {};
+    const clientId = webhookMessageClientId(message);
+    const allowedUserIds = await getWaHubUserIdsForClient(clientId);
+    if (allowedUserIds.length === 0) {
+      res.json({ success: true, ignored: true, reason: "client_not_configured" });
+      return;
+    }
+
+    const records = await Promise.all(
+      allowedUserIds.map((userId) => upsertWhatsAppWebhookInboxMessage(message, userId, req.body?.sentAt)),
+    );
+    broadcastInboxEvent({ source: "whatsapp-hub", event, clientId, records: records.length });
+    res.json({ success: true, records: records.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/communication/inbox-events", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+  res.write(`event: connected\n`);
+  res.write(`data: {"success":true}\n\n`);
+  inboxEventClients.add(res);
+
+  const keepAlive = setInterval(() => {
+    res.write(`: keep-alive\n\n`);
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    inboxEventClients.delete(res);
+    res.end();
+  });
+});
+
 type MailSecurity = "ssl" | "starttls" | "none";
 
 type MailSocket = net.Socket | tls.TLSSocket;

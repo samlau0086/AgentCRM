@@ -97,6 +97,7 @@ const WHATSAPP_CHAT_MOB_MAPPINGS_KEY = "crm_whatsapp_chat_mob_mappings";
 const WHATSAPP_AUTO_TRANSLATE_PREFS_KEY = "crm_whatsapp_auto_translate_prefs";
 const WHATSAPP_OUTBOUND_AUTO_TRANSLATE_PREFS_KEY = "crm_whatsapp_outbound_auto_translate_prefs";
 const WHATSAPP_TRANSLATIONS_KEY = "crm_whatsapp_message_translations";
+const INBOX_LIVE_REFRESH_MS = 12000;
 const BULK_DELETE_SENTINEL = "__bulk_delete__";
 const WHATSAPP_EMOJIS = ["😀", "😂", "😊", "😍", "👍", "🙏", "🎉", "🔥", "✅", "💬", "📎", "❤️"];
 const CUSTOMER_LANGUAGE_OPTIONS = [
@@ -450,6 +451,7 @@ export default function Inbox() {
   const [isDrafting, setIsDrafting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inboxRefreshInFlightRef = useRef(false);
 
   const handleAIGenerateSubject = () => {
     if (!stripHtml(composeBody)) {
@@ -674,6 +676,7 @@ export default function Inbox() {
 
   const [messages, setMessages] = useState<MessagePreview[]>([]);
   const [activeMessageId, setActiveMessageId] = useState("");
+  const activeMessageIdRef = useRef(activeMessageId);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMailbox, setSelectedMailbox] = useState<"inbox" | "sent">("inbox");
@@ -877,6 +880,31 @@ export default function Inbox() {
     }
   };
 
+  const refreshInboxFromServer = async () => {
+    if (inboxRefreshInFlightRef.current) return;
+    inboxRefreshInFlightRef.current = true;
+    try {
+      const remoteMessages = await loadInboxMessagesFromServer();
+      const visibleMessages = filterMessagesForCurrentWhatsAppActors(remoteMessages);
+      setMessages((current) => {
+        const currentFingerprint = current
+          .map((message) => `${message.id}:${message.date}:${message.summary}:${message.read}:${message.thread?.length || 0}`)
+          .join("|");
+        const nextFingerprint = visibleMessages
+          .map((message) => `${message.id}:${message.date}:${message.summary}:${message.read}:${message.thread?.length || 0}`)
+          .join("|");
+        return currentFingerprint === nextFingerprint ? current : visibleMessages;
+      });
+      if (visibleMessages.length > 0 && !visibleMessages.some((message) => message.id === activeMessageIdRef.current)) {
+        setActiveMessageId(visibleMessages[0].id);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      inboxRefreshInFlightRef.current = false;
+    }
+  };
+
   useEffect(() => {
     fetchClients()
       .then((clients) => {
@@ -931,6 +959,26 @@ export default function Inbox() {
       })
       .then(() => syncInboxMessages(true))
       .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      refreshInboxFromServer();
+    }, INBOX_LIVE_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return undefined;
+    const events = new EventSource("/api/communication/inbox-events");
+    const handleInboxUpdate = () => {
+      refreshInboxFromServer();
+    };
+    events.addEventListener("inbox.updated", handleInboxUpdate);
+    return () => {
+      events.removeEventListener("inbox.updated", handleInboxUpdate);
+      events.close();
+    };
   }, []);
 
   const activeMessage =
@@ -1620,7 +1668,6 @@ export default function Inbox() {
     setDeletingMessageId(null);
   };
 
-  const activeMessageIdRef = useRef(activeMessageId);
   useEffect(() => {
     activeMessageIdRef.current = activeMessageId;
   }, [activeMessageId]);
