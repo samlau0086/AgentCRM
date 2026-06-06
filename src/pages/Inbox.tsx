@@ -1191,11 +1191,17 @@ export default function Inbox() {
     return message.subject;
   };
 
-  const saveWhatsAppChatMobMapping = (chatId: string, mob: string) => {
+  const saveWhatsAppChatMobMapping = (chatId: string, mob: string, currentMob = "") => {
     const normalizedChatId = chatId.trim();
     const normalizedMob = mob.trim();
+    const normalizedCurrentMob = currentMob.trim();
     if (!normalizedChatId) {
       notify(language === "zh" ? "缺少 WhatsApp chatId，无法保存映射。" : "WhatsApp chatId is missing, so the mapping cannot be saved.", "warning", language === "zh" ? "无法保存" : "Cannot save");
+      return;
+    }
+    if (normalizeConversationAddress(normalizedMob) === normalizeConversationAddress(normalizedCurrentMob)) {
+      setEditingChatMobId("");
+      setEditingChatMob("");
       return;
     }
 
@@ -2855,11 +2861,11 @@ export default function Inbox() {
                           <input
                             value={editingChatMob}
                             onChange={(event) => setEditingChatMob(event.target.value)}
-                            onBlur={() => saveWhatsAppChatMobMapping(chatId, editingChatMob)}
+                            onBlur={() => saveWhatsAppChatMobMapping(chatId, editingChatMob, mappedMob || "")}
                             onKeyDown={(event) => {
                               if (event.key === "Enter") {
                                 event.preventDefault();
-                                saveWhatsAppChatMobMapping(chatId, editingChatMob);
+                                saveWhatsAppChatMobMapping(chatId, editingChatMob, mappedMob || "");
                               }
                               if (event.key === "Escape") {
                                 setEditingChatMobId("");
