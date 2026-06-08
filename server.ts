@@ -22,6 +22,10 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const useSecureCookies = process.env.NODE_ENV === "production";
 const hasDatabase = Boolean(process.env.DATABASE_URL || process.env.PG_VECTOR_URL);
 const hasVectorDatabase = Boolean(process.env.PG_VECTOR_URL);
+const BACKGROUND_INBOX_SYNC_INTERVAL_MS = Math.max(
+  15000,
+  Number(process.env.INBOX_SYNC_INTERVAL_MS || 60000),
+);
 
 app.use(express.json({ limit: "25mb" }));
 app.use(cookieParser());
@@ -1293,12 +1297,15 @@ async function openImapSession(profile: any) {
   return { socket, readLine };
 }
 
-app.post("/api/email/sync-imap", async (req, res) => {
-  const { mappings = [], receiveProfiles = [], limit = 25 } = req.body as {
+async function syncImapEmails({
+  mappings = [],
+  receiveProfiles = [],
+  limit = 25,
+}: {
     mappings?: Array<{ id: string; name: string; receiveProfileId: string }>;
     receiveProfiles?: any[];
     limit?: number;
-  };
+  }) {
   const emails: any[] = [];
   const errors: string[] = [];
   const maxPerAccount = Math.max(1, Math.min(Number(limit || 25), 100));
@@ -1369,10 +1376,21 @@ app.post("/api/email/sync-imap", async (req, res) => {
     }
   }
 
+  return { emails, errors, syncVersion: IMAP_SYNC_VERSION };
+}
+
+app.post("/api/email/sync-imap", async (req, res) => {
+  const { mappings = [], receiveProfiles = [], limit = 25 } = req.body as {
+    mappings?: Array<{ id: string; name: string; receiveProfileId: string }>;
+    receiveProfiles?: any[];
+    limit?: number;
+  };
+  const { emails, errors, syncVersion } = await syncImapEmails({ mappings, receiveProfiles, limit });
+
   if (emails.length === 0 && errors.length > 0) {
-    return res.status(400).json({ error: errors.join(" | "), emails: [], syncVersion: IMAP_SYNC_VERSION });
+    return res.status(400).json({ error: errors.join(" | "), emails: [], syncVersion });
   }
-  res.json({ success: true, emails, errors, syncVersion: IMAP_SYNC_VERSION });
+  res.json({ success: true, emails, errors, syncVersion });
 });
 
 app.post("/api/email/test-smtp", async (req, res) => {
@@ -2289,6 +2307,184 @@ Requirements:
   }
 });
 
+async function getAppSettingValue<T = unknown>(id: string): Promise<T | undefined> {
+  const record = await getRecord("app_settings", id);
+  return record?.value as T | undefined;
+}
+
+async function upsertEmailInboxMessage(email: any) {
+  const existing = await getRecord("inbox_messages", email.id);
+  const thread = Array.isArray(existing?.thread) && existing.thread.length > 0
+    ? existing.thread.map((item: any, index: number) =>
+        index === 0
+          ? {
+              ...item,
+              content: email.summary,
+              htmlContent: email.bodyHtml,
+              time: email.date,
+            }
+          : item,
+      )
+    : [
+        {
+          id: `t_${email.id}`,
+          sender: "user",
+          content: email.summary,
+          htmlContent: email.bodyHtml,
+          time: email.date,
+        },
+      ];
+
+  const next = {
+    ...(existing || {}),
+    ...email,
+    direction: "inbound",
+    read: existing?.read ?? false,
+    thread,
+  };
+  await upsertRecord("inbox_messages", email.id, next);
+  return next;
+}
+
+async function syncEmailsToInbox() {
+  const [mappings, receiveProfiles] = await Promise.all([
+    getRecordList("email_mappings"),
+    getRecordList("email_receive_profiles"),
+  ]);
+  if (!Array.isArray(mappings) || !Array.isArray(receiveProfiles) || mappings.length === 0 || receiveProfiles.length === 0) {
+    return { imported: 0, errors: [] as string[] };
+  }
+
+  const { emails, errors } = await syncImapEmails({ mappings: mappings as any[], receiveProfiles, limit: 25 });
+  let imported = 0;
+  for (const email of emails) {
+    const existing = await getRecord("inbox_messages", email.id);
+    await upsertEmailInboxMessage(email);
+    if (!existing) imported += 1;
+  }
+  return { imported, errors };
+}
+
+function appSettingRowsToWaHubActors(rows: any[], fallbackUserId: string) {
+  return rows.flatMap((record) => {
+    const id = String(record?.id || "");
+    if (id !== "wa_hub_actors" && !id.startsWith("wa_hub_actors:")) return [];
+    const userId = id.startsWith("wa_hub_actors:") ? id.replace(/^wa_hub_actors:/, "") : fallbackUserId;
+    const actors = record?.value;
+    if (!Array.isArray(actors)) return [];
+    return actors
+      .filter((actor) => actor?.clientId)
+      .map((actor) => ({
+        userId,
+        clientId: String(actor.clientId),
+      }));
+  });
+}
+
+async function fetchWaHubMessagesForClient(hubUrl: string, token: string, clientId: string, limit = 50) {
+  const params = new URLSearchParams({ clientId, limit: String(limit) });
+  const response = await fetch(`${hubUrl.replace(/\/+$/, "")}/api/messages?${params.toString()}`, {
+    headers: {
+      "x-hub-token": token,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`WhatsApp Hub ${clientId} sync failed with HTTP ${response.status}.`);
+  }
+  const data = await response.json().catch(() => ({}));
+  return Array.isArray(data.messages) ? data.messages : [];
+}
+
+async function syncWhatsAppHubToInbox() {
+  const [hubUrlSetting, hubTokenSetting, currentUserSetting, appSettings] = await Promise.all([
+    getAppSettingValue<string>("wa_hub_url"),
+    getAppSettingValue<string>("wa_hub_token"),
+    getAppSettingValue<any>("crm_current_user"),
+    getRecordList("app_settings"),
+  ]);
+  const hubUrl = String(process.env.WA_HUB_URL || hubUrlSetting || "").replace(/\/+$/, "");
+  const token = String(process.env.WA_HUB_TOKEN || hubTokenSetting || "");
+  if (!hubUrl || !token) return { imported: 0, errors: [] as string[] };
+
+  const fallbackUserId = String(currentUserSetting?.id || "global");
+  const actors = appSettingRowsToWaHubActors(appSettings, fallbackUserId);
+  if (actors.length === 0) return { imported: 0, errors: [] as string[] };
+
+  let imported = 0;
+  const errors: string[] = [];
+  const actorsByKey = new Map<string, { userId: string; clientId: string }>();
+  for (const actor of actors) actorsByKey.set(`${actor.userId}\u0000${actor.clientId}`, actor);
+
+  for (const { userId, clientId } of actorsByKey.values()) {
+    try {
+      const messages = await fetchWaHubMessagesForClient(hubUrl, token, clientId, 50);
+      const sorted = messages.sort((a: any, b: any) =>
+        (Date.parse(a.created_at || a.createdAt || "") || 0) - (Date.parse(b.created_at || b.createdAt || "") || 0),
+      );
+      for (const message of sorted) {
+        const previewId = `wa_chat_${webhookMessageClientId(message)}:${webhookMessageConversationKey(message)}`;
+        const existing = await getRecord("inbox_messages", previewId);
+        const existingThreadLength = Array.isArray(existing?.thread) ? existing.thread.length : 0;
+        const next = await upsertWhatsAppWebhookInboxMessage(message, userId, message?.created_at || message?.createdAt);
+        const nextThreadLength = Array.isArray(next?.thread) ? next.thread.length : 0;
+        if (!existing || nextThreadLength > existingThreadLength) imported += 1;
+      }
+    } catch (err: any) {
+      errors.push(`${clientId}: ${err.message}`);
+    }
+  }
+  return { imported, errors };
+}
+
+let backgroundInboxSyncRunning = false;
+
+async function runBackgroundInboxSync(reason = "timer") {
+  if (!hasDatabase || backgroundInboxSyncRunning) return;
+  backgroundInboxSyncRunning = true;
+  try {
+    const [emailResult, whatsAppResult] = await Promise.allSettled([
+      syncEmailsToInbox(),
+      syncWhatsAppHubToInbox(),
+    ]);
+    const emailImported = emailResult.status === "fulfilled" ? emailResult.value.imported : 0;
+    const whatsAppImported = whatsAppResult.status === "fulfilled" ? whatsAppResult.value.imported : 0;
+    const errors = [
+      ...(emailResult.status === "fulfilled" ? emailResult.value.errors : [emailResult.reason?.message || "Email sync failed"]),
+      ...(whatsAppResult.status === "fulfilled" ? whatsAppResult.value.errors : [whatsAppResult.reason?.message || "WhatsApp sync failed"]),
+    ].filter(Boolean);
+    if (emailImported > 0 || whatsAppImported > 0) {
+      broadcastInboxEvent({
+        source: "background-inbox-sync",
+        reason,
+        emailImported,
+        whatsAppImported,
+        errors,
+      });
+    }
+    if (errors.length > 0) {
+      console.warn(`[background-inbox-sync] ${errors.join(" | ")}`);
+    }
+  } catch (err) {
+    console.error("[background-inbox-sync] failed:", err);
+  } finally {
+    backgroundInboxSyncRunning = false;
+  }
+}
+
+function startBackgroundInboxSync() {
+  if (!hasDatabase) return;
+  setTimeout(() => runBackgroundInboxSync("startup"), 5000);
+  setInterval(() => runBackgroundInboxSync("timer"), BACKGROUND_INBOX_SYNC_INTERVAL_MS);
+  console.log(`Background inbox sync enabled every ${BACKGROUND_INBOX_SYNC_INTERVAL_MS}ms.`);
+}
+
+app.post("/api/communication/inbox/background-sync", async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  await runBackgroundInboxSync("manual-api");
+  res.json({ success: true });
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -2315,6 +2511,7 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    startBackgroundInboxSync();
   });
 }
 
