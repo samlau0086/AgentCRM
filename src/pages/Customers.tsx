@@ -15,6 +15,8 @@ import {
   List,
   Map as MapIcon,
   MapPin,
+  Mail,
+  MessageCircle,
 } from "lucide-react";
 import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
@@ -64,7 +66,239 @@ type CountryStat = {
   y: number;
 };
 
+function contactTypeKey(type = "") {
+  return type.trim().toLowerCase();
+}
+
+function looksLikeEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function inboxComposeHref(channel: "email" | "whatsapp", to: string, customerId?: string, subject?: string) {
+  const params = new URLSearchParams({ compose: channel, to });
+  if (customerId) params.set("customerId", customerId);
+  if (subject) params.set("subject", subject);
+  return `/inbox?${params.toString()}`;
+}
+
+function getCustomerEmailContact(customer: Customer) {
+  const explicit = customer.contacts?.find((contact) => contactTypeKey(contact.type) === "email" && looksLikeEmail(contact.value))?.value;
+  if (explicit) return explicit;
+  return looksLikeEmail(customer.contact) ? customer.contact : "";
+}
+
+function getCustomerWhatsAppContact(customer: Customer) {
+  const explicit = customer.contacts?.find((contact) => contactTypeKey(contact.type) === "whatsapp" && contact.value.trim())?.value;
+  if (explicit) return explicit;
+  return customer.contacts?.find((contact) => ["mobile", "phone"].includes(contactTypeKey(contact.type)) && contact.value.trim())?.value || "";
+}
+
+function CustomerContactActions({ customer, compact = false }: { customer: Customer; compact?: boolean }) {
+  const email = getCustomerEmailContact(customer);
+  const whatsapp = getCustomerWhatsAppContact(customer);
+  if (!email && !whatsapp) return null;
+  return (
+    <div className={cn("flex flex-wrap gap-1.5", compact ? "mt-1" : "mt-2")}>
+      {whatsapp && (
+        <Link
+          to={inboxComposeHref("whatsapp", whatsapp, customer.id)}
+          className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+          onClick={(event) => event.stopPropagation()}
+          title={`WhatsApp ${whatsapp}`}
+        >
+          <MessageCircle className="h-3 w-3" />
+          WhatsApp
+        </Link>
+      )}
+      {email && (
+        <Link
+          to={inboxComposeHref("email", email, customer.id, `Hello ${customer.name}`)}
+          className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
+          onClick={(event) => event.stopPropagation()}
+          title={`Email ${email}`}
+        >
+          <Mail className="h-3 w-3" />
+          Email
+        </Link>
+      )}
+    </div>
+  );
+}
+
 const COUNTRY_ALIASES: Record<string, string> = {
+  afghanistan: "Afghanistan",
+  albania: "Albania",
+  algeria: "Algeria",
+  andorra: "Andorra",
+  angola: "Angola",
+  antigua_and_barbuda: "Antigua and Barbuda",
+  argentina: "Argentina",
+  armenia: "Armenia",
+  aruba: "Aruba",
+  austria: "Austria",
+  azerbaijan: "Azerbaijan",
+  bahamas: "Bahamas",
+  bahrain: "Bahrain",
+  bangladesh: "Bangladesh",
+  barbados: "Barbados",
+  belarus: "Belarus",
+  belgium: "Belgium",
+  belize: "Belize",
+  benin: "Benin",
+  bhutan: "Bhutan",
+  bolivia: "Bolivia",
+  bosnia: "Bosnia and Herzegovina",
+  bosnia_and_herzegovina: "Bosnia and Herzegovina",
+  botswana: "Botswana",
+  brunei: "Brunei",
+  bulgaria: "Bulgaria",
+  burkina_faso: "Burkina Faso",
+  burundi: "Burundi",
+  cabo_verde: "Cape Verde",
+  cape_verde: "Cape Verde",
+  cambodia: "Cambodia",
+  cameroon: "Cameroon",
+  central_african_republic: "Central African Republic",
+  chad: "Chad",
+  chile: "Chile",
+  colombia: "Colombia",
+  comoros: "Comoros",
+  congo: "Republic of the Congo",
+  republic_of_the_congo: "Republic of the Congo",
+  democratic_republic_of_the_congo: "Democratic Republic of the Congo",
+  dr_congo: "Democratic Republic of the Congo",
+  drc: "Democratic Republic of the Congo",
+  costa_rica: "Costa Rica",
+  cote_d_ivoire: "Cote d'Ivoire",
+  c_te_d_ivoire: "Cote d'Ivoire",
+  cote_divoire: "Cote d'Ivoire",
+  ivory_coast: "Cote d'Ivoire",
+  croatia: "Croatia",
+  cyprus: "Cyprus",
+  czech_republic: "Czech Republic",
+  czechia: "Czech Republic",
+  denmark: "Denmark",
+  djibouti: "Djibouti",
+  dominica: "Dominica",
+  dominican_republic: "Dominican Republic",
+  ecuador: "Ecuador",
+  egypt: "Egypt",
+  el_salvador: "El Salvador",
+  equatorial_guinea: "Equatorial Guinea",
+  eritrea: "Eritrea",
+  estonia: "Estonia",
+  eswatini: "Eswatini",
+  ethiopia: "Ethiopia",
+  fiji: "Fiji",
+  finland: "Finland",
+  gabon: "Gabon",
+  gambia: "Gambia",
+  georgia: "Georgia",
+  ghana: "Ghana",
+  grenada: "Grenada",
+  greece: "Greece",
+  guatemala: "Guatemala",
+  guinea: "Guinea",
+  guinea_bissau: "Guinea-Bissau",
+  guyana: "Guyana",
+  haiti: "Haiti",
+  honduras: "Honduras",
+  hungary: "Hungary",
+  iceland: "Iceland",
+  ireland: "Ireland",
+  israel: "Israel",
+  jordan: "Jordan",
+  kazakhstan: "Kazakhstan",
+  kenya: "Kenya",
+  kiribati: "Kiribati",
+  kosovo: "Kosovo",
+  ksa: "Saudi Arabia",
+  kuwait: "Kuwait",
+  kyrgyzstan: "Kyrgyzstan",
+  laos: "Laos",
+  latvia: "Latvia",
+  lebanon: "Lebanon",
+  lesotho: "Lesotho",
+  liberia: "Liberia",
+  libya: "Libya",
+  liechtenstein: "Liechtenstein",
+  lithuania: "Lithuania",
+  luxembourg: "Luxembourg",
+  macau: "Macau",
+  macao: "Macau",
+  morocco: "Morocco",
+  madagascar: "Madagascar",
+  malawi: "Malawi",
+  maldives: "Maldives",
+  mali: "Mali",
+  malta: "Malta",
+  mauritania: "Mauritania",
+  mauritius: "Mauritius",
+  moldova: "Moldova",
+  monaco: "Monaco",
+  mongolia: "Mongolia",
+  montenegro: "Montenegro",
+  mozambique: "Mozambique",
+  myanmar: "Myanmar",
+  namibia: "Namibia",
+  nauru: "Nauru",
+  nepal: "Nepal",
+  nicaragua: "Nicaragua",
+  niger: "Niger",
+  new_zealand: "New Zealand",
+  nigeria: "Nigeria",
+  north_macedonia: "North Macedonia",
+  norway: "Norway",
+  oman: "Oman",
+  pakistan: "Pakistan",
+  panama: "Panama",
+  paraguay: "Paraguay",
+  peru: "Peru",
+  philippines: "Philippines",
+  poland: "Poland",
+  qatar: "Qatar",
+  romania: "Romania",
+  rwanda: "Rwanda",
+  saint_kitts_and_nevis: "Saint Kitts and Nevis",
+  saint_lucia: "Saint Lucia",
+  saint_vincent_and_the_grenadines: "Saint Vincent and the Grenadines",
+  samoa: "Samoa",
+  san_marino: "San Marino",
+  sao_tome_and_principe: "Sao Tome and Principe",
+  senegal: "Senegal",
+  serbia: "Serbia",
+  seychelles: "Seychelles",
+  sierra_leone: "Sierra Leone",
+  slovakia: "Slovakia",
+  slovenia: "Slovenia",
+  solomon_islands: "Solomon Islands",
+  somalia: "Somalia",
+  south_africa: "South Africa",
+  south_sudan: "South Sudan",
+  sri_lanka: "Sri Lanka",
+  sudan: "Sudan",
+  suriname: "Suriname",
+  sweden: "Sweden",
+  switzerland: "Switzerland",
+  syria: "Syria",
+  taiwan: "Taiwan",
+  tajikistan: "Tajikistan",
+  tanzania: "Tanzania",
+  timor_leste: "Timor-Leste",
+  east_timor: "Timor-Leste",
+  togo: "Togo",
+  tonga: "Tonga",
+  trinidad_and_tobago: "Trinidad and Tobago",
+  tunisia: "Tunisia",
+  uganda: "Uganda",
+  ukraine: "Ukraine",
+  uruguay: "Uruguay",
+  uzbekistan: "Uzbekistan",
+  vanuatu: "Vanuatu",
+  venezuela: "Venezuela",
+  yemen: "Yemen",
+  zambia: "Zambia",
+  zimbabwe: "Zimbabwe",
   us: "United States",
   usa: "United States",
   u_s_a: "United States",
@@ -108,6 +342,7 @@ const COUNTRY_ALIASES: Record<string, string> = {
   br: "Brazil",
   mexico: "Mexico",
   mx: "Mexico",
+  u_a_e: "United Arab Emirates",
   uae: "United Arab Emirates",
   united_arab_emirates: "United Arab Emirates",
 };
@@ -150,33 +385,349 @@ const LOCATION_HINTS: Record<string, string> = {
 };
 
 const COUNTRY_COORDS: Record<string, { lat: number; lon: number }> = {
+  Afghanistan: { lat: 33.9, lon: 67.7 },
+  Albania: { lat: 41.2, lon: 20.2 },
+  Algeria: { lat: 28.0, lon: 1.7 },
+  Andorra: { lat: 42.5, lon: 1.6 },
+  Angola: { lat: -11.2, lon: 17.9 },
+  "Antigua and Barbuda": { lat: 17.1, lon: -61.8 },
+  Argentina: { lat: -38.4, lon: -63.6 },
+  Armenia: { lat: 40.1, lon: 45.0 },
+  Aruba: { lat: 12.5, lon: -69.9 },
+  Austria: { lat: 47.5, lon: 14.6 },
+  Azerbaijan: { lat: 40.1, lon: 47.6 },
+  Bahamas: { lat: 25.0, lon: -77.4 },
+  Bahrain: { lat: 26.1, lon: 50.6 },
+  Bangladesh: { lat: 23.7, lon: 90.4 },
+  Barbados: { lat: 13.2, lon: -59.5 },
+  Belarus: { lat: 53.7, lon: 27.9 },
+  Belgium: { lat: 50.5, lon: 4.5 },
+  Belize: { lat: 17.2, lon: -88.5 },
+  Benin: { lat: 9.3, lon: 2.3 },
+  Bhutan: { lat: 27.5, lon: 90.4 },
+  Bolivia: { lat: -16.3, lon: -63.6 },
+  "Bosnia and Herzegovina": { lat: 44.2, lon: 17.7 },
+  Botswana: { lat: -22.3, lon: 24.7 },
+  Brunei: { lat: 4.5, lon: 114.7 },
+  Bulgaria: { lat: 42.7, lon: 25.5 },
+  "Burkina Faso": { lat: 12.2, lon: -1.6 },
+  Burundi: { lat: -3.4, lon: 29.9 },
+  "Cape Verde": { lat: 16.0, lon: -24.0 },
+  Cambodia: { lat: 12.6, lon: 104.9 },
+  Cameroon: { lat: 7.4, lon: 12.4 },
+  "Central African Republic": { lat: 6.6, lon: 20.9 },
+  Chad: { lat: 15.5, lon: 18.7 },
   "United States": { lat: 39.8, lon: -98.6 },
   Canada: { lat: 56.1, lon: -106.3 },
   Mexico: { lat: 23.6, lon: -102.6 },
   Brazil: { lat: -14.2, lon: -51.9 },
+  Chile: { lat: -35.7, lon: -71.5 },
+  Colombia: { lat: 4.6, lon: -74.1 },
+  Comoros: { lat: -11.9, lon: 43.9 },
+  "Republic of the Congo": { lat: -0.2, lon: 15.8 },
+  "Democratic Republic of the Congo": { lat: -2.9, lon: 23.7 },
+  "Costa Rica": { lat: 9.7, lon: -84.2 },
+  "Cote d'Ivoire": { lat: 7.5, lon: -5.5 },
+  Croatia: { lat: 45.1, lon: 15.2 },
+  Cyprus: { lat: 35.1, lon: 33.4 },
+  "Czech Republic": { lat: 49.8, lon: 15.5 },
+  Denmark: { lat: 56.0, lon: 10.0 },
+  Djibouti: { lat: 11.8, lon: 42.6 },
+  Dominica: { lat: 15.4, lon: -61.4 },
+  "Dominican Republic": { lat: 18.7, lon: -70.2 },
+  Ecuador: { lat: -1.8, lon: -78.2 },
+  Egypt: { lat: 26.8, lon: 30.8 },
+  "El Salvador": { lat: 13.8, lon: -88.9 },
+  "Equatorial Guinea": { lat: 1.7, lon: 10.3 },
+  Eritrea: { lat: 15.2, lon: 39.8 },
+  Estonia: { lat: 58.6, lon: 25.0 },
+  Eswatini: { lat: -26.5, lon: 31.5 },
+  Ethiopia: { lat: 9.1, lon: 40.5 },
+  Fiji: { lat: -17.7, lon: 178.1 },
+  Finland: { lat: 61.9, lon: 25.7 },
+  Gabon: { lat: -0.8, lon: 11.6 },
+  Gambia: { lat: 13.4, lon: -15.3 },
   "United Kingdom": { lat: 55.4, lon: -3.4 },
   France: { lat: 46.2, lon: 2.2 },
   Germany: { lat: 51.2, lon: 10.5 },
+  Georgia: { lat: 42.3, lon: 43.4 },
+  Ghana: { lat: 7.9, lon: -1.0 },
+  Grenada: { lat: 12.1, lon: -61.7 },
+  Greece: { lat: 39.1, lon: 21.8 },
+  Guatemala: { lat: 15.8, lon: -90.2 },
+  Guinea: { lat: 9.9, lon: -9.7 },
+  "Guinea-Bissau": { lat: 11.8, lon: -15.2 },
+  Guyana: { lat: 4.9, lon: -58.9 },
+  Haiti: { lat: 19.0, lon: -72.3 },
+  Honduras: { lat: 15.2, lon: -86.2 },
+  Hungary: { lat: 47.2, lon: 19.5 },
+  Iceland: { lat: 64.9, lon: -19.0 },
+  Ireland: { lat: 53.4, lon: -8.2 },
   Italy: { lat: 41.9, lon: 12.6 },
   Spain: { lat: 40.5, lon: -3.7 },
+  Israel: { lat: 31.0, lon: 35.0 },
+  Jordan: { lat: 31.2, lon: 36.2 },
+  Kazakhstan: { lat: 48.0, lon: 67.0 },
+  Kenya: { lat: -0.1, lon: 37.9 },
+  Kiribati: { lat: 1.9, lon: -157.4 },
+  Kosovo: { lat: 42.6, lon: 20.9 },
+  Kuwait: { lat: 29.3, lon: 47.5 },
+  Kyrgyzstan: { lat: 41.2, lon: 74.8 },
+  Laos: { lat: 19.9, lon: 102.5 },
+  Latvia: { lat: 56.9, lon: 24.6 },
+  Lebanon: { lat: 33.9, lon: 35.9 },
+  Lesotho: { lat: -29.6, lon: 28.2 },
+  Liberia: { lat: 6.4, lon: -9.4 },
+  Libya: { lat: 26.3, lon: 17.2 },
+  Liechtenstein: { lat: 47.2, lon: 9.6 },
+  Lithuania: { lat: 55.2, lon: 23.9 },
+  Luxembourg: { lat: 49.8, lon: 6.1 },
   China: { lat: 35.9, lon: 104.2 },
   "Hong Kong": { lat: 22.3, lon: 114.2 },
+  Macau: { lat: 22.2, lon: 113.5 },
   Singapore: { lat: 1.35, lon: 103.8 },
   Japan: { lat: 36.2, lon: 138.3 },
   "South Korea": { lat: 36.5, lon: 127.8 },
   India: { lat: 20.6, lon: 78.9 },
   Indonesia: { lat: -2.5, lon: 118.0 },
   Malaysia: { lat: 4.2, lon: 102.0 },
+  Morocco: { lat: 31.8, lon: -7.1 },
+  Madagascar: { lat: -18.8, lon: 46.9 },
+  Malawi: { lat: -13.3, lon: 34.3 },
+  Maldives: { lat: 3.2, lon: 73.2 },
+  Mali: { lat: 17.6, lon: -3.9 },
+  Malta: { lat: 35.9, lon: 14.4 },
+  Mauritania: { lat: 21.0, lon: -10.9 },
+  Mauritius: { lat: -20.3, lon: 57.6 },
+  Moldova: { lat: 47.4, lon: 28.4 },
+  Monaco: { lat: 43.7, lon: 7.4 },
+  Mongolia: { lat: 46.9, lon: 103.8 },
+  Montenegro: { lat: 42.7, lon: 19.3 },
+  Mozambique: { lat: -18.7, lon: 35.5 },
+  Myanmar: { lat: 21.9, lon: 95.9 },
+  Namibia: { lat: -22.6, lon: 17.1 },
+  Nauru: { lat: -0.5, lon: 166.9 },
+  Nepal: { lat: 28.4, lon: 84.1 },
+  Nicaragua: { lat: 12.9, lon: -85.2 },
+  Niger: { lat: 17.6, lon: 8.1 },
   Netherlands: { lat: 52.1, lon: 5.3 },
+  "New Zealand": { lat: -40.9, lon: 174.9 },
+  Nigeria: { lat: 9.1, lon: 8.7 },
+  "North Macedonia": { lat: 41.6, lon: 21.7 },
+  Norway: { lat: 60.5, lon: 8.5 },
+  Oman: { lat: 21.5, lon: 55.9 },
+  Pakistan: { lat: 30.4, lon: 69.3 },
+  Panama: { lat: 8.5, lon: -80.8 },
+  Paraguay: { lat: -23.4, lon: -58.4 },
+  Peru: { lat: -9.2, lon: -75.0 },
+  Philippines: { lat: 12.9, lon: 121.8 },
+  Poland: { lat: 51.9, lon: 19.1 },
   Portugal: { lat: 39.4, lon: -8.2 },
+  Qatar: { lat: 25.4, lon: 51.2 },
+  Romania: { lat: 45.9, lon: 24.9 },
+  Rwanda: { lat: -1.9, lon: 29.9 },
+  "Saint Kitts and Nevis": { lat: 17.4, lon: -62.8 },
+  "Saint Lucia": { lat: 13.9, lon: -61.0 },
+  "Saint Vincent and the Grenadines": { lat: 13.3, lon: -61.2 },
+  Samoa: { lat: -13.8, lon: -172.1 },
+  "San Marino": { lat: 43.9, lon: 12.5 },
+  "Sao Tome and Principe": { lat: 0.2, lon: 6.6 },
   Russia: { lat: 61.5, lon: 105.3 },
   "Saudi Arabia": { lat: 23.9, lon: 45.1 },
+  Senegal: { lat: 14.5, lon: -14.5 },
+  Serbia: { lat: 44.0, lon: 20.8 },
+  Seychelles: { lat: -4.7, lon: 55.5 },
+  "Sierra Leone": { lat: 8.5, lon: -11.8 },
+  Slovakia: { lat: 48.7, lon: 19.7 },
+  Slovenia: { lat: 46.1, lon: 14.9 },
+  "Solomon Islands": { lat: -9.6, lon: 160.2 },
+  Somalia: { lat: 5.2, lon: 46.2 },
+  "South Africa": { lat: -30.6, lon: 22.9 },
+  "South Sudan": { lat: 6.9, lon: 31.3 },
+  "Sri Lanka": { lat: 7.9, lon: 80.8 },
+  Sudan: { lat: 12.9, lon: 30.2 },
+  Suriname: { lat: 4.1, lon: -56.0 },
+  Sweden: { lat: 60.1, lon: 18.6 },
+  Switzerland: { lat: 46.8, lon: 8.2 },
+  Syria: { lat: 34.8, lon: 38.9 },
+  Taiwan: { lat: 23.7, lon: 121.0 },
+  Tajikistan: { lat: 38.9, lon: 71.0 },
+  Tanzania: { lat: -6.4, lon: 34.9 },
+  "Timor-Leste": { lat: -8.9, lon: 125.7 },
+  Togo: { lat: 8.6, lon: 0.8 },
+  Tonga: { lat: -21.2, lon: -175.2 },
+  "Trinidad and Tobago": { lat: 10.7, lon: -61.2 },
+  Tuvalu: { lat: -7.1, lon: 177.7 },
   Thailand: { lat: 15.9, lon: 101.0 },
+  Tunisia: { lat: 34.0, lon: 9.5 },
   Turkey: { lat: 39.0, lon: 35.2 },
+  Uganda: { lat: 1.4, lon: 32.3 },
+  Ukraine: { lat: 48.4, lon: 31.2 },
+  Uruguay: { lat: -32.5, lon: -55.8 },
+  Uzbekistan: { lat: 41.4, lon: 64.6 },
+  Vanuatu: { lat: -15.4, lon: 166.9 },
+  Venezuela: { lat: 6.4, lon: -66.6 },
   Vietnam: { lat: 14.1, lon: 108.3 },
+  Yemen: { lat: 15.6, lon: 48.5 },
+  Zambia: { lat: -13.1, lon: 27.8 },
+  Zimbabwe: { lat: -19.0, lon: 29.2 },
   Australia: { lat: -25.3, lon: 133.8 },
   "United Arab Emirates": { lat: 24.0, lon: 54.0 },
   Unknown: { lat: -58, lon: 0 },
+};
+
+const ISO2_COUNTRY_ALIASES: Record<string, string> = {
+  ae: "United Arab Emirates",
+  af: "Afghanistan",
+  ag: "Antigua and Barbuda",
+  al: "Albania",
+  am: "Armenia",
+  ao: "Angola",
+  ar: "Argentina",
+  aw: "Aruba",
+  at: "Austria",
+  az: "Azerbaijan",
+  ba: "Bosnia and Herzegovina",
+  bb: "Barbados",
+  bd: "Bangladesh",
+  be: "Belgium",
+  bf: "Burkina Faso",
+  bg: "Bulgaria",
+  bh: "Bahrain",
+  bi: "Burundi",
+  bj: "Benin",
+  bn: "Brunei",
+  bo: "Bolivia",
+  bs: "Bahamas",
+  bt: "Bhutan",
+  bw: "Botswana",
+  bz: "Belize",
+  cd: "Democratic Republic of the Congo",
+  cf: "Central African Republic",
+  cg: "Republic of the Congo",
+  ch: "Switzerland",
+  ci: "Cote d'Ivoire",
+  cl: "Chile",
+  cm: "Cameroon",
+  co: "Colombia",
+  cv: "Cape Verde",
+  cr: "Costa Rica",
+  dj: "Djibouti",
+  dm: "Dominica",
+  cy: "Cyprus",
+  cz: "Czech Republic",
+  dk: "Denmark",
+  do: "Dominican Republic",
+  dz: "Algeria",
+  ec: "Ecuador",
+  ee: "Estonia",
+  eg: "Egypt",
+  er: "Eritrea",
+  sz: "Eswatini",
+  et: "Ethiopia",
+  fj: "Fiji",
+  ga: "Gabon",
+  gm: "Gambia",
+  fi: "Finland",
+  ge: "Georgia",
+  gh: "Ghana",
+  gn: "Guinea",
+  gq: "Equatorial Guinea",
+  gw: "Guinea-Bissau",
+  gy: "Guyana",
+  gr: "Greece",
+  gt: "Guatemala",
+  ht: "Haiti",
+  hn: "Honduras",
+  hr: "Croatia",
+  hu: "Hungary",
+  id: "Indonesia",
+  ie: "Ireland",
+  il: "Israel",
+  jo: "Jordan",
+  ke: "Kenya",
+  kg: "Kyrgyzstan",
+  kh: "Cambodia",
+  ki: "Kiribati",
+  kr: "South Korea",
+  kw: "Kuwait",
+  kz: "Kazakhstan",
+  la: "Laos",
+  lb: "Lebanon",
+  li: "Liechtenstein",
+  lr: "Liberia",
+  ls: "Lesotho",
+  ly: "Libya",
+  mc: "Monaco",
+  md: "Moldova",
+  mg: "Madagascar",
+  mk: "North Macedonia",
+  ml: "Mali",
+  mn: "Mongolia",
+  mt: "Malta",
+  mu: "Mauritius",
+  mv: "Maldives",
+  mw: "Malawi",
+  mz: "Mozambique",
+  na: "Namibia",
+  ne: "Niger",
+  ni: "Nicaragua",
+  lk: "Sri Lanka",
+  lt: "Lithuania",
+  lu: "Luxembourg",
+  lv: "Latvia",
+  ma: "Morocco",
+  mm: "Myanmar",
+  my: "Malaysia",
+  ng: "Nigeria",
+  nl: "Netherlands",
+  no: "Norway",
+  np: "Nepal",
+  nz: "New Zealand",
+  om: "Oman",
+  pa: "Panama",
+  pe: "Peru",
+  ph: "Philippines",
+  pk: "Pakistan",
+  pl: "Poland",
+  py: "Paraguay",
+  qa: "Qatar",
+  ro: "Romania",
+  rw: "Rwanda",
+  sb: "Solomon Islands",
+  sc: "Seychelles",
+  sd: "Sudan",
+  sl: "Sierra Leone",
+  sn: "Senegal",
+  so: "Somalia",
+  ss: "South Sudan",
+  st: "Sao Tome and Principe",
+  sr: "Suriname",
+  rs: "Serbia",
+  se: "Sweden",
+  si: "Slovenia",
+  sk: "Slovakia",
+  sy: "Syria",
+  tj: "Tajikistan",
+  tg: "Togo",
+  tl: "Timor-Leste",
+  tt: "Trinidad and Tobago",
+  tv: "Tuvalu",
+  tn: "Tunisia",
+  tw: "Taiwan",
+  tz: "Tanzania",
+  ua: "Ukraine",
+  ug: "Uganda",
+  uy: "Uruguay",
+  uz: "Uzbekistan",
+  vc: "Saint Vincent and the Grenadines",
+  ve: "Venezuela",
+  vu: "Vanuatu",
+  xk: "Kosovo",
+  ye: "Yemen",
+  zm: "Zambia",
+  zw: "Zimbabwe",
+  za: "South Africa",
 };
 
 const WORLD_MAP_SVG_URL = "https://upload.wikimedia.org/wikipedia/commons/5/51/BlankMap-Equirectangular.svg";
@@ -319,6 +870,7 @@ function rowToPublicLead(row: Record<string, string>): PublicLead | null {
     contacts: buildContactMethods(row),
     industry: pickCsv(row, ["industry", "category"]),
     location: pickCsv(row, ["location", "address", "city", "country"]),
+    country: normalizeCountryField(pickCsv(row, ["country"])),
     description: pickCsv(row, ["description", "notes", "note", "summary"]),
     score: pickCsv(row, ["score", "priority_score", "ai_score"]) ? clampScore(pickCsv(row, ["score", "priority_score", "ai_score"])) : undefined,
     intent: (pickCsv(row, ["intent"]) as PublicLead["intent"]) || undefined,
@@ -354,6 +906,12 @@ function normalizeCountry(value = "") {
   return COUNTRY_ALIASES[key] || COUNTRY_ALIASES[`${key}_country`] || trimmed.replace(/\s+/g, " ");
 }
 
+function normalizeCountryField(value = "") {
+  const key = countryKey(value);
+  if (!key) return "";
+  return COUNTRY_ALIASES[key] || ISO2_COUNTRY_ALIASES[key] || normalizeCountry(value);
+}
+
 function inferCountryFromLocation(location = "") {
   const parts = location
     .split(/[,|/]/)
@@ -364,6 +922,7 @@ function inferCountryFromLocation(location = "") {
     const key = countryKey(part);
     if (COUNTRY_COORDS[normalized] || COUNTRY_ALIASES[key]) return normalized;
     if (LOCATION_HINTS[key]) return LOCATION_HINTS[key];
+    if (ISO2_COUNTRY_ALIASES[key]) return ISO2_COUNTRY_ALIASES[key];
   }
   for (const part of parts) {
     const hint = LOCATION_HINTS[countryKey(part)];
@@ -373,11 +932,11 @@ function inferCountryFromLocation(location = "") {
 }
 
 function getCustomerCountry(customer: Customer) {
-  return normalizeCountry(customer.country || inferCountryFromLocation([customer.city, customer.province, customer.address].filter(Boolean).join(", "))) || "Unknown";
+  return normalizeCountryField(customer.country || "") || inferCountryFromLocation([customer.city, customer.province, customer.address].filter(Boolean).join(", ")) || "Unknown";
 }
 
 function getPublicLeadCountry(lead: PublicLead) {
-  return inferCountryFromLocation(lead.location || "") || "Unknown";
+  return normalizeCountryField(lead.country || "") || inferCountryFromLocation(lead.location || "") || "Unknown";
 }
 
 function projectCountryPoint(country: string) {
@@ -647,24 +1206,12 @@ function CustomerFormView({
               className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
             />
             <datalist id="country-list">
-              <option value="United States" />
-              <option value="Canada" />
-              <option value="United Kingdom" />
-              <option value="Australia" />
-              <option value="Germany" />
-              <option value="France" />
-              <option value="Japan" />
-              <option value="China" />
-              <option value="India" />
-              <option value="Brazil" />
-              <option value="Mexico" />
-              <option value="South Africa" />
-              <option value="Spain" />
-              <option value="Italy" />
-              <option value="Netherlands" />
-              <option value="New Zealand" />
-              <option value="Singapore" />
-              <option value="United Arab Emirates" />
+              {Object.keys(COUNTRY_COORDS)
+                .filter((country) => country !== "Unknown")
+                .sort((a, b) => a.localeCompare(b))
+                .map((country) => (
+                  <option key={country} value={country} />
+                ))}
             </datalist>
           </div>
           <div>
@@ -1431,6 +1978,7 @@ export default function Customers() {
                               {c.contact}
                             </span>
                           )}
+                          {!isModalOpen && <CustomerContactActions customer={c} compact />}
                         </div>
                       </td>
                       {!isModalOpen && (

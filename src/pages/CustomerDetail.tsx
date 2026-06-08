@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Clock,
@@ -15,8 +15,9 @@ import {
   Loader2,
   Send,
   Edit2,
+  MessageCircle,
+  Phone,
 } from "lucide-react";
-import { Link } from "react-router-dom";
 import { useLanguage } from "../i18n";
 import {
   getCustomer,
@@ -50,6 +51,41 @@ type TimelineItem = {
   event: string;
   type: "ai" | "action" | "comm";
 };
+
+function contactTypeKey(type = "") {
+  return type.trim().toLowerCase();
+}
+
+function looksLikeEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function inboxComposeHref(channel: "email" | "whatsapp", to: string, customerId?: string, subject?: string) {
+  const params = new URLSearchParams({ compose: channel, to });
+  if (customerId) params.set("customerId", customerId);
+  if (subject) params.set("subject", subject);
+  return `/inbox?${params.toString()}`;
+}
+
+function getEmailContact(customer: Customer) {
+  const explicit = customer.contacts?.find((contact) => contactTypeKey(contact.type) === "email" && looksLikeEmail(contact.value))?.value;
+  if (explicit) return explicit;
+  return looksLikeEmail(customer.contact) ? customer.contact : "";
+}
+
+function getWhatsAppContact(customer: Customer) {
+  const explicit = customer.contacts?.find((contact) => contactTypeKey(contact.type) === "whatsapp" && contact.value.trim())?.value;
+  if (explicit) return explicit;
+  return customer.contacts?.find((contact) => ["mobile", "phone"].includes(contactTypeKey(contact.type)) && contact.value.trim())?.value || "";
+}
+
+function contactIcon(type = "") {
+  const key = contactTypeKey(type);
+  if (key === "email") return <Mail className="w-4 h-4 shrink-0" />;
+  if (key === "whatsapp") return <MessageCircle className="w-4 h-4 shrink-0" />;
+  if (["mobile", "phone"].includes(key)) return <Phone className="w-4 h-4 shrink-0" />;
+  return <Briefcase className="w-4 h-4 shrink-0" />;
+}
 
 export default function CustomerDetail() {
   const { id } = useParams();
@@ -342,12 +378,24 @@ export default function CustomerDetail() {
                   key={i}
                   className="flex items-center gap-1 ml-2 border-l border-slate-300 dark:border-white/10 pl-2"
                 >
-                  {c.type === "Email" ? (
-                    <Mail className="w-4 h-4 shrink-0" />
+                  {contactIcon(c.type)}
+                  {contactTypeKey(c.type) === "email" && looksLikeEmail(c.value) ? (
+                    <Link
+                      to={inboxComposeHref("email", c.value, id, `Hello ${customer.name}`)}
+                      className="hover:text-blue-600 dark:hover:text-blue-300 underline-offset-2 hover:underline"
+                    >
+                      {c.value}
+                    </Link>
+                  ) : contactTypeKey(c.type) === "whatsapp" ? (
+                    <Link
+                      to={inboxComposeHref("whatsapp", c.value, id)}
+                      className="hover:text-emerald-600 dark:hover:text-emerald-300 underline-offset-2 hover:underline"
+                    >
+                      {c.value}
+                    </Link>
                   ) : (
-                    <Briefcase className="w-4 h-4 shrink-0" />
+                    <span>{c.value}</span>
                   )}
-                  <span>{c.value}</span>
                 </span>
               ))}
             </p>
@@ -492,6 +540,59 @@ export default function CustomerDetail() {
 
           {/* Right Column: Key Details & Pending Agent Actions */}
           <div className="space-y-6">
+            <div className="bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 rounded-2xl p-6">
+              <h2 className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">
+                Contact Methods
+              </h2>
+              <div className="space-y-3">
+                {getWhatsAppContact(customer) && (
+                  <Link
+                    to={inboxComposeHref("whatsapp", getWhatsAppContact(customer), id)}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <MessageCircle className="h-4 w-4 shrink-0" />
+                      <span>WhatsApp</span>
+                    </span>
+                    <span className="min-w-0 truncate text-xs font-medium opacity-80">
+                      {getWhatsAppContact(customer)}
+                    </span>
+                  </Link>
+                )}
+                {getEmailContact(customer) && (
+                  <Link
+                    to={inboxComposeHref("email", getEmailContact(customer), id, `Hello ${customer.name}`)}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Mail className="h-4 w-4 shrink-0" />
+                      <span>Email</span>
+                    </span>
+                    <span className="min-w-0 truncate text-xs font-medium opacity-80">
+                      {getEmailContact(customer)}
+                    </span>
+                  </Link>
+                )}
+                {(customer.contacts || []).filter((contact) => !["email", "whatsapp"].includes(contactTypeKey(contact.type))).map((contact) => (
+                  <div
+                    key={contact.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
+                  >
+                    <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      {contactIcon(contact.type)}
+                      {contact.type}
+                    </span>
+                    <span className="min-w-0 truncate text-xs">{contact.value}</span>
+                  </div>
+                ))}
+                {!getWhatsAppContact(customer) && !getEmailContact(customer) && !(customer.contacts || []).length && (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    No contact methods saved yet.
+                  </p>
+                )}
+              </div>
+            </div>
+
             {/* Agent Approval Queue */}
             {hasPendingDraft && (
               <div className="bg-white dark:bg-white/5 shadow-sm dark:shadow-none border border-slate-200 dark:border-white/10 rounded-2xl p-6">

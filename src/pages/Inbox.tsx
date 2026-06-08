@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Inbox as InboxTray,
   Mail,
@@ -417,6 +417,7 @@ function WhatsAppAttachmentView({ attachment }: { attachment: Attachment }) {
 
 export default function Inbox() {
   const { t, language } = useLanguage();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [waClients, setWaClients] = useState<WaClient[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>("");
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
@@ -452,6 +453,7 @@ export default function Inbox() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inboxRefreshInFlightRef = useRef(false);
+  const composeParamsHandledRef = useRef("");
 
   const handleAIGenerateSubject = () => {
     if (!stripHtml(composeBody)) {
@@ -980,6 +982,34 @@ export default function Inbox() {
       events.close();
     };
   }, []);
+
+  useEffect(() => {
+    const compose = (searchParams.get("compose") || "").toLowerCase();
+    const to = (searchParams.get("to") || "").trim();
+    if (!to || !["email", "whatsapp"].includes(compose)) {
+      if (!searchParams.toString()) composeParamsHandledRef.current = "";
+      return;
+    }
+
+    const key = searchParams.toString();
+    if (composeParamsHandledRef.current === key) return;
+    composeParamsHandledRef.current = key;
+
+    const channel = compose === "whatsapp" ? "WhatsApp" : "Email";
+    resetCompose(channel);
+    setComposeMode("new");
+    setComposeChannel(channel);
+    setComposeTo([to]);
+    setComposeWhatsAppChatId(channel === "WhatsApp" ? to : "");
+    setComposeSubject(channel === "Email" ? searchParams.get("subject") || "" : "");
+    if (channel === "Email") applySignatureForRecipient(to);
+    setActiveTab("compose");
+    setSelectedMailbox("inbox");
+
+    const nextParams = new URLSearchParams(searchParams);
+    ["compose", "to", "subject", "customerId"].forEach((param) => nextParams.delete(param));
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const activeMessage =
     messages.find((m) => m.id === activeMessageId) || messages[0] || null;

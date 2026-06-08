@@ -281,6 +281,7 @@ export interface PublicLead {
   contacts?: Contact[];
   industry?: string;
   location?: string;
+  country?: string;
   description?: string;
   score?: number;
   risk?: "Low" | "Medium" | "High";
