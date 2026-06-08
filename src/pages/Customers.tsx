@@ -33,7 +33,9 @@ import {
   loadPublicLeadsFromServer,
   PublicLead,
   savePublicLeads,
+  deletePublicLeads,
   claimLead,
+  getCurrentUser,
 } from "../services/db";
 
 const CONTACT_TYPES = [
@@ -917,6 +919,8 @@ function CountryMapView({
 export default function Customers() {
   const { t } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
+  const currentUser = getCurrentUser();
+  const canBulkDeletePublicPool = ["admin", "superadmin"].includes(currentUser.role);
 
   const [activeTab, setActiveTab] = useState<"my-customers" | "public-pool">(
     "my-customers",
@@ -936,6 +940,8 @@ export default function Customers() {
   const [deletingCustomerId, setDeletingCustomerId] = useState<string | null>(
     null,
   );
+  const [selectedPublicLeadIds, setSelectedPublicLeadIds] = useState<string[]>([]);
+  const [isBulkDeletePublicLeadsOpen, setIsBulkDeletePublicLeadsOpen] = useState(false);
 
   useServerCollectionSync([
     {
@@ -963,6 +969,11 @@ export default function Customers() {
       setSearchParams({});
     }
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const leadIds = new Set(publicLeads.map((lead) => lead.id));
+    setSelectedPublicLeadIds((current) => current.filter((id) => leadIds.has(id)));
+  }, [publicLeads]);
 
   const handleAdd = () => {
     setEditingCustomer(null);
@@ -1155,6 +1166,37 @@ export default function Customers() {
       ? getCountryStats(customers, getCustomerCountry)
       : getCountryStats(publicLeads, getPublicLeadCountry);
 
+  const visiblePublicLeadIds = filteredPublicLeads.map((lead) => lead.id);
+  const selectedVisiblePublicLeadIds = selectedPublicLeadIds.filter((id) => visiblePublicLeadIds.includes(id));
+  const isAllVisiblePublicLeadsSelected =
+    visiblePublicLeadIds.length > 0 && selectedVisiblePublicLeadIds.length === visiblePublicLeadIds.length;
+
+  const togglePublicLeadSelection = (leadId: string) => {
+    setSelectedPublicLeadIds((current) =>
+      current.includes(leadId)
+        ? current.filter((id) => id !== leadId)
+        : [...current, leadId],
+    );
+  };
+
+  const toggleAllVisiblePublicLeads = () => {
+    setSelectedPublicLeadIds((current) => {
+      const visibleIds = new Set(visiblePublicLeadIds);
+      if (isAllVisiblePublicLeadsSelected) {
+        return current.filter((id) => !visibleIds.has(id));
+      }
+      return Array.from(new Set([...current, ...visiblePublicLeadIds]));
+    });
+  };
+
+  const confirmBulkDeletePublicLeads = () => {
+    if (!canBulkDeletePublicPool || selectedPublicLeadIds.length === 0) return;
+    deletePublicLeads(selectedPublicLeadIds);
+    setPublicLeads(getPublicLeads());
+    setSelectedPublicLeadIds([]);
+    notify("Selected public leads have been deleted.", "success", "Public Pool updated");
+  };
+
   const selectCountryOnMap = (country: string) => {
     setCountryFilter(country);
     setViewMode("list");
@@ -1177,6 +1219,7 @@ export default function Customers() {
               onClick={() => {
                 setActiveTab("my-customers");
                 setCountryFilter("");
+                setSelectedPublicLeadIds([]);
               }}
               className={cn(
                 "px-4 py-1.5 text-sm font-medium rounded-md transition-all",
@@ -1207,6 +1250,16 @@ export default function Customers() {
               )}
             </button>
           </div>
+          {!isModalOpen && activeTab === "public-pool" && canBulkDeletePublicPool && selectedPublicLeadIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsBulkDeletePublicLeadsOpen(true)}
+              className="border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20 rounded-lg flex items-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete Selected ({selectedPublicLeadIds.length})
+            </button>
+          )}
           {!isModalOpen && (
             <button
               onClick={() => openImport(activeTab)}
@@ -1493,6 +1546,17 @@ export default function Customers() {
               <table className="w-full text-left text-sm whitespace-nowrap">
                 <thead className="bg-white dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
                   <tr>
+                    {canBulkDeletePublicPool && (
+                      <th className="px-6 py-4 w-12">
+                        <input
+                          type="checkbox"
+                          checked={isAllVisiblePublicLeadsSelected}
+                          onChange={toggleAllVisiblePublicLeads}
+                          aria-label="Select all visible public leads"
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                      </th>
+                    )}
                     <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500">
                       Lead Info
                     </th>
@@ -1516,6 +1580,17 @@ export default function Customers() {
                         key={lead.id}
                         className="hover:bg-white/[0.04] transition-colors"
                       >
+                        {canBulkDeletePublicPool && (
+                          <td className="px-6 py-4">
+                            <input
+                              type="checkbox"
+                              checked={selectedPublicLeadIds.includes(lead.id)}
+                              onChange={() => togglePublicLeadSelection(lead.id)}
+                              aria-label={`Select ${lead.name}`}
+                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                          </td>
+                        )}
                         <td className="px-6 py-4">
                           <div className="flex flex-col gap-1">
                             <span className="font-medium text-slate-900 dark:text-white">
@@ -1588,7 +1663,7 @@ export default function Customers() {
                   {filteredPublicLeads.length === 0 && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={canBulkDeletePublicPool ? 6 : 5}
                         className="px-6 py-12 text-center text-slate-500"
                       >
                         {publicLeads.length === 0
@@ -1730,6 +1805,14 @@ export default function Customers() {
           message="Are you sure you want to delete this customer? All their associated data will be removed. This action cannot be undone."
           onConfirm={confirmDelete}
           onCancel={() => setDeletingCustomerId(null)}
+        />
+        <ConfirmModal
+          isOpen={isBulkDeletePublicLeadsOpen}
+          title="Delete Public Pool Leads"
+          message={`Delete ${selectedPublicLeadIds.length} selected public lead(s)? This action cannot be undone.`}
+          confirmText="Delete Leads"
+          onConfirm={confirmBulkDeletePublicLeads}
+          onCancel={() => setIsBulkDeletePublicLeadsOpen(false)}
         />
       </div>
     </div>

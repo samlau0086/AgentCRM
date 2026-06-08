@@ -318,6 +318,13 @@ export function deletePublicLead(id: string) {
   deleteRecordFromServer("crm_public_leads", id);
 }
 
+export function deletePublicLeads(ids: string[]) {
+  const idSet = new Set(ids);
+  if (idSet.size === 0) return;
+  savePublicLeads(getPublicLeads().filter((lead) => !idSet.has(lead.id)));
+  ids.forEach((id) => deleteRecordFromServer("crm_public_leads", id));
+}
+
 export function claimLead(leadId: string, userId: string) {
   const leads = getPublicLeads();
   const leadIndex = leads.findIndex((l) => l.id === leadId);
