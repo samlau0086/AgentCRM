@@ -292,22 +292,11 @@ export interface PublicLead {
   enrichedAt?: string;
 }
 
-function isDemoPublicLead(lead: PublicLead) {
-  const text = [lead.id, lead.name, lead.contact, lead.source, lead.description]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  return /\b(mock|demo|sample|test|fake|placeholder)\b/.test(text) || text.includes("techflow solutions");
-}
-
 export function getPublicLeads(): PublicLead[] {
   try {
     const data = localStorage.getItem("crm_public_leads");
     if (data) {
-      const parsed = JSON.parse(data) as PublicLead[];
-      const realLeads = parsed.filter((lead) => !isDemoPublicLead(lead));
-      if (realLeads.length !== parsed.length) savePublicLeads(realLeads);
-      return realLeads;
+      return JSON.parse(data) as PublicLead[];
     }
   } catch (e) {}
 
@@ -318,8 +307,9 @@ export function getPublicLeads(): PublicLead[] {
 
 export function savePublicLeads(leads: PublicLead[]) {
   localStorage.setItem("crm_public_leads", JSON.stringify(leads));
-  persistRecordList("crm_public_leads", leads);
+  const savePromise = persistRecordList("crm_public_leads", leads);
   notifyDataChanged("crm_public_leads");
+  return savePromise;
 }
 
 export function deletePublicLead(id: string) {
@@ -456,8 +446,9 @@ export function getCustomers(): Customer[] {
 
 export function saveCustomers(customers: Customer[]) {
   localStorage.setItem("crm_customers", JSON.stringify(customers));
-  persistRecordList("crm_customers", customers);
+  const savePromise = persistRecordList("crm_customers", customers);
   notifyDataChanged("crm_customers");
+  return savePromise;
 }
 
 // ----------------------------------------------------------------------

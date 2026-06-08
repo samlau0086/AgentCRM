@@ -997,7 +997,7 @@ export default function Customers() {
     }
   };
 
-  const confirmCsvImport = () => {
+  const confirmCsvImport = async () => {
     if (!importPreview) return;
 
     if (importTarget === "my-customers") {
@@ -1010,8 +1010,8 @@ export default function Customers() {
         existingKeys.add(key);
         return true;
       });
-      saveCustomers([...unique, ...existing]);
-      setCustomers(getCustomers());
+      await saveCustomers([...unique, ...existing]);
+      setCustomers(await loadCustomersFromServer());
       notify(`Imported ${unique.length} customer(s). ${imported.length - unique.length} duplicate row(s) skipped.`, "success", "CSV import complete");
     } else {
       const imported = importPreview.rows.map(rowToPublicLead).filter(Boolean) as PublicLead[];
@@ -1023,8 +1023,8 @@ export default function Customers() {
         existingKeys.add(key);
         return true;
       });
-      savePublicLeads([...unique, ...existing]);
-      setPublicLeads(getPublicLeads());
+      await savePublicLeads([...unique, ...existing]);
+      setPublicLeads(await loadPublicLeadsFromServer());
       notify(`Imported ${unique.length} public lead(s). ${imported.length - unique.length} duplicate row(s) skipped.`, "success", "CSV import complete");
     }
 
