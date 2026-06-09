@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Tag, Receipt, Search, Edit2, Trash2, X, Save, Check, Image as ImageIcon } from 'lucide-react';
+import { Plus, Tag, Receipt, Search, Edit2, Trash2, X, Save, Check, Image as ImageIcon, Upload, Loader2 } from 'lucide-react';
 import { cn } from '../Layout';
 import { useLanguage } from '../i18n';
 import MediaLibraryModal from '../components/MediaLibraryModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { notify } from '../services/notifications';
 import {
-  Product, getProducts, addProduct, updateProduct, deleteProduct,
+  Product, getProducts, addProduct, updateProduct, deleteProduct, saveProducts,
   Quote, getQuotes, addQuote, updateQuote, deleteQuote,
   getCustomers, Customer
 } from '../services/db';
+
+type WooImportProduct = Omit<Product, 'id'> & {
+  source: 'woocommerce';
+  sourceId: string;
+  sourceUrl?: string;
+};
 
 export default function Sales() {
   const { t } = useLanguage();
@@ -23,6 +29,17 @@ export default function Sales() {
   // Modals for Create/Edit
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
+  const [isWooImportOpen, setIsWooImportOpen] = useState(false);
+  const [isWooImporting, setIsWooImporting] = useState(false);
+  const [wooImportConfig, setWooImportConfig] = useState({
+    siteUrl: '',
+    consumerKey: '',
+    consumerSecret: '',
+    perPage: 50,
+    pages: 3,
+    status: 'publish',
+    currency: 'USD',
+  });
 
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
   const [editingQuote, setEditingQuote] = useState<Partial<Quote> | null>(null);
@@ -129,6 +146,62 @@ export default function Sales() {
     }
   };
 
+  const importWooCommerceProducts = async () => {
+    setIsWooImporting(true);
+    try {
+      const response = await fetch('/api/integrations/woocommerce/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(wooImportConfig),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `WooCommerce import failed with HTTP ${response.status}.`);
+      }
+
+      const imported = (Array.isArray(data.products) ? data.products : []) as WooImportProduct[];
+      const existing = getProducts();
+      const productsByKey = new Map<string, Product>();
+      existing.forEach((product) => {
+        const key = product.source === 'woocommerce' && product.sourceId
+          ? `woo:${product.sourceId}`
+          : product.sku
+            ? `sku:${product.sku.toLowerCase()}`
+            : `id:${product.id}`;
+        productsByKey.set(key, product);
+      });
+
+      let created = 0;
+      let updated = 0;
+      imported.forEach((product) => {
+        const skuKey = product.sku ? `sku:${product.sku.toLowerCase()}` : '';
+        const wooKey = `woo:${product.sourceId}`;
+        const existingProduct = productsByKey.get(wooKey) || (skuKey ? productsByKey.get(skuKey) : undefined);
+        const nextProduct: Product = {
+          ...(existingProduct || {}),
+          ...product,
+          id: existingProduct?.id || `prod_woo_${product.sourceId}`,
+          price: product.pricingTiers?.[0]?.unitPrice || product.price || 0,
+        };
+        productsByKey.set(wooKey, nextProduct);
+        if (skuKey) productsByKey.set(skuKey, nextProduct);
+        if (existingProduct) updated += 1;
+        else created += 1;
+      });
+
+      const merged = Array.from(new Map(Array.from(productsByKey.values()).map((product) => [product.id, product])).values())
+        .sort((a, b) => a.name.localeCompare(b.name));
+      await saveProducts(merged);
+      setProducts(getProducts());
+      setIsWooImportOpen(false);
+      notify(`Imported ${created} new product(s), updated ${updated} existing product(s).`, 'success', 'WooCommerce import complete');
+    } catch (err: any) {
+      notify(err.message || 'Failed to import WooCommerce products.', 'error', 'WooCommerce import failed');
+    } finally {
+      setIsWooImporting(false);
+    }
+  };
+
   const handleSaveQuote = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingQuote) return;
@@ -191,6 +264,16 @@ export default function Sales() {
               <Receipt className="w-4 h-4" /> Quotes
             </button>
           </div>
+          {activeTab === 'products' && (
+            <button
+              type="button"
+              onClick={() => setIsWooImportOpen(true)}
+              className="border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-semibold text-purple-700 shadow-sm transition-colors hover:bg-purple-100 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-300 dark:hover:bg-purple-500/20 rounded-lg flex items-center gap-2"
+            >
+              <Upload className="w-4 h-4" />
+              Import WooCommerce
+            </button>
+          )}
           <button 
             onClick={() => {
                if (activeTab === 'products') {
@@ -254,6 +337,11 @@ export default function Sales() {
                          )}
                          <div>
                            <span className="font-medium text-slate-900 dark:text-white">{product.name}</span>
+                           {product.source === 'woocommerce' && (
+                             <span className="ml-2 rounded bg-purple-50 px-1.5 py-0.5 text-[9px] font-semibold text-purple-600 dark:bg-purple-500/10 dark:text-purple-300">
+                               WooCommerce
+                             </span>
+                           )}
                            <p className="text-xs text-slate-500 truncate max-w-[200px] mt-0.5">{product.description}</p>
                          </div>
                        </div>
@@ -339,6 +427,123 @@ export default function Sales() {
            )}
          </div>
       </div>
+
+      {isWooImportOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-white/10">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-800 dark:text-white">Import WordPress + WooCommerce Products</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Uses WooCommerce REST API v3. Create a read-only REST API key in WordPress admin first.
+                </p>
+              </div>
+              <button onClick={() => setIsWooImportOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">WordPress Site URL</label>
+                <input
+                  type="url"
+                  placeholder="https://example.com"
+                  value={wooImportConfig.siteUrl}
+                  onChange={e => setWooImportConfig({ ...wooImportConfig, siteUrl: e.target.value })}
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Consumer Key</label>
+                  <input
+                    type="password"
+                    value={wooImportConfig.consumerKey}
+                    onChange={e => setWooImportConfig({ ...wooImportConfig, consumerKey: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Consumer Secret</label>
+                  <input
+                    type="password"
+                    value={wooImportConfig.consumerSecret}
+                    onChange={e => setWooImportConfig({ ...wooImportConfig, consumerSecret: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Status</label>
+                  <select
+                    value={wooImportConfig.status}
+                    onChange={e => setWooImportConfig({ ...wooImportConfig, status: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                  >
+                    <option value="publish">Published</option>
+                    <option value="private">Private</option>
+                    <option value="draft">Draft</option>
+                    <option value="any">Any</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Per Page</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={wooImportConfig.perPage}
+                    onChange={e => setWooImportConfig({ ...wooImportConfig, perPage: parseInt(e.target.value) || 50 })}
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Pages</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={wooImportConfig.pages}
+                    onChange={e => setWooImportConfig({ ...wooImportConfig, pages: parseInt(e.target.value) || 3 })}
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Currency</label>
+                  <input
+                    type="text"
+                    value={wooImportConfig.currency}
+                    onChange={e => setWooImportConfig({ ...wooImportConfig, currency: e.target.value.toUpperCase() })}
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
+                Imported products update existing CRM products when WooCommerce ID or SKU matches. WooCommerce sale price is used first, then current price, then regular price.
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 p-6 dark:border-white/10 dark:bg-black/20">
+              <button
+                type="button"
+                onClick={() => setIsWooImportOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={importWooCommerceProducts}
+                disabled={isWooImporting || !wooImportConfig.siteUrl || !wooImportConfig.consumerKey || !wooImportConfig.consumerSecret}
+                className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isWooImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {isWooImporting ? 'Importing...' : 'Import Products'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isProductModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4 animate-in fade-in duration-200">

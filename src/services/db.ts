@@ -473,6 +473,9 @@ export interface Product {
   currency: string;
   status: "Active" | "Inactive";
   image?: string;
+  source?: "manual" | "woocommerce";
+  sourceId?: string;
+  sourceUrl?: string;
 }
 
 export function getProducts(): Product[] {
@@ -488,8 +491,9 @@ export function getProducts(): Product[] {
 
 export function saveProducts(products: Product[]) {
   localStorage.setItem("crm_products", JSON.stringify(products));
-  persistRecordList("crm_products", products);
+  const savePromise = persistRecordList("crm_products", products);
   notifyDataChanged("crm_products");
+  return savePromise;
 }
 
 export function addProduct(product: Omit<Product, "id">) {

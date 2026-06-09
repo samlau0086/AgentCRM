@@ -577,6 +577,98 @@ crudRoutes("email_send_profiles", "/api/email/send-profiles");
 crudRoutes("email_signatures", "/api/email/signatures");
 crudRoutes("email_mappings", "/api/email/mappings");
 
+function cleanWooText(value = "") {
+  return String(value || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseWooPrice(product: any) {
+  const raw = product.sale_price || product.price || product.regular_price || "0";
+  const parsed = Number(String(raw).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+app.post("/api/integrations/woocommerce/products", async (req, res) => {
+  const {
+    siteUrl = "",
+    consumerKey = "",
+    consumerSecret = "",
+    perPage = 50,
+    pages = 3,
+    status = "any",
+  } = req.body || {};
+  const baseUrl = String(siteUrl || "").trim().replace(/\/+$/, "");
+  const key = String(consumerKey || "").trim();
+  const secret = String(consumerSecret || "").trim();
+  if (!baseUrl || !key || !secret) {
+    res.status(400).json({ error: "WordPress site URL, Consumer Key, and Consumer Secret are required." });
+    return;
+  }
+
+  try {
+    const imported: any[] = [];
+    const safePerPage = Math.max(1, Math.min(Number(perPage) || 50, 100));
+    const safePages = Math.max(1, Math.min(Number(pages) || 3, 10));
+    const auth = Buffer.from(`${key}:${secret}`).toString("base64");
+
+    for (let page = 1; page <= safePages; page += 1) {
+      const params = new URLSearchParams({
+        per_page: String(safePerPage),
+        page: String(page),
+        orderby: "date",
+        order: "desc",
+      });
+      if (status && status !== "any") params.set("status", String(status));
+      const response = await fetch(`${baseUrl}/wp-json/wc/v3/products?${params.toString()}`, {
+        headers: {
+          Authorization: `Basic ${auth}`,
+          Accept: "application/json",
+        },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = data?.message || data?.error || `WooCommerce returned HTTP ${response.status}.`;
+        throw new Error(String(message));
+      }
+      if (!Array.isArray(data) || data.length === 0) break;
+      imported.push(...data);
+      if (data.length < safePerPage) break;
+    }
+
+    const products = imported.map((product) => {
+      const price = parseWooPrice(product);
+      const sku = String(product.sku || `woo-${product.id}`);
+      return {
+        name: String(product.name || sku),
+        description: cleanWooText(product.short_description || product.description || ""),
+        sku,
+        price,
+        pricingTiers: [{ minQty: 1, unitPrice: price }],
+        currency: String(product.currency || req.body.currency || "USD"),
+        status: product.status === "publish" || product.status === "private" ? "Active" : "Inactive",
+        image: product.images?.[0]?.src || "",
+        source: "woocommerce",
+        sourceId: String(product.id),
+        sourceUrl: product.permalink || `${baseUrl}/?p=${product.id}`,
+      };
+    });
+
+    res.json({ products, count: products.length });
+  } catch (err: any) {
+    res.status(500).json({ error: `WooCommerce import failed: ${err.message}` });
+  }
+});
+
 const inboxEventClients = new Set<express.Response>();
 
 function broadcastInboxEvent(payload: unknown) {
