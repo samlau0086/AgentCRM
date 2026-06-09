@@ -1870,11 +1870,12 @@ export default function Customers() {
     });
   };
 
-  const confirmBulkDeletePublicLeads = () => {
+  const confirmBulkDeletePublicLeads = async () => {
     if (!canBulkDeletePublicPool || selectedPublicLeadIds.length === 0) return;
-    deletePublicLeads(selectedPublicLeadIds);
-    setPublicLeads(getPublicLeads());
+    await deletePublicLeads(selectedPublicLeadIds);
+    setPublicLeads(await loadPublicLeadsFromServer());
     setSelectedPublicLeadIds([]);
+    setIsBulkDeletePublicLeadsOpen(false);
     notify("Selected public leads have been deleted.", "success", "Public Pool updated");
   };
 

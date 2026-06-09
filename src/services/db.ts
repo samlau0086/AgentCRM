@@ -327,17 +327,17 @@ export function savePublicLeads(leads: PublicLead[]) {
   return savePromise;
 }
 
-export function deletePublicLead(id: string) {
+export async function deletePublicLead(id: string) {
   const leads = getPublicLeads();
-  savePublicLeads(leads.filter((l) => l.id !== id));
-  deleteRecordFromServer("crm_public_leads", id);
+  await savePublicLeads(leads.filter((l) => l.id !== id));
+  await deleteRecordFromServer("crm_public_leads", id);
 }
 
-export function deletePublicLeads(ids: string[]) {
+export async function deletePublicLeads(ids: string[]) {
   const idSet = new Set(ids);
   if (idSet.size === 0) return;
-  savePublicLeads(getPublicLeads().filter((lead) => !idSet.has(lead.id)));
-  ids.forEach((id) => deleteRecordFromServer("crm_public_leads", id));
+  await savePublicLeads(getPublicLeads().filter((lead) => !idSet.has(lead.id)));
+  await Promise.all(ids.map((id) => deleteRecordFromServer("crm_public_leads", id)));
 }
 
 export function claimLead(leadId: string, userId: string) {
