@@ -485,13 +485,28 @@ export function getProducts(): Product[] {
   } catch (e) {}
 
   const initial: Product[] = [];
-  saveProducts(initial);
+  localStorage.setItem("crm_products", JSON.stringify(initial));
   return initial;
+}
+
+export async function loadProductsFromServer() {
+  const products = await loadRecordListFromServer<Product>("crm_products");
+  if (!products) return getProducts();
+  if (products.length === 0) {
+    const cached = getProducts();
+    const migrationResponse = await fetch("/api/app/settings/crm_data_migrated_to_server").catch(() => null);
+    if (migrationResponse?.status === 404 && cached.length > 0) {
+      await replaceRecordListOnServer("crm_products", cached);
+      return cached;
+    }
+  }
+  cacheRecordList("crm_products", products);
+  return products;
 }
 
 export function saveProducts(products: Product[]) {
   localStorage.setItem("crm_products", JSON.stringify(products));
-  const savePromise = persistRecordList("crm_products", products);
+  const savePromise = replaceRecordListOnServer("crm_products", products);
   notifyDataChanged("crm_products");
   return savePromise;
 }
@@ -502,7 +517,7 @@ export function addProduct(product: Omit<Product, "id">) {
     ...product,
     id: `prod_${Math.random().toString(36).substr(2, 9)}`,
   });
-  saveProducts(products);
+  return saveProducts(products);
 }
 
 export function updateProduct(id: string, updates: Partial<Product>) {
@@ -510,13 +525,13 @@ export function updateProduct(id: string, updates: Partial<Product>) {
   const index = products.findIndex((p) => p.id === id);
   if (index !== -1) {
     products[index] = { ...products[index], ...updates };
-    saveProducts(products);
+    return saveProducts(products);
   }
+  return Promise.resolve();
 }
 
 export function deleteProduct(id: string) {
-  saveProducts(getProducts().filter((p) => p.id !== id));
-  deleteRecordFromServer("crm_products", id);
+  return saveProducts(getProducts().filter((p) => p.id !== id));
 }
 
 // ----------------------------------------------------------------------

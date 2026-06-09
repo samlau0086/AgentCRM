@@ -6,7 +6,7 @@ import MediaLibraryModal from '../components/MediaLibraryModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { notify } from '../services/notifications';
 import {
-  Product, getProducts, addProduct, updateProduct, deleteProduct, saveProducts,
+  Product, getProducts, loadProductsFromServer, addProduct, updateProduct, deleteProduct, saveProducts,
   Quote, getQuotes, addQuote, updateQuote, deleteQuote,
   getCustomers, Customer
 } from '../services/db';
@@ -48,14 +48,26 @@ export default function Sales() {
   // Deletion modals
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [deletingQuoteId, setDeletingQuoteId] = useState<string | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [isBulkDeleteProductsOpen, setIsBulkDeleteProductsOpen] = useState(false);
 
   // Media picker modal
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
 
   useEffect(() => {
-    setProducts(getProducts());
+    let cancelled = false;
+    loadProductsFromServer()
+      .then((serverProducts) => {
+        if (!cancelled) setProducts(serverProducts);
+      })
+      .catch(() => {
+        if (!cancelled) setProducts(getProducts());
+      });
     setQuotes(getQuotes());
     setCustomers(getCustomers());
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const calculateQuoteTotals = (quote: Partial<Quote>) => {
@@ -106,20 +118,20 @@ export default function Sales() {
     setEditingQuote({ ...editingQuote, items: newItems });
   };
 
-  const handleSaveProduct = (e: React.FormEvent) => {
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct) return;
     
     if (editingProduct.id) {
       const pricingTiers = normalizePricingTiers(editingProduct);
-      updateProduct(editingProduct.id, {
+      await updateProduct(editingProduct.id, {
         ...editingProduct,
         price: pricingTiers[0]?.unitPrice || editingProduct.price || 0,
         pricingTiers,
       });
     } else {
       const pricingTiers = normalizePricingTiers(editingProduct);
-      addProduct({
+      await addProduct({
         name: editingProduct.name || '',
         description: editingProduct.description || '',
         sku: editingProduct.sku || '',
@@ -130,7 +142,7 @@ export default function Sales() {
         image: editingProduct.image
       });
     }
-    setProducts(getProducts());
+    setProducts(await loadProductsFromServer());
     setIsProductModalOpen(false);
     setEditingProduct(null);
   };
@@ -139,12 +151,23 @@ export default function Sales() {
     setDeletingProductId(id);
   };
 
-  const confirmDeleteProduct = () => {
+  const confirmDeleteProduct = async () => {
     if (deletingProductId) {
-      deleteProduct(deletingProductId);
-      setProducts(getProducts());
+      await deleteProduct(deletingProductId);
+      setProducts(await loadProductsFromServer());
+      setSelectedProductIds((ids) => ids.filter((id) => id !== deletingProductId));
       setDeletingProductId(null);
     }
+  };
+
+  const confirmBulkDeleteProducts = async () => {
+    const selected = new Set(selectedProductIds);
+    const remainingProducts = getProducts().filter((product) => !selected.has(product.id));
+    await saveProducts(remainingProducts);
+    setProducts(await loadProductsFromServer());
+    setSelectedProductIds([]);
+    setIsBulkDeleteProductsOpen(false);
+    notify(`Deleted ${selected.size} product(s).`, 'success', 'Products deleted');
   };
 
   const importWooCommerceProducts = async () => {
@@ -248,6 +271,22 @@ export default function Sales() {
     }
   };
 
+  const filteredProducts = products.filter(
+    (product) =>
+      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      product.sku.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
+  const visibleProductIds = filteredProducts.map((product) => product.id);
+  const selectedVisibleProductIds = visibleProductIds.filter((id) => selectedProductIds.includes(id));
+  const areAllVisibleProductsSelected = visibleProductIds.length > 0 && selectedVisibleProductIds.length === visibleProductIds.length;
+  const toggleVisibleProducts = () => {
+    if (areAllVisibleProductsSelected) {
+      setSelectedProductIds((ids) => ids.filter((id) => !visibleProductIds.includes(id)));
+      return;
+    }
+    setSelectedProductIds((ids) => Array.from(new Set([...ids, ...visibleProductIds])));
+  };
+
   return (
     <div className="p-4 md:p-8 h-full flex flex-col gap-6 w-full">
       <div className="flex flex-col gap-6 md:flex-row md:items-center justify-between shrink-0">
@@ -305,15 +344,32 @@ export default function Sales() {
       <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-2xl overflow-hidden shadow-sm">
          {/* Search Bar */}
          <div className="p-4 border-b border-slate-200 dark:border-white/10 shrink-0">
-           <div className="relative max-w-md">
-             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-             <input
-               type="text"
-               placeholder={`Search ${activeTab}...`}
-               value={searchQuery}
-               onChange={e => setSearchQuery(e.target.value)}
-               className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg text-sm focus:outline-none focus:border-blue-500 text-slate-900 dark:text-white"
-             />
+           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+             <div className="relative max-w-md flex-1">
+               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+               <input
+                 type="text"
+                 placeholder={`Search ${activeTab}...`}
+                 value={searchQuery}
+                 onChange={e => setSearchQuery(e.target.value)}
+                 className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg text-sm focus:outline-none focus:border-blue-500 text-slate-900 dark:text-white"
+               />
+             </div>
+             {activeTab === 'products' && selectedProductIds.length > 0 && (
+               <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 dark:border-red-500/20 dark:bg-red-500/10">
+                 <span className="text-sm font-medium text-red-700 dark:text-red-300">
+                   {selectedProductIds.length} selected
+                 </span>
+                 <button
+                   type="button"
+                   onClick={() => setIsBulkDeleteProductsOpen(true)}
+                   className="inline-flex items-center gap-2 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-500"
+                 >
+                   <Trash2 className="h-3.5 w-3.5" />
+                   Delete Selected
+                 </button>
+               </div>
+             )}
            </div>
          </div>
 
@@ -322,6 +378,15 @@ export default function Sales() {
              <table className="w-full text-left text-sm whitespace-nowrap">
                <thead className="bg-slate-50 dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
                  <tr>
+                   <th className="w-12 px-6 py-4">
+                     <input
+                       type="checkbox"
+                       checked={areAllVisibleProductsSelected}
+                       onChange={toggleVisibleProducts}
+                       aria-label="Select all visible products"
+                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-white/20 dark:bg-black/40"
+                     />
+                   </th>
                    <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-500">Product Name</th>
                    <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-500">SKU</th>
                    <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-500">Price</th>
@@ -330,8 +395,23 @@ export default function Sales() {
                  </tr>
                </thead>
                <tbody className="divide-y divide-slate-200 dark:divide-white/5">
-                 {products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.sku.toLowerCase().includes(searchQuery.toLowerCase())).map(product => (
+                 {filteredProducts.map(product => (
                    <tr key={product.id} className="hover:bg-slate-50/50 dark:hover:bg-white/[0.02] transition-colors">
+                     <td className="px-6 py-4">
+                       <input
+                         type="checkbox"
+                         checked={selectedProductIds.includes(product.id)}
+                         onChange={() => {
+                           setSelectedProductIds((ids) =>
+                             ids.includes(product.id)
+                               ? ids.filter((id) => id !== product.id)
+                               : [...ids, product.id],
+                           );
+                         }}
+                         aria-label={`Select ${product.name}`}
+                         className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-white/20 dark:bg-black/40"
+                       />
+                     </td>
                      <td className="px-6 py-4">
                        <div className="flex items-center gap-3">
                          {product.image ? (
@@ -378,6 +458,13 @@ export default function Sales() {
                      </td>
                    </tr>
                  ))}
+                 {filteredProducts.length === 0 && (
+                   <tr>
+                     <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                       No products found.
+                     </td>
+                   </tr>
+                 )}
                </tbody>
              </table>
            ) : (
@@ -928,6 +1015,14 @@ export default function Sales() {
         message="Are you sure you want to delete this product? This action cannot be undone."
         onConfirm={confirmDeleteProduct}
         onCancel={() => setDeletingProductId(null)}
+      />
+
+      <ConfirmModal
+        isOpen={isBulkDeleteProductsOpen}
+        title="Delete Selected Products"
+        message={`Are you sure you want to delete ${selectedProductIds.length} selected product(s)? This action cannot be undone.`}
+        onConfirm={confirmBulkDeleteProducts}
+        onCancel={() => setIsBulkDeleteProductsOpen(false)}
       />
 
       <ConfirmModal
