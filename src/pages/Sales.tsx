@@ -17,6 +17,85 @@ type WooImportProduct = Omit<Product, 'id'> & {
   sourceUrl?: string;
 };
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+
+function clampPage(page: number, totalItems: number, pageSize: number) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  return Math.min(Math.max(1, page), totalPages);
+}
+
+function paginateItems<T>(items: T[], page: number, pageSize: number) {
+  const safePage = clampPage(page, items.length, pageSize);
+  const start = (safePage - 1) * pageSize;
+  return {
+    page: safePage,
+    totalPages: Math.max(1, Math.ceil(items.length / pageSize)),
+    start,
+    end: Math.min(start + pageSize, items.length),
+    items: items.slice(start, start + pageSize),
+  };
+}
+
+function PaginationBar({
+  page,
+  totalItems,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = clampPage(page, totalItems, pageSize);
+  const start = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(safePage * pageSize, totalItems);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-black/20 dark:text-slate-300 md:flex-row md:items-center md:justify-between">
+      <div>
+        Showing <span className="font-semibold">{start}</span>-<span className="font-semibold">{end}</span> of{' '}
+        <span className="font-semibold">{totalItems}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={pageSize}
+          onChange={(event) => onPageSizeChange(Number(event.target.value))}
+          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/40"
+        >
+          {PAGE_SIZE_OPTIONS.map((size) => (
+            <option key={size} value={size}>
+              {size} / page
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => onPageChange(safePage - 1)}
+          disabled={safePage <= 1}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+        >
+          Previous
+        </button>
+        <span className="min-w-20 text-center text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {safePage} / {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(safePage + 1)}
+          disabled={safePage >= totalPages}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Sales() {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'products' | 'quotes'>('products');
@@ -25,6 +104,8 @@ export default function Sales() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [productPage, setProductPage] = useState(1);
+  const [productPageSize, setProductPageSize] = useState(50);
 
   // Modals for Create/Edit
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -69,6 +150,10 @@ export default function Sales() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    setProductPage(1);
+  }, [searchQuery]);
 
   const calculateQuoteTotals = (quote: Partial<Quote>) => {
     const items = quote.items || [];
@@ -276,7 +361,9 @@ export default function Sales() {
       product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       product.sku.toLowerCase().includes(searchQuery.toLowerCase()),
   );
-  const visibleProductIds = filteredProducts.map((product) => product.id);
+  const productPagination = paginateItems(filteredProducts, productPage, productPageSize);
+  const pagedProducts = productPagination.items;
+  const visibleProductIds = pagedProducts.map((product) => product.id);
   const selectedVisibleProductIds = visibleProductIds.filter((id) => selectedProductIds.includes(id));
   const areAllVisibleProductsSelected = visibleProductIds.length > 0 && selectedVisibleProductIds.length === visibleProductIds.length;
   const toggleVisibleProducts = () => {
@@ -375,8 +462,9 @@ export default function Sales() {
 
          <div className="overflow-auto flex-1">
            {activeTab === 'products' ? (
-             <table className="w-full text-left text-sm whitespace-nowrap">
-               <thead className="bg-slate-50 dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
+             <div className="flex min-h-full flex-col">
+               <table className="w-full text-left text-sm whitespace-nowrap">
+                 <thead className="bg-slate-50 dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
                  <tr>
                    <th className="w-12 px-6 py-4">
                      <input
@@ -393,9 +481,9 @@ export default function Sales() {
                    <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-500">Status</th>
                    <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-500 text-right">Actions</th>
                  </tr>
-               </thead>
-               <tbody className="divide-y divide-slate-200 dark:divide-white/5">
-                 {filteredProducts.map(product => (
+                 </thead>
+                 <tbody className="divide-y divide-slate-200 dark:divide-white/5">
+                 {pagedProducts.map(product => (
                    <tr key={product.id} className="hover:bg-slate-50/50 dark:hover:bg-white/[0.02] transition-colors">
                      <td className="px-6 py-4">
                        <input
@@ -465,8 +553,19 @@ export default function Sales() {
                      </td>
                    </tr>
                  )}
-               </tbody>
-             </table>
+                 </tbody>
+               </table>
+               <PaginationBar
+                 page={productPagination.page}
+                 totalItems={filteredProducts.length}
+                 pageSize={productPageSize}
+                 onPageChange={setProductPage}
+                 onPageSizeChange={(size) => {
+                   setProductPageSize(size);
+                   setProductPage(1);
+                 }}
+               />
+             </div>
            ) : (
              <table className="w-full text-left text-sm whitespace-nowrap">
                <thead className="bg-slate-50 dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">

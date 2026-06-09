@@ -88,8 +88,8 @@ async function replaceRecordListOnServer(key: string, records: Array<{ id: strin
 
 function deleteRecordFromServer(key: string, id: string) {
   const route = SERVER_COLLECTIONS[key];
-  if (!route || typeof fetch === "undefined") return;
-  fetch(`${route}/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(console.error);
+  if (!route || typeof fetch === "undefined") return Promise.resolve();
+  return fetch(`${route}/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(console.error);
 }
 
 async function clearRecordListFromServer(key: string) {
@@ -655,6 +655,12 @@ export function deleteCustomer(id: string) {
   const customers = getCustomers();
   saveCustomers(customers.filter((c) => c.id !== id));
   deleteRecordFromServer("crm_customers", id);
+}
+
+export async function deleteCustomers(ids: string[]) {
+  const idSet = new Set(ids);
+  await saveCustomers(getCustomers().filter((customer) => !idSet.has(customer.id)));
+  await Promise.all(ids.map((id) => deleteRecordFromServer("crm_customers", id)));
 }
 
 export interface Agent {

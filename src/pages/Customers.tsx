@@ -27,6 +27,7 @@ import {
   getCustomers,
   saveCustomers,
   deleteCustomer,
+  deleteCustomers,
   addCustomer,
   updateCustomer,
   Customer,
@@ -53,6 +54,8 @@ const CONTACT_TYPES = [
 type CsvImportTarget = "my-customers" | "public-pool";
 type CustomerViewMode = "list" | "map";
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+
 type CsvImportPreview = {
   fileName: string;
   headers: string[];
@@ -65,6 +68,83 @@ type CountryStat = {
   x: number;
   y: number;
 };
+
+function clampPage(page: number, totalItems: number, pageSize: number) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  return Math.min(Math.max(1, page), totalPages);
+}
+
+function paginateItems<T>(items: T[], page: number, pageSize: number) {
+  const safePage = clampPage(page, items.length, pageSize);
+  const start = (safePage - 1) * pageSize;
+  return {
+    page: safePage,
+    totalPages: Math.max(1, Math.ceil(items.length / pageSize)),
+    start,
+    end: Math.min(start + pageSize, items.length),
+    items: items.slice(start, start + pageSize),
+  };
+}
+
+function PaginationBar({
+  page,
+  totalItems,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = clampPage(page, totalItems, pageSize);
+  const start = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(safePage * pageSize, totalItems);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-black/20 dark:text-slate-300 md:flex-row md:items-center md:justify-between">
+      <div>
+        Showing <span className="font-semibold">{start}</span>-<span className="font-semibold">{end}</span> of{" "}
+        <span className="font-semibold">{totalItems}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={pageSize}
+          onChange={(event) => onPageSizeChange(Number(event.target.value))}
+          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/40"
+        >
+          {PAGE_SIZE_OPTIONS.map((size) => (
+            <option key={size} value={size}>
+              {size} / page
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => onPageChange(safePage - 1)}
+          disabled={safePage <= 1}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+        >
+          Previous
+        </button>
+        <span className="min-w-20 text-center text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {safePage} / {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(safePage + 1)}
+          disabled={safePage >= totalPages}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function contactTypeKey(type = "") {
   return type.trim().toLowerCase();
@@ -1477,6 +1557,10 @@ export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<CustomerViewMode>("list");
   const [countryFilter, setCountryFilter] = useState("");
+  const [customerPage, setCustomerPage] = useState(1);
+  const [publicLeadPage, setPublicLeadPage] = useState(1);
+  const [customerPageSize, setCustomerPageSize] = useState(50);
+  const [publicLeadPageSize, setPublicLeadPageSize] = useState(50);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -1487,6 +1571,8 @@ export default function Customers() {
   const [deletingCustomerId, setDeletingCustomerId] = useState<string | null>(
     null,
   );
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
+  const [isBulkDeleteCustomersOpen, setIsBulkDeleteCustomersOpen] = useState(false);
   const [selectedPublicLeadIds, setSelectedPublicLeadIds] = useState<string[]>([]);
   const [isBulkDeletePublicLeadsOpen, setIsBulkDeletePublicLeadsOpen] = useState(false);
 
@@ -1518,9 +1604,19 @@ export default function Customers() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
+    const customerIds = new Set(customers.map((customer) => customer.id));
+    setSelectedCustomerIds((current) => current.filter((id) => customerIds.has(id)));
+  }, [customers]);
+
+  useEffect(() => {
     const leadIds = new Set(publicLeads.map((lead) => lead.id));
     setSelectedPublicLeadIds((current) => current.filter((id) => leadIds.has(id)));
   }, [publicLeads]);
+
+  useEffect(() => {
+    setCustomerPage(1);
+    setPublicLeadPage(1);
+  }, [searchQuery, countryFilter]);
 
   const handleAdd = () => {
     setEditingCustomer(null);
@@ -1669,8 +1765,18 @@ export default function Customers() {
     if (deletingCustomerId) {
       deleteCustomer(deletingCustomerId);
       setCustomers(getCustomers());
+      setSelectedCustomerIds((current) => current.filter((id) => id !== deletingCustomerId));
       setDeletingCustomerId(null);
     }
+  };
+
+  const confirmBulkDeleteCustomers = async () => {
+    if (selectedCustomerIds.length === 0) return;
+    await deleteCustomers(selectedCustomerIds);
+    setCustomers(await loadCustomersFromServer());
+    notify(`Deleted ${selectedCustomerIds.length} customer(s).`, "success", "Customers updated");
+    setSelectedCustomerIds([]);
+    setIsBulkDeleteCustomersOpen(false);
   };
 
   const handleSaveCustomer = (newCustomer: Customer) => {
@@ -1713,7 +1819,35 @@ export default function Customers() {
       ? getCountryStats(customers, getCustomerCountry)
       : getCountryStats(publicLeads, getPublicLeadCountry);
 
-  const visiblePublicLeadIds = filteredPublicLeads.map((lead) => lead.id);
+  const customerPagination = paginateItems(filteredCustomers, customerPage, customerPageSize);
+  const publicLeadPagination = paginateItems(filteredPublicLeads, publicLeadPage, publicLeadPageSize);
+  const pagedCustomers = customerPagination.items;
+  const pagedPublicLeads = publicLeadPagination.items;
+
+  const visibleCustomerIds = pagedCustomers.map((customer) => customer.id);
+  const selectedVisibleCustomerIds = selectedCustomerIds.filter((id) => visibleCustomerIds.includes(id));
+  const isAllVisibleCustomersSelected =
+    visibleCustomerIds.length > 0 && selectedVisibleCustomerIds.length === visibleCustomerIds.length;
+
+  const toggleCustomerSelection = (customerId: string) => {
+    setSelectedCustomerIds((current) =>
+      current.includes(customerId)
+        ? current.filter((id) => id !== customerId)
+        : [...current, customerId],
+    );
+  };
+
+  const toggleAllVisibleCustomers = () => {
+    setSelectedCustomerIds((current) => {
+      const visibleIds = new Set(visibleCustomerIds);
+      if (isAllVisibleCustomersSelected) {
+        return current.filter((id) => !visibleIds.has(id));
+      }
+      return Array.from(new Set([...current, ...visibleCustomerIds]));
+    });
+  };
+
+  const visiblePublicLeadIds = pagedPublicLeads.map((lead) => lead.id);
   const selectedVisiblePublicLeadIds = selectedPublicLeadIds.filter((id) => visiblePublicLeadIds.includes(id));
   const isAllVisiblePublicLeadsSelected =
     visiblePublicLeadIds.length > 0 && selectedVisiblePublicLeadIds.length === visiblePublicLeadIds.length;
@@ -1766,6 +1900,7 @@ export default function Customers() {
               onClick={() => {
                 setActiveTab("my-customers");
                 setCountryFilter("");
+                setCustomerPage(1);
                 setSelectedPublicLeadIds([]);
               }}
               className={cn(
@@ -1781,6 +1916,8 @@ export default function Customers() {
               onClick={() => {
                 setActiveTab("public-pool");
                 setCountryFilter("");
+                setPublicLeadPage(1);
+                setSelectedCustomerIds([]);
               }}
               className={cn(
                 "px-4 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2",
@@ -1797,6 +1934,16 @@ export default function Customers() {
               )}
             </button>
           </div>
+          {!isModalOpen && activeTab === "my-customers" && selectedCustomerIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsBulkDeleteCustomersOpen(true)}
+              className="border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20 rounded-lg flex items-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete Selected ({selectedCustomerIds.length})
+            </button>
+          )}
           {!isModalOpen && activeTab === "public-pool" && canBulkDeletePublicPool && selectedPublicLeadIds.length > 0 && (
             <button
               type="button"
@@ -1908,9 +2055,21 @@ export default function Customers() {
                 emptyText={activeTab === "my-customers" ? "No customer country data yet." : "No public lead location data yet."}
               />
             ) : activeTab === "my-customers" ? (
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="bg-white dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
+              <div className="flex min-h-full flex-col">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="bg-white dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
                   <tr>
+                    {!isModalOpen && (
+                      <th className="px-6 py-4 w-12">
+                        <input
+                          type="checkbox"
+                          checked={isAllVisibleCustomersSelected}
+                          onChange={toggleAllVisibleCustomers}
+                          aria-label="Select all visible customers"
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                      </th>
+                    )}
                     <th className="px-6 py-4 text-[10px] font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500">
                       {t("cust.table.company")}
                     </th>
@@ -1936,7 +2095,7 @@ export default function Customers() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredCustomers.map((c) => (
+                  {pagedCustomers.map((c) => (
                     <tr
                       key={c.id}
                       className={cn(
@@ -1947,6 +2106,21 @@ export default function Customers() {
                       )}
                       onClick={() => isModalOpen && handleEdit(c)}
                     >
+                      {!isModalOpen && (
+                        <td className="px-6 py-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedCustomerIds.includes(c.id)}
+                            onChange={(event) => {
+                              event.stopPropagation();
+                              toggleCustomerSelection(c.id);
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label={`Select ${c.name}`}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                        </td>
+                      )}
                       <td className="px-6 py-4">
                         <div className="flex flex-col gap-1">
                           {!isModalOpen ? (
@@ -2079,7 +2253,7 @@ export default function Customers() {
                   {filteredCustomers.length === 0 && (
                     <tr>
                       <td
-                        colSpan={isModalOpen ? 1 : 6}
+                        colSpan={isModalOpen ? 1 : 7}
                         className="px-6 py-12 text-center text-slate-500"
                       >
                         {customers.length === 0
@@ -2088,11 +2262,25 @@ export default function Customers() {
                       </td>
                     </tr>
                   )}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+                {!isModalOpen && (
+                  <PaginationBar
+                    page={customerPagination.page}
+                    totalItems={filteredCustomers.length}
+                    pageSize={customerPageSize}
+                    onPageChange={setCustomerPage}
+                    onPageSizeChange={(size) => {
+                      setCustomerPageSize(size);
+                      setCustomerPage(1);
+                    }}
+                  />
+                )}
+              </div>
             ) : (
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="bg-white dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
+              <div className="flex min-h-full flex-col">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="bg-white dark:bg-black/40 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10">
                   <tr>
                     {canBulkDeletePublicPool && (
                       <th className="px-6 py-4 w-12">
@@ -2123,7 +2311,7 @@ export default function Customers() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredPublicLeads.map((lead) => (
+                  {pagedPublicLeads.map((lead) => (
                       <tr
                         key={lead.id}
                         className="hover:bg-white/[0.04] transition-colors"
@@ -2220,8 +2408,19 @@ export default function Customers() {
                       </td>
                     </tr>
                   )}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+                <PaginationBar
+                  page={publicLeadPagination.page}
+                  totalItems={filteredPublicLeads.length}
+                  pageSize={publicLeadPageSize}
+                  onPageChange={setPublicLeadPage}
+                  onPageSizeChange={(size) => {
+                    setPublicLeadPageSize(size);
+                    setPublicLeadPage(1);
+                  }}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -2353,6 +2552,14 @@ export default function Customers() {
           message="Are you sure you want to delete this customer? All their associated data will be removed. This action cannot be undone."
           onConfirm={confirmDelete}
           onCancel={() => setDeletingCustomerId(null)}
+        />
+        <ConfirmModal
+          isOpen={isBulkDeleteCustomersOpen}
+          title="Delete Customers"
+          message={`Delete ${selectedCustomerIds.length} selected customer(s)? This action cannot be undone.`}
+          confirmText="Delete Customers"
+          onConfirm={confirmBulkDeleteCustomers}
+          onCancel={() => setIsBulkDeleteCustomersOpen(false)}
         />
         <ConfirmModal
           isOpen={isBulkDeletePublicLeadsOpen}
