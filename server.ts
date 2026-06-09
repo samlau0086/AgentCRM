@@ -157,6 +157,18 @@ async function deleteRecord(entity: string, id: string) {
   });
 }
 
+async function deleteRecords(entity: string, ids: string[]) {
+  const safeIds = ids.map((id) => String(id || "").trim()).filter(Boolean);
+  if (safeIds.length === 0) return 0;
+  return withDb(async (client) => {
+    const result = await client.query(
+      "DELETE FROM crm_records WHERE entity = $1 AND id = ANY($2::text[])",
+      [entity, safeIds],
+    );
+    return result.rowCount || 0;
+  });
+}
+
 async function initDB() {
   if (!hasDatabase) {
     console.warn("DATABASE_URL/PG_VECTOR_URL is not configured. DB APIs will return 503.");
@@ -541,6 +553,21 @@ function crudRoutes(entity: string, route: string) {
     try {
       await upsertRecord(entity, req.params.id, data);
       res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post(`${route}/bulk-delete`, async (req, res) => {
+    if (!requireDatabase(res)) return;
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (ids.length === 0) {
+      res.status(400).json({ error: "ids must be a non-empty array." });
+      return;
+    }
+    try {
+      const deleted = await deleteRecords(entity, ids);
+      res.json({ success: true, deleted });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

@@ -92,6 +92,19 @@ function deleteRecordFromServer(key: string, id: string) {
   return fetch(`${route}/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(console.error);
 }
 
+async function deleteRecordsFromServer(key: string, ids: string[]) {
+  const route = SERVER_COLLECTIONS[key];
+  if (!route || typeof fetch === "undefined" || ids.length === 0) return;
+  const response = await fetch(`${route}/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to delete ${key}: HTTP ${response.status}`);
+  }
+}
+
 async function clearRecordListFromServer(key: string) {
   const records = await loadRecordListFromServer<Array<{ id: string }>[number]>(key);
   if (!records) return;
@@ -359,8 +372,10 @@ export async function deletePublicLead(id: string) {
 export async function deletePublicLeads(ids: string[]) {
   const idSet = new Set(ids);
   if (idSet.size === 0) return;
-  await savePublicLeads(getPublicLeads().filter((lead) => !idSet.has(lead.id)));
-  await Promise.all(ids.map((id) => deleteRecordFromServer("crm_public_leads", id)));
+  const nextLeads = getPublicLeads().filter((lead) => !idSet.has(lead.id));
+  localStorage.setItem("crm_public_leads", JSON.stringify(nextLeads));
+  notifyDataChanged("crm_public_leads");
+  await deleteRecordsFromServer("crm_public_leads", ids);
 }
 
 export function claimLead(leadId: string, userId: string) {
@@ -684,8 +699,11 @@ export function deleteCustomer(id: string) {
 
 export async function deleteCustomers(ids: string[]) {
   const idSet = new Set(ids);
-  await saveCustomers(getCustomers().filter((customer) => !idSet.has(customer.id)));
-  await Promise.all(ids.map((id) => deleteRecordFromServer("crm_customers", id)));
+  if (idSet.size === 0) return;
+  const nextCustomers = getCustomers().filter((customer) => !idSet.has(customer.id));
+  localStorage.setItem("crm_customers", JSON.stringify(nextCustomers));
+  notifyDataChanged("crm_customers");
+  await deleteRecordsFromServer("crm_customers", ids);
 }
 
 export interface Agent {
