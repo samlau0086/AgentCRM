@@ -57,6 +57,8 @@ type CustomerViewMode = "list" | "map";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 const PUBLIC_POOL_IMPORT_BATCH_SIZE = 100;
+const PUBLIC_POOL_IMPORT_MAX_RETRIES = 3;
+const PUBLIC_POOL_IMPORT_RETRY_DELAY_MS = 1000;
 
 type CsvImportPreview = {
   fileName: string;
@@ -79,12 +81,20 @@ type CsvImportProgress = {
   totalBatches: number;
   imported: number;
   skipped: number;
+  failed: number;
+  retry: number;
   label: string;
 };
 
 function waitForPaint() {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, 0);
+  });
+}
+
+function waitMs(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
   });
 }
 
@@ -1707,46 +1717,102 @@ export default function Customers() {
         totalBatches,
         imported: 0,
         skipped,
+        failed: 0,
+        retry: 0,
         label: "Preparing Public Pool import...",
       });
       await waitForPaint();
 
-      try {
-        for (let start = 0; start < unique.length; start += PUBLIC_POOL_IMPORT_BATCH_SIZE) {
-          const batch = unique.slice(start, start + PUBLIC_POOL_IMPORT_BATCH_SIZE);
-          const batchNumber = Math.floor(start / PUBLIC_POOL_IMPORT_BATCH_SIZE) + 1;
+      let importedCount = 0;
+      let failedCount = 0;
+      let retryCount = 0;
+
+      for (let start = 0; start < unique.length; start += PUBLIC_POOL_IMPORT_BATCH_SIZE) {
+        const batch = unique.slice(start, start + PUBLIC_POOL_IMPORT_BATCH_SIZE);
+        const batchNumber = Math.floor(start / PUBLIC_POOL_IMPORT_BATCH_SIZE) + 1;
+        let saved = false;
+
+        for (let attempt = 1; attempt <= PUBLIC_POOL_IMPORT_MAX_RETRIES && !saved; attempt += 1) {
           setImportProgress({
             active: true,
-            processed: start,
+            processed: importedCount + failedCount,
             total: unique.length,
             batch: batchNumber,
             totalBatches,
-            imported: start,
+            imported: importedCount,
             skipped,
-            label: `Importing batch ${batchNumber} of ${totalBatches}...`,
+            failed: failedCount,
+            retry: retryCount,
+            label:
+              attempt === 1
+                ? `Importing batch ${batchNumber} of ${totalBatches}...`
+                : `Retrying batch ${batchNumber} of ${totalBatches}, attempt ${attempt} of ${PUBLIC_POOL_IMPORT_MAX_RETRIES}...`,
           });
           await waitForPaint();
-          await upsertPublicLeadsBatch(batch);
-          setImportProgress({
-            active: true,
-            processed: Math.min(start + batch.length, unique.length),
-            total: unique.length,
-            batch: batchNumber,
-            totalBatches,
-            imported: Math.min(start + batch.length, unique.length),
-            skipped,
-            label: `Imported batch ${batchNumber} of ${totalBatches}.`,
-          });
-          await waitForPaint();
+
+          try {
+            await upsertPublicLeadsBatch(batch);
+            importedCount += batch.length;
+            saved = true;
+            setImportProgress({
+              active: true,
+              processed: importedCount + failedCount,
+              total: unique.length,
+              batch: batchNumber,
+              totalBatches,
+              imported: importedCount,
+              skipped,
+              failed: failedCount,
+              retry: retryCount,
+              label: `Imported batch ${batchNumber} of ${totalBatches}.`,
+            });
+            await waitForPaint();
+          } catch (err) {
+            retryCount += 1;
+            if (attempt < PUBLIC_POOL_IMPORT_MAX_RETRIES) {
+              setImportProgress({
+                active: true,
+                processed: importedCount + failedCount,
+                total: unique.length,
+                batch: batchNumber,
+                totalBatches,
+                imported: importedCount,
+                skipped,
+                failed: failedCount,
+                retry: retryCount,
+                label: `Batch ${batchNumber} failed. Retrying in ${PUBLIC_POOL_IMPORT_RETRY_DELAY_MS / 1000}s...`,
+              });
+              await waitForPaint();
+              await waitMs(PUBLIC_POOL_IMPORT_RETRY_DELAY_MS);
+            } else {
+              failedCount += batch.length;
+              setImportProgress({
+                active: true,
+                processed: importedCount + failedCount,
+                total: unique.length,
+                batch: batchNumber,
+                totalBatches,
+                imported: importedCount,
+                skipped,
+                failed: failedCount,
+                retry: retryCount,
+                label: `Skipped batch ${batchNumber} after ${PUBLIC_POOL_IMPORT_MAX_RETRIES} failed attempts.`,
+              });
+              await waitForPaint();
+            }
+          }
         }
-      } catch (err) {
-        setImportProgress(null);
-        setImportError(err instanceof Error ? err.message : "Failed to import Public Pool CSV.");
-        notify("Public Pool import failed before all batches completed.", "error", "CSV import failed");
-        return;
       }
       setPublicLeads(await loadPublicLeadsFromServer());
-      notify(`Imported ${unique.length} public lead(s). ${imported.length - unique.length} duplicate row(s) skipped.`, "success", "CSV import complete");
+      if (failedCount > 0) {
+        notify(
+          `Imported ${importedCount} public lead(s). Skipped ${failedCount} row(s) after retries and ${skipped} duplicate row(s).`,
+          "warning",
+          "CSV import completed with skips",
+        );
+      } else {
+        notify(`Imported ${importedCount} public lead(s). ${skipped} duplicate row(s) skipped.`, "success", "CSV import complete");
+      }
       setImportProgress(null);
     }
 
@@ -2603,6 +2669,9 @@ export default function Customers() {
                       <div>
                         <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">
                           {importProgress.label}
+                        </p>
+                        <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">
+                          {importProgress.imported} imported · {importProgress.failed} failed/skipped · {importProgress.retry} retry attempt(s) · {importProgress.skipped} duplicate row(s)
                         </p>
                         <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">
                           Batch {importProgress.batch} / {importProgress.totalBatches} · {importProgress.processed} / {importProgress.total} imported · {importProgress.skipped} duplicate row(s) skipped

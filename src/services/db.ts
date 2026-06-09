@@ -330,18 +330,22 @@ export function savePublicLeads(leads: PublicLead[]) {
 export async function upsertPublicLeadsBatch(leads: PublicLead[]) {
   const route = SERVER_COLLECTIONS.crm_public_leads;
   if (!route || typeof fetch === "undefined") return;
-  const responses = await Promise.all(
-    leads.map((lead) =>
-      fetch(`${route}/${encodeURIComponent(lead.id)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(lead),
-      }),
-    ),
-  );
-  const failed = responses.find((response) => !response.ok);
-  if (failed) {
-    throw new Error(`Failed to save Public Pool batch: HTTP ${failed.status}`);
+  const concurrency = 10;
+  for (let index = 0; index < leads.length; index += concurrency) {
+    const chunk = leads.slice(index, index + concurrency);
+    const responses = await Promise.all(
+      chunk.map((lead) =>
+        fetch(`${route}/${encodeURIComponent(lead.id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(lead),
+        }),
+      ),
+    );
+    const failed = responses.find((response) => !response.ok);
+    if (failed) {
+      throw new Error(`Failed to save Public Pool batch: HTTP ${failed.status}`);
+    }
   }
   notifyDataChanged("crm_public_leads");
 }
