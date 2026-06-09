@@ -14,6 +14,7 @@ import {
 type WooImportProduct = Omit<Product, 'id'> & {
   source: 'woocommerce';
   sourceId: string;
+  sourceSlug?: string;
   sourceUrl?: string;
 };
 
@@ -96,6 +97,13 @@ function PaginationBar({
   );
 }
 
+function joinProductUrl(baseUrl: string, slug?: string) {
+  const base = String(baseUrl || '').trim().replace(/\/+$/, '');
+  const cleanSlug = String(slug || '').trim().replace(/^\/+/, '');
+  if (!base || !cleanSlug) return '';
+  return `${base}/${cleanSlug}`;
+}
+
 export default function Sales() {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'products' | 'quotes'>('products');
@@ -121,6 +129,7 @@ export default function Sales() {
     pages: 3,
     status: 'publish',
     currency: 'USD',
+    productBaseUrl: '',
   });
 
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
@@ -224,7 +233,8 @@ export default function Sales() {
         pricingTiers,
         currency: editingProduct.currency || 'USD',
         status: editingProduct.status || 'Active',
-        image: editingProduct.image
+        image: editingProduct.image,
+        productUrl: editingProduct.productUrl || '',
       });
     }
     setProducts(await loadProductsFromServer());
@@ -286,11 +296,13 @@ export default function Sales() {
         const skuKey = product.sku ? `sku:${product.sku.toLowerCase()}` : '';
         const wooKey = `woo:${product.sourceId}`;
         const existingProduct = productsByKey.get(wooKey) || (skuKey ? productsByKey.get(skuKey) : undefined);
+        const productUrl = joinProductUrl(wooImportConfig.productBaseUrl, product.sourceSlug) || product.productUrl || product.sourceUrl || '';
         const nextProduct: Product = {
           ...(existingProduct || {}),
           ...product,
           id: existingProduct?.id || `prod_woo_${product.sourceId}`,
           price: product.pricingTiers?.[0]?.unitPrice || product.price || 0,
+          productUrl,
         };
         productsByKey.set(wooKey, nextProduct);
         if (skuKey) productsByKey.set(skuKey, nextProduct);
@@ -517,6 +529,16 @@ export default function Sales() {
                              </span>
                            )}
                            <p className="text-xs text-slate-500 truncate max-w-[200px] mt-0.5">{product.description}</p>
+                           {product.productUrl && (
+                             <a
+                               href={product.productUrl}
+                               target="_blank"
+                               rel="noreferrer"
+                               className="mt-0.5 block max-w-[240px] truncate text-xs font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                             >
+                               {product.productUrl}
+                             </a>
+                           )}
                          </div>
                        </div>
                      </td>
@@ -641,9 +663,30 @@ export default function Sales() {
                   type="url"
                   placeholder="https://example.com"
                   value={wooImportConfig.siteUrl}
-                  onChange={e => setWooImportConfig({ ...wooImportConfig, siteUrl: e.target.value })}
+                  onChange={e => {
+                    const siteUrl = e.target.value;
+                    const guessedBase = siteUrl.trim() ? `${siteUrl.trim().replace(/\/+$/, '')}/product` : '';
+                    setWooImportConfig({
+                      ...wooImportConfig,
+                      siteUrl,
+                      productBaseUrl: wooImportConfig.productBaseUrl || guessedBase,
+                    });
+                  }}
                   className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Product Base URL</label>
+                <input
+                  type="url"
+                  placeholder="https://example.com/product"
+                  value={wooImportConfig.productBaseUrl}
+                  onChange={e => setWooImportConfig({ ...wooImportConfig, productBaseUrl: e.target.value })}
+                  className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                />
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Final product link will be Product Base URL + WooCommerce slug.
+                </p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -722,7 +765,7 @@ export default function Sales() {
                 </div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
-                Import starts from Start Page and continues for Pages page(s). Set Pages to 1 for one-page-at-a-time imports. After a successful import, Start Page advances to the next page automatically.
+                Import starts from Start Page and continues for Pages page(s). Set Pages to 1 for one-page-at-a-time imports. Imported products store the WooCommerce slug and use Product Base URL + slug as the final product link.
               </div>
             </div>
             <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 p-6 dark:border-white/10 dark:bg-black/20">
@@ -866,6 +909,16 @@ export default function Sales() {
                       </div>
                     ))}
                   </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Product Link</label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/product/product-slug"
+                    value={editingProduct?.productUrl || ''}
+                    onChange={e => setEditingProduct({ ...editingProduct, productUrl: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>

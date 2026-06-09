@@ -327,6 +327,25 @@ export function savePublicLeads(leads: PublicLead[]) {
   return savePromise;
 }
 
+export async function upsertPublicLeadsBatch(leads: PublicLead[]) {
+  const route = SERVER_COLLECTIONS.crm_public_leads;
+  if (!route || typeof fetch === "undefined") return;
+  const responses = await Promise.all(
+    leads.map((lead) =>
+      fetch(`${route}/${encodeURIComponent(lead.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(lead),
+      }),
+    ),
+  );
+  const failed = responses.find((response) => !response.ok);
+  if (failed) {
+    throw new Error(`Failed to save Public Pool batch: HTTP ${failed.status}`);
+  }
+  notifyDataChanged("crm_public_leads");
+}
+
 export async function deletePublicLead(id: string) {
   const leads = getPublicLeads();
   await savePublicLeads(leads.filter((l) => l.id !== id));
@@ -487,8 +506,10 @@ export interface Product {
   currency: string;
   status: "Active" | "Inactive";
   image?: string;
+  productUrl?: string;
   source?: "manual" | "woocommerce";
   sourceId?: string;
+  sourceSlug?: string;
   sourceUrl?: string;
 }
 

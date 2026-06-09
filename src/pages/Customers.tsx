@@ -36,6 +36,7 @@ import {
   loadPublicLeadsFromServer,
   PublicLead,
   savePublicLeads,
+  upsertPublicLeadsBatch,
   deletePublicLeads,
   claimLead,
   getCurrentUser,
@@ -55,6 +56,7 @@ type CsvImportTarget = "my-customers" | "public-pool";
 type CustomerViewMode = "list" | "map";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+const PUBLIC_POOL_IMPORT_BATCH_SIZE = 100;
 
 type CsvImportPreview = {
   fileName: string;
@@ -68,6 +70,23 @@ type CountryStat = {
   x: number;
   y: number;
 };
+
+type CsvImportProgress = {
+  active: boolean;
+  processed: number;
+  total: number;
+  batch: number;
+  totalBatches: number;
+  imported: number;
+  skipped: number;
+  label: string;
+};
+
+function waitForPaint() {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
+}
 
 function clampPage(page: number, totalItems: number, pageSize: number) {
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -1568,6 +1587,7 @@ export default function Customers() {
   const [importPreview, setImportPreview] = useState<CsvImportPreview | null>(null);
   const [importError, setImportError] = useState("");
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importProgress, setImportProgress] = useState<CsvImportProgress | null>(null);
   const [deletingCustomerId, setDeletingCustomerId] = useState<string | null>(
     null,
   );
@@ -1677,9 +1697,57 @@ export default function Customers() {
         existingKeys.add(key);
         return true;
       });
-      await savePublicLeads([...unique, ...existing]);
+      const skipped = imported.length - unique.length;
+      const totalBatches = Math.max(1, Math.ceil(unique.length / PUBLIC_POOL_IMPORT_BATCH_SIZE));
+      setImportProgress({
+        active: true,
+        processed: 0,
+        total: unique.length,
+        batch: 0,
+        totalBatches,
+        imported: 0,
+        skipped,
+        label: "Preparing Public Pool import...",
+      });
+      await waitForPaint();
+
+      try {
+        for (let start = 0; start < unique.length; start += PUBLIC_POOL_IMPORT_BATCH_SIZE) {
+          const batch = unique.slice(start, start + PUBLIC_POOL_IMPORT_BATCH_SIZE);
+          const batchNumber = Math.floor(start / PUBLIC_POOL_IMPORT_BATCH_SIZE) + 1;
+          setImportProgress({
+            active: true,
+            processed: start,
+            total: unique.length,
+            batch: batchNumber,
+            totalBatches,
+            imported: start,
+            skipped,
+            label: `Importing batch ${batchNumber} of ${totalBatches}...`,
+          });
+          await waitForPaint();
+          await upsertPublicLeadsBatch(batch);
+          setImportProgress({
+            active: true,
+            processed: Math.min(start + batch.length, unique.length),
+            total: unique.length,
+            batch: batchNumber,
+            totalBatches,
+            imported: Math.min(start + batch.length, unique.length),
+            skipped,
+            label: `Imported batch ${batchNumber} of ${totalBatches}.`,
+          });
+          await waitForPaint();
+        }
+      } catch (err) {
+        setImportProgress(null);
+        setImportError(err instanceof Error ? err.message : "Failed to import Public Pool CSV.");
+        notify("Public Pool import failed before all batches completed.", "error", "CSV import failed");
+        return;
+      }
       setPublicLeads(await loadPublicLeadsFromServer());
       notify(`Imported ${unique.length} public lead(s). ${imported.length - unique.length} duplicate row(s) skipped.`, "success", "CSV import complete");
+      setImportProgress(null);
     }
 
     setIsImportOpen(false);
@@ -2459,7 +2527,10 @@ export default function Customers() {
                   </button>
                 </div>
                 <button
-                  onClick={() => setIsImportOpen(false)}
+                  onClick={() => {
+                    if (!importProgress?.active) setIsImportOpen(false);
+                  }}
+                  disabled={Boolean(importProgress?.active)}
                   className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-white/5 dark:hover:text-slate-300"
                 >
                   <X className="h-5 w-5" />
@@ -2525,22 +2596,51 @@ export default function Customers() {
                     </div>
                   </div>
                 )}
+
+                {importProgress && (
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-500/30 dark:bg-blue-500/10">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">
+                          {importProgress.label}
+                        </p>
+                        <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">
+                          Batch {importProgress.batch} / {importProgress.totalBatches} · {importProgress.processed} / {importProgress.total} imported · {importProgress.skipped} duplicate row(s) skipped
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+                        {importProgress.total === 0 ? 100 : Math.round((importProgress.processed / importProgress.total) * 100)}%
+                      </span>
+                    </div>
+                    <div className="mt-4 h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950/60">
+                      <div
+                        className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                        style={{
+                          width: `${importProgress.total === 0 ? 100 : Math.round((importProgress.processed / importProgress.total) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 p-6 dark:border-white/10 dark:bg-black/20">
                 <button
-                  onClick={() => setIsImportOpen(false)}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-white/10"
+                  onClick={() => {
+                    if (!importProgress?.active) setIsImportOpen(false);
+                  }}
+                  disabled={Boolean(importProgress?.active)}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-white/10"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={confirmCsvImport}
-                  disabled={!importPreview}
+                  disabled={!importPreview || Boolean(importProgress?.active)}
                   className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Upload className="h-4 w-4" />
-                  Import CSV
+                  {importProgress?.active ? "Importing..." : "Import CSV"}
                 </button>
               </div>
             </div>

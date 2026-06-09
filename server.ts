@@ -666,6 +666,7 @@ app.post("/api/integrations/woocommerce/products", async (req, res) => {
         image: product.images?.[0]?.src || "",
         source: "woocommerce",
         sourceId: String(product.id),
+        sourceSlug: String(product.slug || ""),
         sourceUrl: product.permalink || `${baseUrl}/?p=${product.id}`,
       };
     });
