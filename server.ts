@@ -604,6 +604,7 @@ app.post("/api/integrations/woocommerce/products", async (req, res) => {
     consumerKey = "",
     consumerSecret = "",
     perPage = 50,
+    page = 1,
     pages = 3,
     status = "any",
   } = req.body || {};
@@ -618,13 +619,18 @@ app.post("/api/integrations/woocommerce/products", async (req, res) => {
   try {
     const imported: any[] = [];
     const safePerPage = Math.max(1, Math.min(Number(perPage) || 50, 100));
+    const safeStartPage = Math.max(1, Number(page) || 1);
     const safePages = Math.max(1, Math.min(Number(pages) || 3, 10));
+    let fetchedPages = 0;
+    let lastRequestedPage = safeStartPage - 1;
     const auth = Buffer.from(`${key}:${secret}`).toString("base64");
 
-    for (let page = 1; page <= safePages; page += 1) {
+    for (let pageIndex = 0; pageIndex < safePages; pageIndex += 1) {
+      const currentPage = safeStartPage + pageIndex;
+      lastRequestedPage = currentPage;
       const params = new URLSearchParams({
         per_page: String(safePerPage),
-        page: String(page),
+        page: String(currentPage),
         orderby: "date",
         order: "desc",
       });
@@ -642,6 +648,7 @@ app.post("/api/integrations/woocommerce/products", async (req, res) => {
       }
       if (!Array.isArray(data) || data.length === 0) break;
       imported.push(...data);
+      fetchedPages += 1;
       if (data.length < safePerPage) break;
     }
 
@@ -663,7 +670,14 @@ app.post("/api/integrations/woocommerce/products", async (req, res) => {
       };
     });
 
-    res.json({ products, count: products.length });
+    res.json({
+      products,
+      count: products.length,
+      page: safeStartPage,
+      pages: safePages,
+      fetchedPages,
+      nextPage: products.length > 0 ? lastRequestedPage + 1 : safeStartPage,
+    });
   } catch (err: any) {
     res.status(500).json({ error: `WooCommerce import failed: ${err.message}` });
   }

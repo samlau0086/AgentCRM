@@ -36,6 +36,7 @@ export default function Sales() {
     consumerKey: '',
     consumerSecret: '',
     perPage: 50,
+    page: 1,
     pages: 3,
     status: 'publish',
     currency: 'USD',
@@ -193,8 +194,13 @@ export default function Sales() {
         .sort((a, b) => a.name.localeCompare(b.name));
       await saveProducts(merged);
       setProducts(getProducts());
-      setIsWooImportOpen(false);
-      notify(`Imported ${created} new product(s), updated ${updated} existing product(s).`, 'success', 'WooCommerce import complete');
+      const nextPage = Math.max(1, Number(data.nextPage) || (wooImportConfig.page + wooImportConfig.pages));
+      setWooImportConfig((current) => ({ ...current, page: nextPage }));
+      notify(
+        `Imported ${created} new product(s), updated ${updated} existing product(s). Next page: ${nextPage}.`,
+        'success',
+        'WooCommerce import complete',
+      );
     } catch (err: any) {
       notify(err.message || 'Failed to import WooCommerce products.', 'error', 'WooCommerce import failed');
     } finally {
@@ -473,7 +479,7 @@ export default function Sales() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Status</label>
                   <select
@@ -486,6 +492,16 @@ export default function Sales() {
                     <option value="draft">Draft</option>
                     <option value="any">Any</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Start Page</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={wooImportConfig.page}
+                    onChange={e => setWooImportConfig({ ...wooImportConfig, page: parseInt(e.target.value) || 1 })}
+                    className="w-full bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-blue-500 outline-none"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Per Page</label>
@@ -520,7 +536,7 @@ export default function Sales() {
                 </div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
-                Imported products update existing CRM products when WooCommerce ID or SKU matches. WooCommerce sale price is used first, then current price, then regular price.
+                Import starts from Start Page and continues for Pages page(s). Set Pages to 1 for one-page-at-a-time imports. After a successful import, Start Page advances to the next page automatically.
               </div>
             </div>
             <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 p-6 dark:border-white/10 dark:bg-black/20">
