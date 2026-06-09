@@ -27,6 +27,9 @@ function notifyDataChanged(key: string) {
   window.dispatchEvent(new CustomEvent("crm:data-changed", { detail: { key } }));
 }
 
+const memoryRecordCache: Record<string, unknown[]> = {};
+const MEMORY_ONLY_COLLECTIONS = new Set(["crm_products"]);
+
 const SERVER_COLLECTIONS: Record<string, string> = {
   crm_public_leads: "/api/crm/public-leads",
   crm_documents: "/api/knowledge",
@@ -109,7 +112,18 @@ async function loadRecordListFromServer<T>(key: string): Promise<T[] | null> {
 }
 
 function cacheRecordList<T>(key: string, records: T[]) {
-  localStorage.setItem(key, JSON.stringify(records));
+  memoryRecordCache[key] = records as unknown[];
+  if (MEMORY_ONLY_COLLECTIONS.has(key)) {
+    try {
+      localStorage.removeItem(key);
+    } catch (err) {}
+  } else {
+    try {
+      localStorage.setItem(key, JSON.stringify(records));
+    } catch (err) {
+      console.warn(`Unable to cache ${key} in localStorage. Using memory cache only.`, err);
+    }
+  }
   notifyDataChanged(key);
 }
 
@@ -479,13 +493,23 @@ export interface Product {
 }
 
 export function getProducts(): Product[] {
+  const cachedProducts = memoryRecordCache.crm_products;
+  if (Array.isArray(cachedProducts)) return cachedProducts as Product[];
+
   try {
     const data = localStorage.getItem("crm_products");
-    if (data) return JSON.parse(data);
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        memoryRecordCache.crm_products = parsed;
+        localStorage.removeItem("crm_products");
+        return parsed;
+      }
+    }
   } catch (e) {}
 
   const initial: Product[] = [];
-  localStorage.setItem("crm_products", JSON.stringify(initial));
+  memoryRecordCache.crm_products = initial;
   return initial;
 }
 
@@ -505,7 +529,7 @@ export async function loadProductsFromServer() {
 }
 
 export function saveProducts(products: Product[]) {
-  localStorage.setItem("crm_products", JSON.stringify(products));
+  memoryRecordCache.crm_products = products;
   const savePromise = replaceRecordListOnServer("crm_products", products);
   notifyDataChanged("crm_products");
   return savePromise;

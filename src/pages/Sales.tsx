@@ -216,7 +216,7 @@ export default function Sales() {
       const merged = Array.from(new Map(Array.from(productsByKey.values()).map((product) => [product.id, product])).values())
         .sort((a, b) => a.name.localeCompare(b.name));
       await saveProducts(merged);
-      setProducts(getProducts());
+      setProducts(await loadProductsFromServer());
       const nextPage = Math.max(1, Number(data.nextPage) || (wooImportConfig.page + wooImportConfig.pages));
       setWooImportConfig((current) => ({ ...current, page: nextPage }));
       notify(
