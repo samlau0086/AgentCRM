@@ -1,5 +1,7 @@
 # AgentCRM
 
+Project roadmap and implementation progress are tracked in [ROADMAP.md](./ROADMAP.md).
+
 AgentCRM is an AI-assisted CRM built with React, Vite, Express, and PostgreSQL/pgvector. It includes customer management, unified Email/WhatsApp inbox, sales quotes, products, media library, knowledge base vectorization, AI agent workflows, user management, and system settings.
 
 AgentCRM 是一个基于 React、Vite、Express 和 PostgreSQL/pgvector 的 AI CRM 系统，包含客户管理、统一 Email/WhatsApp 收件箱、销售报价、产品库、媒体素材库、知识库向量化、AI 智能体工作流、用户管理和系统设置。

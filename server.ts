@@ -124,6 +124,60 @@ async function getRecordList(entity: string) {
   });
 }
 
+async function getRecordPage(
+  entity: string,
+  page: number,
+  pageSize: number,
+  search = "",
+  country = "",
+) {
+  const safePage = Math.max(1, Math.floor(Number(page) || 1));
+  const safePageSize = Math.max(1, Math.min(Math.floor(Number(pageSize) || 50), 200));
+  const offset = (safePage - 1) * safePageSize;
+  const query = String(search || "").trim().toLowerCase();
+  const countryQuery = String(country || "").trim().toLowerCase();
+
+  return withDb(async (client) => {
+    const params: unknown[] = [entity];
+    let where = "WHERE entity = $1";
+    if (query) {
+      params.push(`%${query}%`);
+      where += ` AND LOWER(data::text) LIKE $${params.length}`;
+    }
+    if (countryQuery) {
+      params.push(`%${countryQuery}%`);
+      where += ` AND LOWER(data::text) LIKE $${params.length}`;
+    }
+
+    const countResult = await client.query(
+      `SELECT COUNT(*)::int AS count FROM crm_records ${where}`,
+      params,
+    );
+    const total = Number(countResult.rows[0]?.count || 0);
+
+    params.push(safePageSize, offset);
+    const dataResult = await client.query(
+      `
+      SELECT data
+      FROM crm_records
+      ${where}
+      ORDER BY updated_at DESC
+      LIMIT $${params.length - 1}
+      OFFSET $${params.length}
+      `,
+      params,
+    );
+
+    return {
+      records: dataResult.rows.map((row) => row.data),
+      total,
+      page: safePage,
+      pageSize: safePageSize,
+      totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+    };
+  });
+}
+
 async function getRecord(entity: string, id: string) {
   return withDb(async (client) => {
     const result = await client.query(
@@ -519,6 +573,17 @@ function crudRoutes(entity: string, route: string) {
   app.get(route, async (_req, res) => {
     if (!requireDatabase(res)) return;
     try {
+      const req = _req as express.Request;
+      if (req.query.page || req.query.pageSize || req.query.search) {
+        res.json(await getRecordPage(
+          entity,
+          Number(req.query.page || 1),
+          Number(req.query.pageSize || 50),
+          String(req.query.search || ""),
+          String(req.query.country || ""),
+        ));
+        return;
+      }
       res.json(await getRecordList(entity));
     } catch (err: any) {
       res.status(500).json({ error: err.message });

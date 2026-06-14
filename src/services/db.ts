@@ -124,6 +124,39 @@ async function loadRecordListFromServer<T>(key: string): Promise<T[] | null> {
   return Array.isArray(data) ? data : [];
 }
 
+export type RecordPage<T> = {
+  records: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+async function loadRecordPageFromServer<T>(
+  key: string,
+  options: { page: number; pageSize: number; search?: string; country?: string },
+): Promise<RecordPage<T> | null> {
+  const route = SERVER_COLLECTIONS[key];
+  if (!route || typeof fetch === "undefined") return null;
+  const params = new URLSearchParams({
+    page: String(options.page),
+    pageSize: String(options.pageSize),
+  });
+  if (options.search?.trim()) params.set("search", options.search.trim());
+  if (options.country?.trim()) params.set("country", options.country.trim());
+  const response = await fetch(`${route}?${params.toString()}`);
+  if (!response.ok) return null;
+  const data = await response.json().catch(() => null);
+  if (!data || !Array.isArray(data.records)) return null;
+  return {
+    records: data.records,
+    total: Number(data.total || 0),
+    page: Number(data.page || options.page),
+    pageSize: Number(data.pageSize || options.pageSize),
+    totalPages: Number(data.totalPages || 1),
+  };
+}
+
 function cacheRecordList<T>(key: string, records: T[]) {
   memoryRecordCache[key] = records as unknown[];
   if (MEMORY_ONLY_COLLECTIONS.has(key)) {
@@ -214,6 +247,21 @@ export async function loadCustomersFromServer() {
   return customers;
 }
 
+export async function loadCustomersPageFromServer(options: { page: number; pageSize: number; search?: string; country?: string }) {
+  const page = await loadRecordPageFromServer<Customer>("crm_customers", options);
+  if (!page) {
+    const records = getCustomers();
+    return {
+      records,
+      total: records.length,
+      page: options.page,
+      pageSize: options.pageSize,
+      totalPages: Math.max(1, Math.ceil(records.length / options.pageSize)),
+    };
+  }
+  return page;
+}
+
 export async function loadPublicLeadsFromServer() {
   const leads = await loadRecordListFromServer<PublicLead>("crm_public_leads");
   if (!leads) return getPublicLeads();
@@ -227,6 +275,21 @@ export async function loadPublicLeadsFromServer() {
   }
   cacheRecordList("crm_public_leads", leads);
   return leads;
+}
+
+export async function loadPublicLeadsPageFromServer(options: { page: number; pageSize: number; search?: string; country?: string }) {
+  const page = await loadRecordPageFromServer<PublicLead>("crm_public_leads", options);
+  if (!page) {
+    const records = getPublicLeads();
+    return {
+      records,
+      total: records.length,
+      page: options.page,
+      pageSize: options.pageSize,
+      totalPages: Math.max(1, Math.ceil(records.length / options.pageSize)),
+    };
+  }
+  return page;
 }
 
 export async function loadAgentsFromServer() {
@@ -566,6 +629,21 @@ export async function loadProductsFromServer() {
   }
   cacheRecordList("crm_products", products);
   return products;
+}
+
+export async function loadProductsPageFromServer(options: { page: number; pageSize: number; search?: string }) {
+  const page = await loadRecordPageFromServer<Product>("crm_products", options);
+  if (!page) {
+    const records = getProducts();
+    return {
+      records,
+      total: records.length,
+      page: options.page,
+      pageSize: options.pageSize,
+      totalPages: Math.max(1, Math.ceil(records.length / options.pageSize)),
+    };
+  }
+  return page;
 }
 
 export function saveProducts(products: Product[]) {

@@ -22,7 +22,6 @@ import { cn } from "../Layout";
 import { useLanguage } from "../i18n";
 import ConfirmModal from "../components/ConfirmModal";
 import { notify } from "../services/notifications";
-import { useServerCollectionSync } from "../hooks/useServerCollectionSync";
 import {
   getCustomers,
   saveCustomers,
@@ -31,9 +30,9 @@ import {
   addCustomer,
   updateCustomer,
   Customer,
-  loadCustomersFromServer,
+  loadCustomersPageFromServer,
   getPublicLeads,
-  loadPublicLeadsFromServer,
+  loadPublicLeadsPageFromServer,
   PublicLead,
   savePublicLeads,
   upsertPublicLeadsBatch,
@@ -1582,7 +1581,9 @@ export default function Customers() {
     "my-customers",
   );
   const [customers, setCustomers] = useState<Customer[]>(getCustomers());
+  const [customerTotal, setCustomerTotal] = useState(0);
   const [publicLeads, setPublicLeads] = useState<PublicLead[]>([]);
+  const [publicLeadTotal, setPublicLeadTotal] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<CustomerViewMode>("list");
   const [countryFilter, setCountryFilter] = useState("");
@@ -1606,20 +1607,53 @@ export default function Customers() {
   const [selectedPublicLeadIds, setSelectedPublicLeadIds] = useState<string[]>([]);
   const [isBulkDeletePublicLeadsOpen, setIsBulkDeletePublicLeadsOpen] = useState(false);
 
-  useServerCollectionSync([
-    {
-      keys: ["crm_customers"],
-      loadFromServer: loadCustomersFromServer,
-      readFromCache: getCustomers,
-      setData: setCustomers,
-    },
-    {
-      keys: ["crm_public_leads"],
-      loadFromServer: loadPublicLeadsFromServer,
-      readFromCache: getPublicLeads,
-      setData: setPublicLeads,
-    },
-  ]);
+  useEffect(() => {
+    let cancelled = false;
+    loadCustomersPageFromServer({
+      page: customerPage,
+      pageSize: customerPageSize,
+      search: searchQuery,
+      country: countryFilter,
+    })
+      .then((page) => {
+        if (cancelled) return;
+        setCustomers(page.records);
+        setCustomerTotal(page.total);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const cached = getCustomers();
+        setCustomers(cached);
+        setCustomerTotal(cached.length);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerPage, customerPageSize, searchQuery, countryFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPublicLeadsPageFromServer({
+      page: publicLeadPage,
+      pageSize: publicLeadPageSize,
+      search: searchQuery,
+      country: countryFilter,
+    })
+      .then((page) => {
+        if (cancelled) return;
+        setPublicLeads(page.records);
+        setPublicLeadTotal(page.total);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const cached = getPublicLeads();
+        setPublicLeads(cached);
+        setPublicLeadTotal(cached.length);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [publicLeadPage, publicLeadPageSize, searchQuery, countryFilter]);
 
   useEffect(() => {
     const editId = searchParams.get("edit");
@@ -1647,6 +1681,28 @@ export default function Customers() {
     setCustomerPage(1);
     setPublicLeadPage(1);
   }, [searchQuery, countryFilter]);
+
+  const refreshCustomerPage = async () => {
+    const page = await loadCustomersPageFromServer({
+      page: customerPage,
+      pageSize: customerPageSize,
+      search: searchQuery,
+      country: countryFilter,
+    });
+    setCustomers(page.records);
+    setCustomerTotal(page.total);
+  };
+
+  const refreshPublicLeadPage = async () => {
+    const page = await loadPublicLeadsPageFromServer({
+      page: publicLeadPage,
+      pageSize: publicLeadPageSize,
+      search: searchQuery,
+      country: countryFilter,
+    });
+    setPublicLeads(page.records);
+    setPublicLeadTotal(page.total);
+  };
 
   const handleAdd = () => {
     setEditingCustomer(null);
@@ -1695,7 +1751,7 @@ export default function Customers() {
         return true;
       });
       await saveCustomers([...unique, ...existing]);
-      setCustomers(await loadCustomersFromServer());
+      await refreshCustomerPage();
       notify(`Imported ${unique.length} customer(s). ${imported.length - unique.length} duplicate row(s) skipped.`, "success", "CSV import complete");
     } else {
       const imported = importPreview.rows.map(rowToPublicLead).filter(Boolean) as PublicLead[];
@@ -1803,7 +1859,7 @@ export default function Customers() {
           }
         }
       }
-      setPublicLeads(await loadPublicLeadsFromServer());
+      await refreshPublicLeadPage();
       if (failedCount > 0) {
         notify(
           `Imported ${importedCount} public lead(s). Skipped ${failedCount} row(s) after retries and ${skipped} duplicate row(s).`,
@@ -1895,10 +1951,10 @@ export default function Customers() {
     setDeletingCustomerId(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (deletingCustomerId) {
       deleteCustomer(deletingCustomerId);
-      setCustomers(getCustomers());
+      await refreshCustomerPage();
       setSelectedCustomerIds((current) => current.filter((id) => id !== deletingCustomerId));
       setDeletingCustomerId(null);
     }
@@ -1907,7 +1963,7 @@ export default function Customers() {
   const confirmBulkDeleteCustomers = async () => {
     if (selectedCustomerIds.length === 0) return;
     await deleteCustomers(selectedCustomerIds);
-    setCustomers(await loadCustomersFromServer());
+    await refreshCustomerPage();
     notify(`Deleted ${selectedCustomerIds.length} customer(s).`, "success", "Customers updated");
     setSelectedCustomerIds([]);
     setIsBulkDeleteCustomersOpen(false);
@@ -1923,40 +1979,26 @@ export default function Customers() {
     setIsModalOpen(false);
   };
 
-  const filteredCustomers = customers.filter((c) => {
-    const q = searchQuery.toLowerCase();
-    const country = getCustomerCountry(c);
-    return (
-      matchesCountryFilter(country, countryFilter) &&
-      (c.name.toLowerCase().includes(q) ||
-        c.contact.toLowerCase().includes(q) ||
-        country.toLowerCase().includes(q) ||
-        (c.tags || []).some((t) => t.toLowerCase().includes(q)))
-    );
-  });
-
-  const filteredPublicLeads = publicLeads.filter((lead) => {
-    const q = searchQuery.toLowerCase();
-    const country = getPublicLeadCountry(lead);
-    return (
-      matchesCountryFilter(country, countryFilter) &&
-      (lead.name.toLowerCase().includes(q) ||
-        lead.source.toLowerCase().includes(q) ||
-        lead.contact.toLowerCase().includes(q) ||
-        (lead.location || "").toLowerCase().includes(q) ||
-        country.toLowerCase().includes(q))
-    );
-  });
+  const filteredCustomers = customers;
+  const filteredPublicLeads = publicLeads;
 
   const countryStats =
     activeTab === "my-customers"
       ? getCountryStats(customers, getCustomerCountry)
       : getCountryStats(publicLeads, getPublicLeadCountry);
 
-  const customerPagination = paginateItems(filteredCustomers, customerPage, customerPageSize);
-  const publicLeadPagination = paginateItems(filteredPublicLeads, publicLeadPage, publicLeadPageSize);
-  const pagedCustomers = customerPagination.items;
-  const pagedPublicLeads = publicLeadPagination.items;
+  const customerPagination = {
+    page: customerPage,
+    totalPages: Math.max(1, Math.ceil(customerTotal / customerPageSize)),
+    items: customers,
+  };
+  const publicLeadPagination = {
+    page: publicLeadPage,
+    totalPages: Math.max(1, Math.ceil(publicLeadTotal / publicLeadPageSize)),
+    items: publicLeads,
+  };
+  const pagedCustomers = customers;
+  const pagedPublicLeads = publicLeads;
 
   const visibleCustomerIds = pagedCustomers.map((customer) => customer.id);
   const selectedVisibleCustomerIds = selectedCustomerIds.filter((id) => visibleCustomerIds.includes(id));
@@ -2007,7 +2049,7 @@ export default function Customers() {
   const confirmBulkDeletePublicLeads = async () => {
     if (!canBulkDeletePublicPool || selectedPublicLeadIds.length === 0) return;
     await deletePublicLeads(selectedPublicLeadIds);
-    setPublicLeads(await loadPublicLeadsFromServer());
+    await refreshPublicLeadPage();
     setSelectedPublicLeadIds([]);
     setIsBulkDeletePublicLeadsOpen(false);
     notify("Selected public leads have been deleted.", "success", "Public Pool updated");
@@ -2062,9 +2104,9 @@ export default function Customers() {
               )}
             >
               Public Pool
-              {publicLeads.length > 0 && (
+              {publicLeadTotal > 0 && (
                 <span className="bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 px-1.5 py-0.5 rounded text-[10px]">
-                  {publicLeads.length}
+                  {publicLeadTotal}
                 </span>
               )}
             </button>
@@ -2391,7 +2433,7 @@ export default function Customers() {
                         colSpan={isModalOpen ? 1 : 7}
                         className="px-6 py-12 text-center text-slate-500"
                       >
-                        {customers.length === 0
+                        {customerTotal === 0
                           ? "No customers yet."
                           : "No customers match the current filters."}
                       </td>
@@ -2402,7 +2444,7 @@ export default function Customers() {
                 {!isModalOpen && (
                   <PaginationBar
                     page={customerPagination.page}
-                    totalItems={filteredCustomers.length}
+                    totalItems={customerTotal}
                     pageSize={customerPageSize}
                     onPageChange={setCustomerPage}
                     onPageSizeChange={(size) => {
@@ -2537,7 +2579,7 @@ export default function Customers() {
                         colSpan={canBulkDeletePublicPool ? 6 : 5}
                         className="px-6 py-12 text-center text-slate-500"
                       >
-                        {publicLeads.length === 0
+                        {publicLeadTotal === 0
                           ? "No leads currently available in the public pool. Let your Lead Generation agents gather more!"
                           : "No public leads match the current filters."}
                       </td>
@@ -2547,7 +2589,7 @@ export default function Customers() {
                 </table>
                 <PaginationBar
                   page={publicLeadPagination.page}
-                  totalItems={filteredPublicLeads.length}
+                  totalItems={publicLeadTotal}
                   pageSize={publicLeadPageSize}
                   onPageChange={setPublicLeadPage}
                   onPageSizeChange={(size) => {

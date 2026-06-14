@@ -6,7 +6,7 @@ import MediaLibraryModal from '../components/MediaLibraryModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { notify } from '../services/notifications';
 import {
-  Product, getProducts, loadProductsFromServer, addProduct, updateProduct, deleteProduct, saveProducts,
+  Product, getProducts, loadProductsFromServer, loadProductsPageFromServer, addProduct, updateProduct, deleteProduct, saveProducts,
   Quote, getQuotes, addQuote, updateQuote, deleteQuote,
   getCustomers, Customer
 } from '../services/db';
@@ -109,6 +109,7 @@ export default function Sales() {
   const [activeTab, setActiveTab] = useState<'products' | 'quotes'>('products');
   
   const [products, setProducts] = useState<Product[]>([]);
+  const [productTotal, setProductTotal] = useState(0);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -146,23 +147,36 @@ export default function Sales() {
 
   useEffect(() => {
     let cancelled = false;
-    loadProductsFromServer()
-      .then((serverProducts) => {
-        if (!cancelled) setProducts(serverProducts);
+    loadProductsPageFromServer({ page: productPage, pageSize: productPageSize, search: searchQuery })
+      .then((serverPage) => {
+        if (!cancelled) {
+          setProducts(serverPage.records);
+          setProductTotal(serverPage.total);
+        }
       })
       .catch(() => {
-        if (!cancelled) setProducts(getProducts());
+        if (!cancelled) {
+          const cached = getProducts();
+          setProducts(cached);
+          setProductTotal(cached.length);
+        }
       });
     setQuotes(getQuotes());
     setCustomers(getCustomers());
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [productPage, productPageSize, searchQuery]);
 
   useEffect(() => {
     setProductPage(1);
   }, [searchQuery]);
+
+  const refreshProductsPage = async () => {
+    const serverPage = await loadProductsPageFromServer({ page: productPage, pageSize: productPageSize, search: searchQuery });
+    setProducts(serverPage.records);
+    setProductTotal(serverPage.total);
+  };
 
   const calculateQuoteTotals = (quote: Partial<Quote>) => {
     const items = quote.items || [];
@@ -237,7 +251,7 @@ export default function Sales() {
         productUrl: editingProduct.productUrl || '',
       });
     }
-    setProducts(await loadProductsFromServer());
+    await refreshProductsPage();
     setIsProductModalOpen(false);
     setEditingProduct(null);
   };
@@ -249,7 +263,7 @@ export default function Sales() {
   const confirmDeleteProduct = async () => {
     if (deletingProductId) {
       await deleteProduct(deletingProductId);
-      setProducts(await loadProductsFromServer());
+      await refreshProductsPage();
       setSelectedProductIds((ids) => ids.filter((id) => id !== deletingProductId));
       setDeletingProductId(null);
     }
@@ -257,9 +271,10 @@ export default function Sales() {
 
   const confirmBulkDeleteProducts = async () => {
     const selected = new Set(selectedProductIds);
-    const remainingProducts = getProducts().filter((product) => !selected.has(product.id));
+    const allProducts = await loadProductsFromServer();
+    const remainingProducts = allProducts.filter((product) => !selected.has(product.id));
     await saveProducts(remainingProducts);
-    setProducts(await loadProductsFromServer());
+    await refreshProductsPage();
     setSelectedProductIds([]);
     setIsBulkDeleteProductsOpen(false);
     notify(`Deleted ${selected.size} product(s).`, 'success', 'Products deleted');
@@ -279,7 +294,7 @@ export default function Sales() {
       }
 
       const imported = (Array.isArray(data.products) ? data.products : []) as WooImportProduct[];
-      const existing = getProducts();
+      const existing = await loadProductsFromServer();
       const productsByKey = new Map<string, Product>();
       existing.forEach((product) => {
         const key = product.source === 'woocommerce' && product.sourceId
@@ -313,7 +328,7 @@ export default function Sales() {
       const merged = Array.from(new Map(Array.from(productsByKey.values()).map((product) => [product.id, product])).values())
         .sort((a, b) => a.name.localeCompare(b.name));
       await saveProducts(merged);
-      setProducts(await loadProductsFromServer());
+      await refreshProductsPage();
       const nextPage = Math.max(1, Number(data.nextPage) || (wooImportConfig.page + wooImportConfig.pages));
       setWooImportConfig((current) => ({ ...current, page: nextPage }));
       notify(
@@ -368,13 +383,15 @@ export default function Sales() {
     }
   };
 
-  const filteredProducts = products.filter(
-    (product) =>
-      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.sku.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
-  const productPagination = paginateItems(filteredProducts, productPage, productPageSize);
-  const pagedProducts = productPagination.items;
+  const filteredProducts = products;
+  const productPagination = {
+    page: productPage,
+    totalPages: Math.max(1, Math.ceil(productTotal / productPageSize)),
+    start: productTotal === 0 ? 0 : (productPage - 1) * productPageSize,
+    end: Math.min(productPage * productPageSize, productTotal),
+    items: products,
+  };
+  const pagedProducts = products;
   const visibleProductIds = pagedProducts.map((product) => product.id);
   const selectedVisibleProductIds = visibleProductIds.filter((id) => selectedProductIds.includes(id));
   const areAllVisibleProductsSelected = visibleProductIds.length > 0 && selectedVisibleProductIds.length === visibleProductIds.length;
@@ -568,7 +585,7 @@ export default function Sales() {
                      </td>
                    </tr>
                  ))}
-                 {filteredProducts.length === 0 && (
+                 {productTotal === 0 && (
                    <tr>
                      <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
                        No products found.
@@ -579,7 +596,7 @@ export default function Sales() {
                </table>
                <PaginationBar
                  page={productPagination.page}
-                 totalItems={filteredProducts.length}
+                 totalItems={productTotal}
                  pageSize={productPageSize}
                  onPageChange={setProductPage}
                  onPageSizeChange={(size) => {
