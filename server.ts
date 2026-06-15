@@ -370,6 +370,19 @@ function csvToObjects(text: string) {
   };
 }
 
+function csvEscape(value: string) {
+  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function rowsToCsv(rows: Record<string, string>[]) {
+  const headers = Array.from(new Set(rows.flatMap((row) => Object.keys(row || {}))));
+  if (headers.length === 0) return "";
+  return [
+    headers.map(csvEscape).join(","),
+    ...rows.map((row) => headers.map((header) => csvEscape(String(row?.[header] || ""))).join(",")),
+  ].join("\n");
+}
+
 function pickCsv(row: Record<string, string>, aliases: string[]) {
   for (const alias of aliases) {
     const value = row[normalizeCsvHeader(alias)];
@@ -421,6 +434,41 @@ function buildLeadContactMethods(row: Record<string, string>) {
     }));
 }
 
+function rowToCustomer(row: Record<string, string>, rowNumber: number) {
+  const name = pickCsv(row, ["company", "company_name", "name", "customer", "customer_name", "organization"]);
+  const contact = pickCsv(row, ["contact", "contact_name", "person", "name", "email", "phone", "mobile"]);
+  if (!name && !contact) return null;
+  const country = normalizeCountryName(pickCsv(row, ["country"])) ||
+    inferCountryFromLocation(pickCsv(row, ["location", "address", "city", "province", "state", "region"]));
+  return {
+    id: `cus_csv_${Date.now()}_${rowNumber}_${Math.random().toString(36).slice(2, 9)}`,
+    name: name || contact,
+    contact: contact || name,
+    contacts: buildLeadContactMethods(row),
+    address: pickCsv(row, ["address", "street"]),
+    city: pickCsv(row, ["city"]),
+    province: pickCsv(row, ["province", "state", "region"]),
+    country,
+    preferredLanguage: pickCsv(row, ["preferred_language", "language", "lang"]) || "en",
+    description: pickCsv(row, ["description", "notes", "note", "summary"]),
+    industry: pickCsv(row, ["industry", "category"]),
+    stage: pickCsv(row, ["stage", "pipeline_stage"]) || "New Lead",
+    score: clampScore(pickCsv(row, ["score", "priority_score", "ai_score"])),
+    risk: normalizeRisk(pickCsv(row, ["risk"])) || "Low",
+    intent: normalizeIntent(pickCsv(row, ["intent"])) || "Low",
+    tags: csvTags(pickCsv(row, ["tags", "tag"])),
+    logs: [
+      {
+        id: `log_${Date.now()}_${rowNumber}`,
+        time: new Date().toISOString(),
+        event: "Imported from CSV",
+        type: "action",
+      },
+    ],
+    comments: [],
+  };
+}
+
 function rowToPublicLead(row: Record<string, string>, rowNumber: number) {
   const name = pickCsv(row, ["company", "company_name", "name", "lead", "business_name", "organization"]);
   const contact = pickCsv(row, ["contact", "email", "phone", "mobile", "website", "site", "url"]);
@@ -450,7 +498,7 @@ type ImportJobStatus = "queued" | "running" | "completed" | "completed_with_erro
 
 type ImportJobRecord = {
   id: string;
-  type: "public_leads_csv";
+  type: "public_leads_csv" | "customers_csv";
   fileName: string;
   status: ImportJobStatus;
   totalRows: number;
@@ -485,7 +533,15 @@ async function updateImportJob(id: string, updates: Partial<ImportJobRecord>) {
   await saveImportJob({ ...current, ...updates, updatedAt: new Date().toISOString() });
 }
 
-async function processPublicLeadCsvImport(jobId: string, csvText: string) {
+async function processCsvImportJob(
+  jobId: string,
+  csvText: string,
+  config: {
+    entity: "public_leads" | "customers";
+    rowToRecord: (row: Record<string, string>, rowNumber: number) => any | null;
+    duplicateKey: (record: any) => string;
+  },
+) {
   if (activeImportJobs.has(jobId)) return;
   activeImportJobs.add(jobId);
   try {
@@ -501,11 +557,9 @@ async function processPublicLeadCsvImport(jobId: string, csvText: string) {
       message: `Importing ${totalRows} row(s)...`,
     });
 
-    const existing = await getRecordList("public_leads");
+    const existing = await getRecordList(config.entity);
     const seenKeys = new Set(
-      existing.map((item: any) =>
-        `${item.source || ""}|${item.name || ""}|${item.contact || ""}`.toLowerCase(),
-      ),
+      existing.map((item: any) => config.duplicateKey(item)),
     );
     let importedRows = 0;
     let skippedRows = 0;
@@ -535,12 +589,12 @@ async function processPublicLeadCsvImport(jobId: string, csvText: string) {
               const row = batchRows[index];
               const rowNumber = start + index + 2;
               try {
-                const lead = rowToPublicLead(row, rowNumber);
-                if (!lead) {
+                const record = config.rowToRecord(row, rowNumber);
+                if (!record) {
                   skippedRows += 1;
                   continue;
                 }
-                const key = `${lead.source}|${lead.name}|${lead.contact}`.toLowerCase();
+                const key = config.duplicateKey(record);
                 if (seenKeys.has(key)) {
                   skippedRows += 1;
                   continue;
@@ -552,7 +606,7 @@ async function processPublicLeadCsvImport(jobId: string, csvText: string) {
                   ON CONFLICT (entity, id)
                   DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
                   `,
-                  ["public_leads", lead.id, JSON.stringify(lead)],
+                  [config.entity, record.id, JSON.stringify(record)],
                 );
                 seenKeys.add(key);
                 importedRows += 1;
@@ -627,6 +681,30 @@ async function processPublicLeadCsvImport(jobId: string, csvText: string) {
   } finally {
     activeImportJobs.delete(jobId);
   }
+}
+
+function publicLeadDuplicateKey(item: any) {
+  return `${item.source || ""}|${item.name || ""}|${item.contact || ""}`.toLowerCase();
+}
+
+function customerDuplicateKey(item: any) {
+  return `${item.name || ""}|${item.contact || ""}`.toLowerCase();
+}
+
+async function processPublicLeadCsvImport(jobId: string, csvText: string) {
+  return processCsvImportJob(jobId, csvText, {
+    entity: "public_leads",
+    rowToRecord: rowToPublicLead,
+    duplicateKey: publicLeadDuplicateKey,
+  });
+}
+
+async function processCustomerCsvImport(jobId: string, csvText: string) {
+  return processCsvImportJob(jobId, csvText, {
+    entity: "customers",
+    rowToRecord: rowToCustomer,
+    duplicateKey: customerDuplicateKey,
+  });
 }
 
 async function getRecordPage(
@@ -1161,11 +1239,155 @@ app.post("/api/imports/public-leads/csv", async (req, res) => {
   }
 });
 
+app.post("/api/imports/customers/csv", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  const csvText = String(req.body?.csvText || "");
+  const fileName = String(req.body?.fileName || "my-customers.csv");
+  if (!csvText.trim()) {
+    res.status(400).json({ error: "csvText is required." });
+    return;
+  }
+
+  try {
+    const parsed = csvToObjects(csvText);
+    if (parsed.rows.length === 0) {
+      res.status(400).json({ error: "No importable rows found." });
+      return;
+    }
+    const job: ImportJobRecord = {
+      id: `import_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      type: "customers_csv",
+      fileName,
+      status: "queued",
+      totalRows: parsed.rows.length,
+      processedRows: 0,
+      importedRows: 0,
+      skippedRows: 0,
+      failedRows: 0,
+      retryAttempts: 0,
+      batchSize: 100,
+      currentBatch: 0,
+      totalBatches: Math.max(1, Math.ceil(parsed.rows.length / 100)),
+      message: "Customer import queued.",
+      errors: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await saveImportJob(job);
+    setTimeout(() => {
+      processCustomerCsvImport(job.id, csvText).catch((err) => {
+        console.error("Customer CSV import failed:", err);
+      });
+    }, 0);
+    res.status(202).json(job);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/imports", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  const type = String(req.query.type || "");
+  const status = String(req.query.status || "");
+  try {
+    const jobs = (await getRecordList("import_jobs") as ImportJobRecord[])
+      .filter((job) => !type || job.type === type)
+      .filter((job) => !status || job.status === status)
+      .sort((a, b) => Date.parse(b.createdAt || b.updatedAt || "") - Date.parse(a.createdAt || a.updatedAt || ""))
+      .slice(0, 50);
+    res.json(jobs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/imports/prune", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  const olderThanDays = Math.max(1, Number(req.body?.olderThanDays || 30));
+  const statuses = Array.isArray(req.body?.statuses)
+    ? req.body.statuses.map(String)
+    : ["completed", "completed_with_errors", "failed"];
+  const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+  try {
+    const jobs = await getRecordList("import_jobs") as ImportJobRecord[];
+    const ids = jobs
+      .filter((job) => statuses.includes(job.status))
+      .filter((job) => Date.parse(job.completedAt || job.updatedAt || job.createdAt || "") < cutoff)
+      .map((job) => job.id);
+    const deleted = ids.length > 0 ? await deleteRecords("import_jobs", ids) : 0;
+    res.json({ success: true, deleted });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/imports/:id", async (req, res) => {
   if (!requireDatabase(res)) return;
   try {
     const job = await getImportJob(req.params.id);
     job ? res.json(job) : res.status(404).json({ error: "Import job not found." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/imports/:id", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    await deleteRecord("import_jobs", req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/imports/:id/retry-failed", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const sourceJob = await getImportJob(req.params.id);
+    if (!sourceJob) {
+      res.status(404).json({ error: "Import job not found." });
+      return;
+    }
+    const failedRows = (sourceJob.errors || []).map((error) => error.row).filter(Boolean);
+    if (failedRows.length === 0) {
+      res.status(400).json({ error: "This import job has no failed rows to retry." });
+      return;
+    }
+    const csvText = rowsToCsv(failedRows);
+    if (!csvText) {
+      res.status(400).json({ error: "Failed rows do not contain retryable data." });
+      return;
+    }
+    const job: ImportJobRecord = {
+      id: `import_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      type: sourceJob.type,
+      fileName: `${sourceJob.fileName || sourceJob.id}-retry-failed.csv`,
+      status: "queued",
+      totalRows: failedRows.length,
+      processedRows: 0,
+      importedRows: 0,
+      skippedRows: 0,
+      failedRows: 0,
+      retryAttempts: 0,
+      batchSize: 100,
+      currentBatch: 0,
+      totalBatches: Math.max(1, Math.ceil(failedRows.length / 100)),
+      message: `Retry queued from ${sourceJob.id}.`,
+      errors: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await saveImportJob(job);
+    setTimeout(() => {
+      const processRetry = sourceJob.type === "customers_csv"
+        ? processCustomerCsvImport
+        : processPublicLeadCsvImport;
+      processRetry(job.id, csvText).catch((err) => {
+        console.error("Failed-row retry import failed:", err);
+      });
+    }, 0);
+    res.status(202).json(job);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1193,7 +1415,7 @@ app.get("/api/imports/:id/failed-csv", async (req, res) => {
     const csv = rows
       .map((row) =>
         row
-          .map((value) => /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
+          .map((value) => csvEscape(value))
           .join(","),
       )
       .join("\n");

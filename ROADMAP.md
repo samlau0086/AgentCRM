@@ -58,8 +58,10 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Public Pool CSV import uses a server-side job with progress polling.
 - [x] Public Pool CSV import has server-side batch retry and skip-after-retries behavior.
 - [x] Public Pool CSV import supports failed-row CSV download.
-- [ ] Move My Customers CSV import to the same server-side import job pattern.
-- [ ] Add import history view and retry-failed-rows action.
+- [x] Public Pool import history view added to the CSV import modal.
+- [x] Public Pool failed-row retry creates a new backend import job.
+- [x] My Customers CSV import uses the same server-side job, progress, history, failed-row download, and retry pattern.
+- [x] Broader import history page added with type/status filters, failed-row actions, delete, and retention pruning.
 
 ## 3. Sales, Products & Quotes / 产品与报价
 
@@ -189,8 +191,6 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Add import history view and retry-failed-rows action.
-2. Move My Customers CSV import to the same backend import job pattern.
-3. Add always-on server-side agent scheduler.
-4. Add production health dashboards for WhatsApp, Email, agent runs, and imports.
-5. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
+1. Add always-on server-side agent scheduler.
+2. Add production health dashboards for WhatsApp, Email, agent runs, and imports.
+3. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.

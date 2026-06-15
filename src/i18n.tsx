@@ -9,6 +9,7 @@ const dictionaries = {
     'nav.media': 'Media Library',
     'nav.inbox': 'Inbox',
     'nav.agentCenter': 'Agent Center',
+    'nav.imports': 'Import History',
     'nav.knowledge': 'Knowledge Base',
     'nav.settings': 'Settings',
     'search.placeholder': 'Search customers, messages, tasks...',

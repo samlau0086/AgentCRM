@@ -141,7 +141,7 @@ export type ImportJobStatus = "queued" | "running" | "completed" | "completed_wi
 
 export type ImportJob = {
   id: string;
-  type: "public_leads_csv";
+  type: "public_leads_csv" | "customers_csv";
   fileName: string;
   status: ImportJobStatus;
   totalRows: number;
@@ -173,11 +173,71 @@ export async function createPublicLeadCsvImportJob(fileName: string, csvText: st
   return response.json() as Promise<ImportJob>;
 }
 
+export async function createCustomerCsvImportJob(fileName: string, csvText: string) {
+  const response = await fetch("/api/imports/customers/csv", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName, csvText }),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error || `Failed to create customer import job: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<ImportJob>;
+}
+
 export async function loadImportJob(jobId: string) {
   const response = await fetch(`/api/imports/${encodeURIComponent(jobId)}`);
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     throw new Error(data?.error || `Failed to load import job: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<ImportJob>;
+}
+
+export async function loadImportJobs(type = "", status = "") {
+  const params = new URLSearchParams();
+  if (type) params.set("type", type);
+  if (status) params.set("status", status);
+  const response = await fetch(`/api/imports?${params.toString()}`);
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error || `Failed to load import jobs: HTTP ${response.status}`);
+  }
+  const data = await response.json().catch(() => []);
+  return Array.isArray(data) ? data as ImportJob[] : [];
+}
+
+export async function deleteImportJob(jobId: string) {
+  const response = await fetch(`/api/imports/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error || `Failed to delete import job: HTTP ${response.status}`);
+  }
+}
+
+export async function pruneImportJobs(olderThanDays: number) {
+  const response = await fetch("/api/imports/prune", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ olderThanDays }),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error || `Failed to prune import jobs: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<{ success: boolean; deleted: number }>;
+}
+
+export async function retryImportJobFailedRows(jobId: string) {
+  const response = await fetch(`/api/imports/${encodeURIComponent(jobId)}/retry-failed`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error || `Failed to retry import job: HTTP ${response.status}`);
   }
   return response.json() as Promise<ImportJob>;
 }

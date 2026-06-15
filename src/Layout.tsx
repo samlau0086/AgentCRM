@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Info,
+  UploadCloud,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -54,6 +55,7 @@ export default function Layout() {
       href: "/agent-center",
       icon: Bot,
     },
+    { name: language === "zh" ? "导入历史" : t("nav.imports"), href: "/imports", icon: UploadCloud },
     { name: t("nav.knowledge"), href: "/knowledge", icon: BookOpen },
     ...(currentUser.role === "superadmin"
       ? [

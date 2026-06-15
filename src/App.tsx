@@ -19,6 +19,7 @@ import Settings from "./pages/Settings";
 import UserManagement from "./pages/UserManagement";
 import Profile from "./pages/Profile";
 import Login from "./pages/Login";
+import ImportHistory from "./pages/ImportHistory";
 import { LanguageProvider } from "./i18n";
 import { ThemeProvider } from "./theme";
 import { startAgentScheduler } from "./services/agentScheduler";
@@ -62,6 +63,7 @@ export default function App() {
               <Route path="inbox" element={<Inbox />} />
               <Route path="knowledge" element={<KnowledgeBase />} />
               <Route path="agent-center" element={<AgentCenter />} />
+              <Route path="imports" element={<ImportHistory />} />
               <Route path="users" element={<UserManagement />} />
               <Route path="profile" element={<Profile />} />
               <Route path="settings" element={<Settings />} />
