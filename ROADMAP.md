@@ -186,14 +186,14 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] README includes English usage guide.
 - [x] README includes deployment and verification notes.
 - [x] Roadmap added as `ROADMAP.md`.
-- [~] Chinese README content needs encoding cleanup; current Chinese section appears mojibake in the repository.
-- [ ] Rewrite README Chinese section in clean UTF-8.
+- [x] Chinese README content rewritten in clean UTF-8.
+- [x] README documents Operations Health, Production Logs, server scheduler, and agent retry behavior.
 - [ ] Add architecture diagram and data flow diagrams.
 
 ---
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
-2. Add automated deployment smoke tests for health, inbox sync, operations logs, and agent scheduler endpoints.
-3. Add persistent operation event storage for long-term audit history.
+1. Add automated deployment smoke tests for health, inbox sync, operations logs, and agent scheduler endpoints.
+2. Add persistent operation event storage for long-term audit history.
+3. Add database indexes for high-volume CRM record queries.
