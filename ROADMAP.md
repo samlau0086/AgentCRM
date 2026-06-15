@@ -176,7 +176,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] PM2 restart points to current `dist/server.cjs`.
 - [x] Deploy fails fast if legacy browser prompt UI is found in built assets.
 - [x] `/api/deploy-info` endpoint exists for backend version verification.
-- [ ] Add automated smoke test after deployment.
+- [x] Add automated smoke tests after deployment for health, operations logs, inbox sync, and agent scheduler endpoints.
 - [ ] Add database migration/version endpoint.
 - [x] Add first-pass production health dashboard for Email, WhatsApp, agent runs, imports, and lead-platform collection jobs.
 - [x] Add first-pass searchable production logs/event history dashboard.
@@ -194,6 +194,6 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Add automated deployment smoke tests for health, inbox sync, operations logs, and agent scheduler endpoints.
-2. Add persistent operation event storage for long-term audit history.
-3. Add database indexes for high-volume CRM record queries.
+1. Add persistent operation event storage for long-term audit history.
+2. Add database indexes for high-volume CRM record queries.
+3. Add provider health checks for configured AI model profiles.

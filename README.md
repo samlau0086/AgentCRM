@@ -232,6 +232,7 @@ Required GitHub Actions secrets:
 - `PROJECT_PATH`
 - `APP_NAME`
 - `APP_PORT`
+- `APP_URL`
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `GEMINI_API_KEY`
@@ -239,6 +240,9 @@ Required GitHub Actions secrets:
 - `OPENAI_API_KEY`
 - `OPENROUTER_API_KEY`
 - `ANTHROPIC_API_KEY`
+- `WA_HUB_URL`
+- `WA_HUB_TOKEN`
+- `WA_HUB_WEBHOOK_SECRET`
 
 The deployment workflow:
 
@@ -251,6 +255,7 @@ The deployment workflow:
 7. Runs `npm run build`.
 8. Fails fast if legacy prompt UI or stale backend markers are found.
 9. Restarts PM2 with `dist/server.cjs`.
+10. Runs smoke tests against deploy info, operations health, operations logs, background inbox sync, and agent scheduler endpoints.
 
 ### Deployment Verification
 
@@ -498,6 +503,7 @@ google/gemini-flash-1.5
 - `PROJECT_PATH`
 - `APP_NAME`
 - `APP_PORT`
+- `APP_URL`
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `GEMINI_API_KEY`
@@ -505,6 +511,9 @@ google/gemini-flash-1.5
 - `OPENAI_API_KEY`
 - `OPENROUTER_API_KEY`
 - `ANTHROPIC_API_KEY`
+- `WA_HUB_URL`
+- `WA_HUB_TOKEN`
+- `WA_HUB_WEBHOOK_SECRET`
 
 部署流程：
 
@@ -517,6 +526,7 @@ google/gemini-flash-1.5
 7. 执行 `npm run build`。
 8. 如果发现旧版 prompt UI 或旧 backend marker，则中止部署。
 9. 使用 `dist/server.cjs` 重启 PM2。
+10. 执行 smoke tests，验证 deploy info、operations health、operations logs、后台收件箱同步和智能体调度接口。
 
 ### 部署验证
 

@@ -99,6 +99,26 @@ jobs:
               sed -i '/^ANTHROPIC_API_KEY=/d' .env
               echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
             fi
+
+            if [ -n "${{ secrets.APP_URL }}" ]; then
+              sed -i '/^APP_URL=/d' .env
+              echo "APP_URL=${{ secrets.APP_URL }}" >> .env
+            fi
+
+            if [ -n "${{ secrets.WA_HUB_URL }}" ]; then
+              sed -i '/^WA_HUB_URL=/d' .env
+              echo "WA_HUB_URL=${{ secrets.WA_HUB_URL }}" >> .env
+            fi
+
+            if [ -n "${{ secrets.WA_HUB_TOKEN }}" ]; then
+              sed -i '/^WA_HUB_TOKEN=/d' .env
+              echo "WA_HUB_TOKEN=${{ secrets.WA_HUB_TOKEN }}" >> .env
+            fi
+
+            if [ -n "${{ secrets.WA_HUB_WEBHOOK_SECRET }}" ]; then
+              sed -i '/^WA_HUB_WEBHOOK_SECRET=/d' .env
+              echo "WA_HUB_WEBHOOK_SECRET=${{ secrets.WA_HUB_WEBHOOK_SECRET }}" >> .env
+            fi
             
             # 安装依赖
             npm install
@@ -134,5 +154,58 @@ jobs:
             pm2 delete "${{ secrets.APP_NAME }}" || true
             pm2 start "$(pwd)/dist/server.cjs" --name "${{ secrets.APP_NAME }}" --update-env
             pm2 save
+
+            # Post-deploy smoke tests. Prefer public APP_URL when provided,
+            # otherwise test through localhost on the configured app port.
+            SMOKE_BASE_URL="${{ secrets.APP_URL }}"
+            if [ -z "$SMOKE_BASE_URL" ]; then
+              SMOKE_BASE_URL="http://127.0.0.1:${{ secrets.APP_PORT }}"
+            fi
+            SMOKE_BASE_URL="${SMOKE_BASE_URL%/}"
+            echo "Running smoke tests against ${SMOKE_BASE_URL}"
+
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -k -sS -m 5 "${SMOKE_BASE_URL}/api/deploy-info" >/dev/null 2>&1; then
+                echo "App responded before smoke tests."
+                break
+              fi
+              echo "Waiting for app to respond (${attempt}/10)..."
+              sleep 3
+            done
+
+            smoke_get() {
+              path="$1"
+              expected="$2"
+              tmp_file="$(mktemp)"
+              code="$(curl -k -sS -m 20 -o "$tmp_file" -w "%{http_code}" "${SMOKE_BASE_URL}${path}" || true)"
+              if [ "$code" != "$expected" ]; then
+                echo "Smoke GET ${path} failed. Expected ${expected}, got ${code}."
+                cat "$tmp_file" || true
+                rm -f "$tmp_file"
+                exit 1
+              fi
+              rm -f "$tmp_file"
+            }
+
+            smoke_post() {
+              path="$1"
+              expected="$2"
+              tmp_file="$(mktemp)"
+              code="$(curl -k -sS -m 30 -X POST -o "$tmp_file" -w "%{http_code}" "${SMOKE_BASE_URL}${path}" || true)"
+              if [ "$code" != "$expected" ]; then
+                echo "Smoke POST ${path} failed. Expected ${expected}, got ${code}."
+                cat "$tmp_file" || true
+                rm -f "$tmp_file"
+                exit 1
+              fi
+              rm -f "$tmp_file"
+            }
+
+            smoke_get "/api/deploy-info" "200"
+            smoke_get "/api/operations/health" "200"
+            smoke_get "/api/operations/logs?limit=10" "200"
+            smoke_post "/api/communication/inbox/background-sync" "200"
+            smoke_post "/api/agent/scheduler/tick" "200"
+            echo "Smoke tests passed."
             # 如果使用 systemd: sudo systemctl restart your-service
             # 如果是普通的 docker-compose: docker-compose up -d --build
