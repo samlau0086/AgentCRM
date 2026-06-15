@@ -180,6 +180,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [ ] Add database migration/version endpoint.
 - [x] Add first-pass production health dashboard for Email, WhatsApp, agent runs, imports, and lead-platform collection jobs.
 - [x] Add first-pass searchable production logs/event history dashboard.
+- [x] Add first-pass persistent operation event storage with retention pruning.
 
 ## 11. Documentation / 文档
 
@@ -194,6 +195,6 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Add persistent operation event storage for long-term audit history.
-2. Add database indexes for high-volume CRM record queries.
-3. Add provider health checks for configured AI model profiles.
+1. Add database indexes for high-volume CRM record queries.
+2. Add provider health checks for configured AI model profiles.
+3. Add richer operation event detail views and export.

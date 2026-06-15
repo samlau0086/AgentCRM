@@ -525,6 +525,26 @@ const activeImportJobs = new Set<string>();
 
 async function saveImportJob(job: ImportJobRecord) {
   await upsertRecord("import_jobs", job.id, job);
+  await recordOperationEvent({
+    id: `import-job:${job.id}:${job.status}:${job.processedRows || 0}:${job.failedRows || 0}`,
+    timestamp: job.updatedAt || job.completedAt || job.startedAt || job.createdAt,
+    module: "import",
+    severity: severityFromStatus(job.status),
+    title: job.fileName || job.type || "Import job",
+    detail: job.message || `${job.importedRows || 0} imported, ${job.skippedRows || 0} skipped, ${job.failedRows || 0} failed.`,
+    status: job.status,
+    recordId: job.id,
+    metadata: {
+      type: job.type,
+      totalRows: job.totalRows,
+      processedRows: job.processedRows,
+      importedRows: job.importedRows,
+      skippedRows: job.skippedRows,
+      failedRows: job.failedRows,
+      retryAttempts: job.retryAttempts,
+      firstError: job.errors?.[0],
+    },
+  });
 }
 
 async function getImportJob(id: string) {
@@ -1617,6 +1637,23 @@ async function addServerAgentRun(run: any) {
     createdAt: new Date().toISOString(),
   };
   await upsertRecord("agent_runs", record.id, record);
+  await recordOperationEvent({
+    id: `agent-run-created:${record.id}`,
+    timestamp: record.createdAt,
+    module: record.operationType === "lead_platform_collection" ? "lead_platform" : "agent",
+    severity: severityFromStatus(record.status),
+    title: record.taskType || record.workflowId || "Agent run created",
+    detail: record.currentStep || "Agent run created.",
+    status: record.status,
+    recordId: record.id,
+    metadata: {
+      agentId: record.agentId,
+      workflowId: record.workflowId,
+      operationType: record.operationType,
+      targetType: record.targetType,
+      targetId: record.targetId,
+    },
+  });
   return record;
 }
 
@@ -1627,6 +1664,23 @@ async function addServerAgentStep(step: any) {
     createdAt: new Date().toISOString(),
   };
   await upsertRecord("agent_steps", record.id, record);
+  await recordOperationEvent({
+    id: `agent-step:${record.id}`,
+    timestamp: record.createdAt,
+    module: String(record.toolName || "").includes("lead_generation") ? "lead_platform" : "agent",
+    severity: severityFromStatus(record.status),
+    title: record.toolName || record.stepType || "Agent step",
+    detail: record.outputJson?.error || record.outputJson?.message || record.stepType || "",
+    status: record.status,
+    recordId: record.runId,
+    metadata: {
+      stepId: record.id,
+      runId: record.runId,
+      stepType: record.stepType,
+      inputJson: record.inputJson,
+      outputJson: record.outputJson,
+    },
+  });
   return record;
 }
 
@@ -1801,6 +1855,24 @@ async function failServerAgentRun(run: any, workflow: ServerWorkflow | undefined
     ...failure,
   };
   await upsertRecord("agent_runs", run.id, nextRun);
+  await recordOperationEvent({
+    id: `agent-run-failed:${run.id}:${failure.retryAttempt}`,
+    module: run.operationType === "lead_platform_collection" ? "lead_platform" : "agent",
+    severity: "error",
+    title: run.taskType || run.workflowId || "Agent run failed",
+    detail: failure.errorMessage,
+    status: nextRun.currentStep,
+    recordId: run.id,
+    metadata: {
+      agentId: run.agentId,
+      workflowId: run.workflowId,
+      operationType: run.operationType,
+      failureCategory: failure.failureCategory,
+      retryable: failure.retryable,
+      retryAttempt: failure.retryAttempt,
+      nextRetryAt: failure.nextRetryAt,
+    },
+  });
   return nextRun;
 }
 
@@ -1844,6 +1916,22 @@ async function executeExistingServerAgentRun(run: any, reason = "retry") {
       errorMessage: "",
     };
     await upsertRecord("agent_runs", run.id, completedRun);
+    await recordOperationEvent({
+      id: `agent-run-completed:${run.id}:${Date.now()}`,
+      module: run.operationType === "lead_platform_collection" ? "lead_platform" : "agent",
+      severity: "success",
+      title: run.taskType || workflow.name || "Agent run completed",
+      detail: reason === "manual" ? "Manual retry completed." : "Retry completed.",
+      status: "Completed",
+      recordId: run.id,
+      metadata: {
+        agentId: run.agentId,
+        workflowId: run.workflowId,
+        operationType: run.operationType,
+        retryAttempt: run.retryAttempt || 0,
+        outputJson: result.outputJson,
+      },
+    });
     return completedRun;
   } catch (err: any) {
     return failServerAgentRun(runningRun, workflow, err, run.retryAttempt || 0);
@@ -1952,6 +2040,23 @@ async function runServerAgentIfDue(agent: ServerAgent, now: Date) {
           currentStep: "Completed",
           outputJson: result.outputJson,
           toolResults: result.steps,
+        });
+        await recordOperationEvent({
+          id: `agent-run-completed:${run.id}`,
+          module: workflow.operationType === "lead_platform_collection" ? "lead_platform" : "agent",
+          severity: "success",
+          title: run.taskType || workflow.name,
+          detail: "Scheduled workflow completed.",
+          status: "Completed",
+          recordId: run.id,
+          metadata: {
+            agentId: agent.id,
+            workflowId: workflow.id,
+            operationType: workflow.operationType,
+            targetType: target.type,
+            targetId: target.id,
+            outputJson: result.outputJson,
+          },
         });
       } catch (err: any) {
         await failServerAgentRun(run, workflow, err, 0);
@@ -2379,6 +2484,24 @@ async function upsertWhatsAppWebhookInboxMessage(message: any, userId: string, s
   };
 
   await upsertRecord("inbox_messages", previewId, next);
+  await recordOperationEvent({
+    id: `whatsapp-message:${previewId}:${threadId}`,
+    timestamp: createdAt,
+    module: "whatsapp",
+    severity: "info",
+    title: `WhatsApp: ${mappedMob || conversationKey}`,
+    detail: summary || "WhatsApp message stored.",
+    status: message?.direction === "outbound" ? "Outbound" : "Inbound",
+    recordId: previewId,
+    metadata: {
+      clientId,
+      conversationKey,
+      threadId,
+      direction: message?.direction,
+      attachments: attachments.length,
+      userId,
+    },
+  });
   return next;
 }
 
@@ -4156,6 +4279,22 @@ async function upsertEmailInboxMessage(email: any) {
     thread,
   };
   await upsertRecord("inbox_messages", email.id, next);
+  await recordOperationEvent({
+    id: `email-message:${email.id}`,
+    timestamp: email.date || new Date().toISOString(),
+    module: "email",
+    severity: "info",
+    title: `Email: ${email.subject || "(No subject)"}`,
+    detail: email.summary || "Email message stored.",
+    status: existing ? "Updated" : "Imported",
+    recordId: email.id,
+    metadata: {
+      sender: email.sender,
+      target: email.target,
+      mailbox: email.mailbox,
+      direction: "inbound",
+    },
+  });
   return next;
 }
 
@@ -4292,8 +4431,41 @@ async function runBackgroundInboxSync(reason = "timer") {
     if (errors.length > 0) {
       console.warn(`[background-inbox-sync] ${errors.join(" | ")}`);
     }
+    await recordOperationEvent({
+      module: "system",
+      severity: errors.length > 0 ? "warning" : "success",
+      title: "Background inbox sync",
+      detail: `Reason: ${reason}. Email imported: ${emailImported}. WhatsApp imported: ${whatsAppImported}.`,
+      status: errors.length > 0 ? "Completed with warnings" : "Completed",
+      metadata: {
+        reason,
+        emailImported,
+        whatsAppImported,
+        errors,
+      },
+    });
+    for (const [index, error] of errors.entries()) {
+      await recordOperationEvent({
+        id: `background-inbox-sync-error:${Date.now()}:${index}`,
+        module: String(error).toLowerCase().includes("whatsapp") || String(error).toLowerCase().includes("hub") ? "whatsapp" : "email",
+        severity: "error",
+        title: "Background inbox sync error",
+        detail: String(error),
+        status: "Failed",
+        metadata: { reason },
+      });
+    }
+    await pruneOperationEvents();
   } catch (err: any) {
     backgroundInboxSyncState.lastErrors = [err.message || "Background inbox sync failed."];
+    await recordOperationEvent({
+      module: "system",
+      severity: "error",
+      title: "Background inbox sync failed",
+      detail: err.message || "Background inbox sync failed.",
+      status: "Failed",
+      metadata: { reason },
+    });
     console.error("[background-inbox-sync] failed:", err);
   } finally {
     backgroundInboxSyncState.lastFinishedAt = new Date().toISOString();
@@ -4433,6 +4605,58 @@ type OperationsLog = {
   metadata?: Record<string, unknown>;
 };
 
+const OPERATION_EVENT_RETENTION = Math.max(1000, Number(process.env.OPERATION_EVENT_RETENTION || 5000));
+
+function operationEventId(module: OperationsLog["module"]) {
+  return `event_${module}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+async function recordOperationEvent(event: Omit<OperationsLog, "id" | "timestamp"> & Partial<Pick<OperationsLog, "id" | "timestamp">>) {
+  if (!hasDatabase) return undefined;
+  const record: OperationsLog = {
+    id: event.id || operationEventId(event.module),
+    timestamp: event.timestamp || new Date().toISOString(),
+    module: event.module,
+    severity: event.severity,
+    title: event.title,
+    detail: event.detail,
+    status: event.status,
+    recordId: event.recordId,
+    metadata: event.metadata,
+  };
+  try {
+    await upsertRecord("operation_events", record.id, record);
+    return record;
+  } catch (err) {
+    console.warn("[operation-events] failed to persist event:", err);
+    return undefined;
+  }
+}
+
+async function pruneOperationEvents() {
+  if (!hasDatabase || OPERATION_EVENT_RETENTION <= 0) return;
+  try {
+    await withDb(async (client) => {
+      await client.query(
+        `
+        DELETE FROM crm_records
+        WHERE entity = 'operation_events'
+          AND id NOT IN (
+            SELECT id
+            FROM crm_records
+            WHERE entity = 'operation_events'
+            ORDER BY COALESCE((data->>'timestamp')::timestamptz, updated_at) DESC
+            LIMIT $1
+          );
+        `,
+        [OPERATION_EVENT_RETENTION],
+      );
+    });
+  } catch (err) {
+    console.warn("[operation-events] failed to prune events:", err);
+  }
+}
+
 function severityFromStatus(status = ""): OperationsLog["severity"] {
   const value = String(status || "").toLowerCase();
   if (value.includes("failed") || value === "rejected") return "error";
@@ -4459,14 +4683,25 @@ async function buildOperationsLogs(options: {
   search?: string;
   limit?: number;
 }) {
-  const [agentRuns, importJobs, inboxMessages] = await Promise.all([
+  const [agentRuns, importJobs, inboxMessages, storedEvents] = await Promise.all([
     getRecordList("agent_runs"),
     getRecordList("import_jobs"),
     getRecordList("inbox_messages"),
+    getRecordList("operation_events").catch(() => []),
   ]);
 
   const logs: OperationsLog[] = [];
-  const pushLog = (log: OperationsLog) => logs.push(log);
+  const seenLogs = new Set<string>();
+  const pushLog = (log: OperationsLog) => {
+    if (!log?.id || seenLogs.has(log.id)) return;
+    seenLogs.add(log.id);
+    logs.push(log);
+  };
+
+  (storedEvents as OperationsLog[]).forEach((event) => {
+    if (!event?.id || !event?.module || !event?.severity || !event?.title) return;
+    pushLog(event);
+  });
 
   if (backgroundInboxSyncState.lastStartedAt || backgroundInboxSyncState.lastFinishedAt) {
     pushLog({
@@ -4601,6 +4836,17 @@ app.get("/api/operations/logs", async (req, res) => {
     }));
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to load operations logs." });
+  }
+});
+
+app.post("/api/operations/events/prune", async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    await pruneOperationEvents();
+    const remaining = await getRecordList("operation_events");
+    res.json({ success: true, retained: remaining.length, retention: OPERATION_EVENT_RETENTION });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to prune operation events." });
   }
 });
 

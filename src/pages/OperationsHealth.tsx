@@ -258,6 +258,25 @@ export default function OperationsHealth() {
     }
   };
 
+  const pruneOperationEvents = async () => {
+    setBusyAction("prune-events");
+    try {
+      const response = await fetch("/api/operations/events/prune", { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Prune failed with HTTP ${response.status}.`);
+      notify(
+        language === "zh" ? `已按保留策略清理事件，当前保留 ${data.retained ?? 0} 条。` : `Operation events pruned. ${data.retained ?? 0} retained.`,
+        "success",
+        copy.title,
+      );
+      await loadLogs();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to prune operation events.", "error", copy.title);
+    } finally {
+      setBusyAction("");
+    }
+  };
+
   const derived = useMemo(() => {
     if (!health) return null;
     const emailWarn = health.email.receiveProfiles === 0 || health.email.mappings === 0 || health.email.errors.length > 0;
@@ -375,6 +394,14 @@ export default function OperationsHealth() {
           >
             <RefreshCw className={cn("h-4 w-4", logsLoading && "animate-spin")} />
             {language === "zh" ? "刷新日志" : "Refresh logs"}
+          </button>
+          <button
+            type="button"
+            onClick={pruneOperationEvents}
+            disabled={!!busyAction}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
+          >
+            {language === "zh" ? "清理事件" : "Prune events"}
           </button>
         </div>
         <div className="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-white/10 lg:flex-row">

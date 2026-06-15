@@ -53,6 +53,7 @@ WA_HUB_WEBHOOK_SECRET=...
 AGENT_SCHEDULER_INTERVAL_MS=60000
 AGENT_RUN_MAX_RETRIES=3
 BACKGROUND_INBOX_SYNC_INTERVAL_MS=60000
+OPERATION_EVENT_RETENTION=5000
 ```
 
 `DATABASE_URL` stores CRM data. `PG_VECTOR_URL` is used by the vector knowledge base. In GitHub Actions deployment, `PG_VECTOR_URL` can be set from `DATABASE_URL` when only one database URL is provided.
@@ -70,6 +71,7 @@ Database-backed data includes:
 - Products, quotes, pricing tiers, and WooCommerce imports
 - Model Profiles
 - Agents, agent runs, trace steps, approvals, failure categories, and retry metadata
+- Operation events used by Production Logs
 - System users
 - App settings
 - Media records
@@ -219,6 +221,8 @@ The **Production Logs** table provides a searchable event stream across:
 
 Filters include module, severity, and free-text search.
 
+Operation events are persisted in the database so production history survives browser changes and service restarts. The default retention keeps the newest 5000 events and can be changed with `OPERATION_EVENT_RETENTION`. Use **Prune events** in Operations to apply the retention policy manually.
+
 ### Deployment
 
 The repo includes `.github/workflows/deploy.yml`. It deploys to a VPS on every push to `main`.
@@ -324,6 +328,7 @@ WA_HUB_WEBHOOK_SECRET=...
 AGENT_SCHEDULER_INTERVAL_MS=60000
 AGENT_RUN_MAX_RETRIES=3
 BACKGROUND_INBOX_SYNC_INTERVAL_MS=60000
+OPERATION_EVENT_RETENTION=5000
 ```
 
 `DATABASE_URL` 用于保存 CRM 业务数据。`PG_VECTOR_URL` 用于知识库向量化。如果 GitHub Actions 自动部署时只配置了 `DATABASE_URL`，可以在部署脚本中将 `PG_VECTOR_URL` 设置为同一个值。
@@ -341,6 +346,7 @@ BACKGROUND_INBOX_SYNC_INTERVAL_MS=60000
 - 产品、报价、数量阶梯价格和 WooCommerce 导入
 - 模型 Profiles
 - 智能体、运行日志、追踪步骤、人工审批、失败分类和重试元数据
+- 用于 Production Logs 的 operation events
 - 系统用户
 - 应用设置
 - 媒体素材记录
@@ -489,6 +495,8 @@ google/gemini-flash-1.5
 - System sync/scheduler events
 
 支持按模块、级别和关键词搜索。
+
+Operation events 会保存到数据库，因此生产历史不会因为换浏览器或服务重启而丢失。默认保留最新 5000 条，可通过 `OPERATION_EVENT_RETENTION` 调整。在 Operations 页面点击 **Prune events / 清理事件** 可手动应用保留策略。
 
 ### 自动部署
 
