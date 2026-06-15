@@ -1460,6 +1460,11 @@ type ServerWorkflow = {
   repeatable: boolean;
 };
 
+type AgentFailureCategory = "configuration" | "network" | "rate_limit" | "provider" | "data" | "approval" | "duplicate" | "unknown";
+
+const SERVER_AGENT_MAX_RETRIES = Math.max(0, Number(process.env.AGENT_RUN_MAX_RETRIES || 3));
+const SERVER_AGENT_RETRY_DELAYS_MS = [60000, 5 * 60000, 15 * 60000];
+
 const serverAgentWorkflows: ServerWorkflow[] = [
   { id: "lead_scoring", name: "AI Lead Analysis", operationType: "lead_ai_analysis", targetType: "lead", requiredTools: ["customers", "knowledge"], repeatable: false },
   { id: "lead_enrichment", name: "Lead Generation Platforms", operationType: "lead_platform_collection", targetType: "platform", requiredTools: ["lead_platforms"], repeatable: true },
@@ -1515,6 +1520,44 @@ function serverAgentWorkflowsFor(agent: ServerAgent) {
 
 function operationKey(workflow: ServerWorkflow, target: any) {
   return `${workflow.operationType}:${target.type}:${String(target.id).toLowerCase()}`;
+}
+
+function classifyAgentFailure(message = "", status?: number): AgentFailureCategory {
+  const text = String(message || "").toLowerCase();
+  if (status === 429 || text.includes("rate limit") || text.includes("too many requests")) return "rate_limit";
+  if (status && status >= 500) return "provider";
+  if (text.includes("timeout") || text.includes("timed out") || text.includes("network") || text.includes("fetch failed") || text.includes("econn") || text.includes("socket")) return "network";
+  if (text.includes("api key") || text.includes("disabled") || text.includes("base url") || text.includes("configure") || text.includes("not enabled") || text.includes("requires")) return "configuration";
+  if (text.includes("not found") || text.includes("no eligible target") || text.includes("no active product") || text.includes("no enabled workflow")) return "data";
+  if (text.includes("rejected") || text.includes("approval")) return "approval";
+  if (text.includes("duplicate") || text.includes("already")) return "duplicate";
+  if (text.includes("http 5")) return "provider";
+  return "unknown";
+}
+
+function isRetryableAgentFailure(category: AgentFailureCategory) {
+  return ["network", "rate_limit", "provider", "unknown"].includes(category);
+}
+
+function nextAgentRetryAt(attempt: number, now = new Date()) {
+  const delay = SERVER_AGENT_RETRY_DELAYS_MS[Math.min(Math.max(0, attempt), SERVER_AGENT_RETRY_DELAYS_MS.length - 1)] || SERVER_AGENT_RETRY_DELAYS_MS[0];
+  return new Date(now.getTime() + delay).toISOString();
+}
+
+function agentFailureMetadata(err: any, priorAttempt = 0, now = new Date()) {
+  const message = err?.message || String(err || "Agent workflow failed.");
+  const category = classifyAgentFailure(message, err?.status);
+  const retryAttempt = priorAttempt + 1;
+  const retryable = isRetryableAgentFailure(category) && retryAttempt <= SERVER_AGENT_MAX_RETRIES;
+  return {
+    errorMessage: message,
+    failureCategory: category,
+    retryable,
+    retryAttempt,
+    maxRetries: SERVER_AGENT_MAX_RETRIES,
+    nextRetryAt: retryable ? nextAgentRetryAt(priorAttempt, now) : "",
+    lastRetryAt: priorAttempt > 0 ? now.toISOString() : "",
+  };
 }
 
 async function serverDuplicateRunExists(key?: string) {
@@ -1729,27 +1772,129 @@ async function executeServerWorkflow(agent: ServerAgent, workflow: ServerWorkflo
   throw new Error(`Server-side workflow ${workflow.id} is not available yet.`);
 }
 
+async function resolveServerWorkflowTarget(workflow: ServerWorkflow, run: any, agent?: ServerAgent) {
+  const inputTarget = run?.inputJson?.target;
+  if (inputTarget?.record) return inputTarget;
+  const targets = await serverWorkflowTargets(workflow, agent);
+  return targets.find((target) => String(target.id) === String(run.targetId || inputTarget?.id)) || inputTarget;
+}
+
+async function failServerAgentRun(run: any, workflow: ServerWorkflow | undefined, err: any, priorAttempt = 0) {
+  const failure = agentFailureMetadata(err, priorAttempt);
+  await addServerAgentStep({
+    runId: run.id,
+    stepType: "Tool",
+    toolName: workflow?.id || run.workflowId || "server.agent",
+    outputJson: {
+      error: failure.errorMessage,
+      failureCategory: failure.failureCategory,
+      retryable: failure.retryable,
+      retryAttempt: failure.retryAttempt,
+      nextRetryAt: failure.nextRetryAt,
+    },
+    status: "Failed",
+  });
+  const nextRun = {
+    ...run,
+    status: "Failed",
+    currentStep: failure.retryable ? "Retry Scheduled" : "Failed",
+    ...failure,
+  };
+  await upsertRecord("agent_runs", run.id, nextRun);
+  return nextRun;
+}
+
+async function executeExistingServerAgentRun(run: any, reason = "retry") {
+  const agent = await getRecord("agents", run.agentId) as ServerAgent | undefined;
+  if (!agent) throw new Error("Agent no longer exists.");
+  const workflow = serverAgentWorkflows.find((item) => item.id === run.workflowId);
+  if (!workflow) throw new Error(`Workflow ${run.workflowId || ""} is not available for retry.`);
+  const target = await resolveServerWorkflowTarget(workflow, run, agent);
+  if (!target) throw new Error("Original workflow target is no longer available.");
+
+  const runningRun = {
+    ...run,
+    status: "Running",
+    currentStep: reason === "manual" ? "Manual Retry" : "Retrying",
+    lastRetryAt: new Date().toISOString(),
+  };
+  await upsertRecord("agent_runs", run.id, runningRun);
+  await addServerAgentStep({
+    runId: run.id,
+    stepType: "Thought",
+    toolName: reason === "manual" ? "server.retry.manual" : "server.retry.auto",
+    inputJson: { runId: run.id, retryAttempt: run.retryAttempt || 0, reason },
+    outputJson: { workflowId: workflow.id, targetId: target.id },
+    status: "Success",
+  });
+
+  try {
+    const result = await executeServerWorkflow(agent, workflow, target);
+    for (const step of result.steps) {
+      await addServerAgentStep({ runId: run.id, stepType: "Tool", ...step });
+    }
+    const completedRun = {
+      ...runningRun,
+      status: "Completed",
+      currentStep: "Completed",
+      outputJson: result.outputJson,
+      toolResults: result.steps,
+      retryable: false,
+      nextRetryAt: "",
+      errorMessage: "",
+    };
+    await upsertRecord("agent_runs", run.id, completedRun);
+    return completedRun;
+  } catch (err: any) {
+    return failServerAgentRun(runningRun, workflow, err, run.retryAttempt || 0);
+  }
+}
+
 async function writeServerSchedulerFailure(agent: ServerAgent, message: string, now: Date) {
+  const failure = agentFailureMetadata(new Error(message), 0, now);
   const run = await addServerAgentRun({
     agentId: agent.id,
     taskType: `Scheduled: ${agent.name}`,
     status: "Failed",
-    currentStep: "Skipped",
+    currentStep: failure.retryable ? "Retry Scheduled" : "Skipped",
     targetType: "global",
     repeatable: true,
     inputJson: { scheduled: true, schedule: agent.schedule, serverSide: true },
     outputJson: { reason: message },
     errorMessage: message,
+    ...failure,
   });
   await addServerAgentStep({
     runId: run.id,
     stepType: "Thought",
     toolName: "server.scheduler.skip",
     inputJson: { agentId: agent.id, schedule: agent.schedule },
-    outputJson: { message },
+    outputJson: { message, failureCategory: failure.failureCategory, retryable: failure.retryable, nextRetryAt: failure.nextRetryAt },
     status: "Failed",
   });
   await updateServerAgentSchedule(agent, now);
+}
+
+async function retryDueServerAgentRuns(now: Date) {
+  const runs = await getRecordList("agent_runs");
+  const dueRuns = runs
+    .filter((run: any) =>
+      run.status === "Failed" &&
+      run.retryable &&
+      run.nextRetryAt &&
+      (Date.parse(run.nextRetryAt) || 0) <= now.getTime() &&
+      (run.retryAttempt || 0) <= SERVER_AGENT_MAX_RETRIES,
+    )
+    .sort((a: any, b: any) => (Date.parse(a.nextRetryAt) || 0) - (Date.parse(b.nextRetryAt) || 0))
+    .slice(0, 5);
+  for (const run of dueRuns) {
+    try {
+      await executeExistingServerAgentRun(run, "auto");
+    } catch (err: any) {
+      await failServerAgentRun(run, serverAgentWorkflows.find((item) => item.id === run.workflowId), err, run.retryAttempt || 0);
+    }
+  }
+  return dueRuns.length;
 }
 
 async function runServerAgentIfDue(agent: ServerAgent, now: Date) {
@@ -1809,19 +1954,7 @@ async function runServerAgentIfDue(agent: ServerAgent, now: Date) {
           toolResults: result.steps,
         });
       } catch (err: any) {
-        await addServerAgentStep({
-          runId: run.id,
-          stepType: "Tool",
-          toolName: workflow.id,
-          outputJson: { error: err.message },
-          status: "Failed",
-        });
-        await upsertRecord("agent_runs", run.id, {
-          ...run,
-          status: "Failed",
-          currentStep: "Failed",
-          errorMessage: err.message,
-        });
+        await failServerAgentRun(run, workflow, err, 0);
       }
       await updateServerAgentSchedule(agent, now);
       return true;
@@ -1849,6 +1982,7 @@ async function tickServerAgentScheduler(reason = "timer") {
   serverAgentSchedulerState.lastError = "";
   try {
     const now = new Date();
+    ran += await retryDueServerAgentRuns(now);
     const agents = await getRecordList("agents") as ServerAgent[];
     for (const agent of agents) {
       if (await runServerAgentIfDue(agent, now)) ran += 1;
@@ -1878,6 +2012,25 @@ app.post("/api/agent/scheduler/tick", async (_req, res) => {
     res.json({ success: true, ...(await tickServerAgentScheduler("manual-api")) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/agent/runs/:id/retry", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const run = await getRecord("agent_runs", req.params.id);
+    if (!run) {
+      res.status(404).json({ error: "Agent run was not found." });
+      return;
+    }
+    if (run.status !== "Failed") {
+      res.status(400).json({ error: "Only failed agent runs can be retried." });
+      return;
+    }
+    const nextRun = await executeExistingServerAgentRun(run, "manual");
+    res.json({ success: true, run: nextRun });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to retry agent run." });
   }
 });
 

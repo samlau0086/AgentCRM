@@ -19,7 +19,8 @@ import {
   CheckCircle2,
   XCircle,
   ListTodo,
-  Trash2
+  Trash2,
+  RotateCcw
 } from "lucide-react";
 import { useLanguage } from "../i18n";
 import { cn } from "../Layout";
@@ -112,6 +113,43 @@ function findBlockingRun(runs: AgentRun[], operationKey?: string) {
     run.repeatable === false &&
     ["Running", "Pending", "Completed"].includes(run.status),
   );
+}
+
+type AgentFailureCategory = NonNullable<AgentRun["failureCategory"]>;
+
+function classifyAgentFailure(message = ""): AgentFailureCategory {
+  const text = String(message || "").toLowerCase();
+  if (text.includes("rate limit") || text.includes("too many requests") || text.includes("http 429")) return "rate_limit";
+  if (text.includes("timeout") || text.includes("timed out") || text.includes("network") || text.includes("fetch failed") || text.includes("econn")) return "network";
+  if (text.includes("http 5")) return "provider";
+  if (text.includes("api key") || text.includes("disabled") || text.includes("base url") || text.includes("configure") || text.includes("not enabled") || text.includes("requires")) return "configuration";
+  if (text.includes("not found") || text.includes("no eligible target") || text.includes("no active product") || text.includes("no enabled workflow")) return "data";
+  if (text.includes("rejected") || text.includes("approval")) return "approval";
+  if (text.includes("duplicate") || text.includes("already")) return "duplicate";
+  return "unknown";
+}
+
+function failureMeta(message: string, priorAttempt = 0) {
+  const category = classifyAgentFailure(message);
+  const retryAttempt = priorAttempt + 1;
+  const maxRetries = 3;
+  const retryable = ["network", "rate_limit", "provider", "unknown"].includes(category) && retryAttempt <= maxRetries;
+  const delays = [60000, 5 * 60000, 15 * 60000];
+  return {
+    errorMessage: message,
+    failureCategory: category,
+    retryable,
+    retryAttempt,
+    maxRetries,
+    nextRetryAt: retryable ? new Date(Date.now() + delays[Math.min(priorAttempt, delays.length - 1)]).toISOString() : "",
+    lastRetryAt: priorAttempt > 0 ? new Date().toISOString() : "",
+  };
+}
+
+function formatRunTime(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 export default function AgentCenter() {
@@ -474,6 +512,23 @@ export default function AgentCenter() {
     setApprovals(getAgentApprovals());
   };
 
+  const markRunFailed = (runId: string, message: string, priorAttempt = 0, currentStep = "Failed") => {
+    const meta = failureMeta(message, priorAttempt);
+    const updatedRuns = getAgentRuns().map((item) =>
+      item.id === runId
+        ? {
+            ...item,
+            status: "Failed" as const,
+            currentStep: meta.retryable ? "Retry Scheduled" : currentStep,
+            ...meta,
+          }
+        : item,
+    );
+    saveAgentRuns(updatedRuns);
+    setRuns(updatedRuns);
+    return meta;
+  };
+
   const handleEdit = (agent: Agent) => {
     setEditingAgent(agent);
     setScheduleModeDraft(agent.schedule?.mode || "interval");
@@ -575,11 +630,12 @@ export default function AgentCenter() {
       runFailed = true;
       const message = err instanceof Error ? err.message : copy.unknownError;
       runErrorMessage = message;
+      const meta = failureMeta(message);
       addAgentStep({
         runId: run.id,
         stepType: "Tool",
         toolName: "trigger_agent",
-        outputJson: { error: message },
+        outputJson: { error: message, failureCategory: meta.failureCategory, retryable: meta.retryable, nextRetryAt: meta.nextRetryAt },
         status: "Failed",
       });
       setTestLogs((prev) => [...prev, message]);
@@ -589,9 +645,9 @@ export default function AgentCenter() {
           ? {
               ...item,
               status: runFailed ? ("Failed" as const) : ("Completed" as const),
-              currentStep: runFailed ? "Failed" : "Completed",
+              currentStep: runFailed && runErrorMessage ? (failureMeta(runErrorMessage).retryable ? "Retry Scheduled" : "Failed") : "Completed",
               outputJson: runOutput,
-              errorMessage: runErrorMessage,
+              ...(runFailed && runErrorMessage ? failureMeta(runErrorMessage) : { errorMessage: runErrorMessage }),
             }
           : item,
       );
@@ -628,6 +684,9 @@ export default function AgentCenter() {
             currentStep: "Completed",
             outputJson: result.outputJson,
             toolResults: result.steps,
+            retryable: false,
+            nextRetryAt: "",
+            errorMessage: "",
           }
         : item,
     );
@@ -713,14 +772,10 @@ export default function AgentCenter() {
         runId: run.id,
         stepType: "Tool",
         toolName: workflow.id,
-        outputJson: { error: message },
+        outputJson: { error: message, ...failureMeta(message) },
         status: "Failed",
       });
-      saveAgentRuns(getAgentRuns().map((item) =>
-        item.id === run.id
-          ? { ...item, status: "Failed" as const, currentStep: "Failed", errorMessage: message }
-          : item,
-      ));
+      markRunFailed(run.id, message);
       notify(message, "error", copy.workflowFailed);
       refreshAgentRuntimeState();
     }
@@ -822,6 +877,65 @@ export default function AgentCenter() {
     notify(copy.runsCleared, "success");
   };
 
+  const retryAgentRun = async (run: AgentRun) => {
+    if (run.status !== "Failed") return;
+    try {
+      const response = await fetch(`/api/agent/runs/${encodeURIComponent(run.id)}/retry`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) {
+        notify(language === "zh" ? "已重新执行失败任务。" : "Failed run retried.", "success", copy.runsTitle);
+        await Promise.allSettled([loadAgentRunsFromServer(), loadAgentStepsFromServer()]);
+        refreshAgentRuntimeState();
+        return;
+      }
+      if (response.status !== 404) throw new Error(data.error || `Retry failed with HTTP ${response.status}.`);
+    } catch (err) {
+      if (run.inputJson?.serverSide) {
+        notify(err instanceof Error ? err.message : "Failed to retry run.", "error", copy.workflowFailed);
+        return;
+      }
+    }
+
+    const agent = agents.find((item) => item.id === run.agentId);
+    const workflow = agentWorkflowDefinitions.find((item) => item.id === run.workflowId || item.id === run.inputJson?.workflowId);
+    const target = run.inputJson?.target as AgentWorkflowTarget | undefined;
+    if (!agent || !workflow || !target) {
+      notify(language === "zh" ? "缺少原始智能体、工作流或目标，无法重试。" : "Missing original agent, workflow, or target. Cannot retry.", "warning", copy.workflowFailed);
+      return;
+    }
+
+    saveAgentRuns(getAgentRuns().map((item) =>
+      item.id === run.id
+        ? { ...item, status: "Running" as const, currentStep: "Manual Retry", lastRetryAt: new Date().toISOString() }
+        : item,
+    ));
+    addAgentStep({
+      runId: run.id,
+      stepType: "Thought",
+      toolName: "manual.retry",
+      inputJson: { runId: run.id, retryAttempt: run.retryAttempt || 0 },
+      outputJson: { workflowId: workflow.id, targetId: target.id },
+      status: "Success",
+    });
+    refreshAgentRuntimeState();
+
+    try {
+      await writeRuntimeResult(run, workflow, target, agent);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : copy.unknownError;
+      addAgentStep({
+        runId: run.id,
+        stepType: "Tool",
+        toolName: workflow.id,
+        outputJson: { error: message, ...failureMeta(message, run.retryAttempt || 0) },
+        status: "Failed",
+      });
+      markRunFailed(run.id, message, run.retryAttempt || 0);
+      notify(message, "error", copy.workflowFailed);
+      refreshAgentRuntimeState();
+    }
+  };
+
   const updateApprovalStatus = async (id: string, status: "Approved" | "Rejected") => {
     const approvalToUpdate = getAgentApprovals().find((approval) => approval.id === id);
     if (status === "Approved" && approvalToUpdate?.actionType === "execute_workflow") {
@@ -838,22 +952,26 @@ export default function AgentCenter() {
             runId: run.id,
             stepType: "Tool",
             toolName: workflow.id,
-            outputJson: { error: message },
+            outputJson: { error: message, ...failureMeta(message) },
             status: "Failed",
           });
-          saveAgentRuns(getAgentRuns().map((item) =>
-            item.id === run.id
-              ? { ...item, status: "Failed" as const, currentStep: "Failed", errorMessage: message }
-              : item,
-          ));
+          markRunFailed(run.id, message);
           notify(message, "error", copy.workflowFailed);
         }
       }
     }
     if (status === "Rejected" && approvalToUpdate?.actionType === "execute_workflow") {
+      const rejectionMeta = {
+        errorMessage: "Workflow rejected by user.",
+        failureCategory: "approval" as AgentFailureCategory,
+        retryable: false,
+        retryAttempt: 0,
+        maxRetries: 3,
+        nextRetryAt: "",
+      };
       saveAgentRuns(getAgentRuns().map((run) =>
         run.id === approvalToUpdate.runId
-          ? { ...run, status: "Failed" as const, currentStep: "Rejected", errorMessage: "Workflow rejected by user." }
+          ? { ...run, status: "Failed" as const, currentStep: "Rejected", ...rejectionMeta }
           : run,
       ));
       addAgentStep({
@@ -1495,6 +1613,18 @@ export default function AgentCenter() {
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-xs text-slate-500">{statusLabel(run.status)}</span>
+                        {run.status === "Failed" && (
+                          <button
+                            type="button"
+                            onClick={() => retryAgentRun(run)}
+                            title={language === "zh" ? "重试失败任务" : "Retry failed run"}
+                            aria-label={language === "zh" ? "重试失败任务" : "Retry failed run"}
+                            className="px-2 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-colors flex items-center gap-1"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>{language === "zh" ? "重试" : "Retry"}</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setDeletingRunId(run.id)}
@@ -1510,6 +1640,24 @@ export default function AgentCenter() {
                     <div className="text-xs text-slate-500 mb-4 flex items-center gap-2">
                       <Bot className="w-3 h-3" /> {agentName(agentInfo)}
                     </div>
+                    {run.status === "Failed" && (
+                      <div className="mb-4 rounded-lg border border-red-200 bg-red-50/80 p-3 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-white/70 px-2 py-0.5 font-semibold uppercase tracking-wide dark:bg-black/20">
+                            {run.failureCategory || classifyAgentFailure(run.errorMessage || "")}
+                          </span>
+                          <span>
+                            {language === "zh" ? "重试" : "Retry"} {run.retryAttempt || 0}/{run.maxRetries ?? 3}
+                          </span>
+                          {run.retryable && run.nextRetryAt && (
+                            <span>
+                              {language === "zh" ? "下次自动重试" : "Next auto retry"}: {formatRunTime(run.nextRetryAt)}
+                            </span>
+                          )}
+                        </div>
+                        {run.errorMessage && <p className="mt-2 break-words">{run.errorMessage}</p>}
+                      </div>
+                    )}
                     <div className="space-y-2">
                       {runSteps.map((step, idx) => (
                         <div key={step.id} className="flex gap-3 text-xs">

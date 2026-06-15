@@ -1060,6 +1060,12 @@ export interface AgentRun {
   toolResults?: any[];
   currentStep?: string;
   errorMessage?: string;
+  failureCategory?: "configuration" | "network" | "rate_limit" | "provider" | "data" | "approval" | "duplicate" | "unknown";
+  retryable?: boolean;
+  retryAttempt?: number;
+  maxRetries?: number;
+  nextRetryAt?: string;
+  lastRetryAt?: string;
   createdAt: string;
 }
 

@@ -136,7 +136,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Scheduled agent execution works while browser/app runtime is active.
 - [x] First-pass always-on server-side agent scheduler/worker added for database-backed agents.
 - [x] Server-side scheduler can run configured Lead Generation Platform integrations, import returned leads, and avoid duplicate Public Pool inserts.
-- [ ] Add agent execution retry policy and failure classification.
+- [x] Add first-pass agent execution retry policy and failure classification.
 - [ ] Add workflow run detail page with inputs, outputs, and linked records.
 
 ## 7. AI & Model Providers / AI 与模型
@@ -194,6 +194,6 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Add agent execution retry policy and failure classification.
-2. Add deeper production logs dashboard with searchable event history.
-3. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
+1. Add deeper production logs dashboard with searchable event history.
+2. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
+3. Add automated deployment smoke tests for health, inbox sync, and agent scheduler endpoints.
