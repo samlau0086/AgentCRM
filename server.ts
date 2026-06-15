@@ -1438,6 +1438,7 @@ type ServerAgent = {
   status?: "Active" | "Idle" | "Disabled";
   harness?: "Auto" | "Human-in-the-loop";
   tools?: string[];
+  integrations?: string[];
   workflowIds?: string[];
   schedule?: {
     mode?: "interval" | "monthly";
@@ -1526,7 +1527,7 @@ async function serverDuplicateRunExists(key?: string) {
   );
 }
 
-async function serverWorkflowTargets(workflow: ServerWorkflow) {
+async function serverWorkflowTargets(workflow: ServerWorkflow, agent?: ServerAgent) {
   if (workflow.targetType === "lead") {
     return (await getRecordList("public_leads")).map((lead: any) => ({
       type: "lead",
@@ -1541,6 +1542,14 @@ async function serverWorkflowTargets(workflow: ServerWorkflow) {
       id: customer.id,
       label: customer.name,
       record: customer,
+    }));
+  }
+  if (workflow.targetType === "platform") {
+    return (await getServerEnabledLeadPlatforms(agent)).map((platform) => ({
+      type: "platform",
+      id: platform.id,
+      label: platform.name,
+      record: platform,
     }));
   }
   return [];
@@ -1627,6 +1636,40 @@ async function executeServerWorkflow(agent: ServerAgent, workflow: ServerWorkflo
         { toolName: "lead.update", outputJson: updatedLead, status: "Success" },
       ],
       outputJson: { leadId: lead.id, score, intent: updatedLead.intent, risk: updatedLead.risk },
+    };
+  }
+
+  if (workflow.id === "lead_enrichment") {
+    const platform = target.record || (await getServerEnabledLeadPlatforms(agent)).find((item) => item.id === target.id);
+    if (!platform) {
+      throw new Error("This Lead Generation Platform is not enabled for the agent. Configure it in Settings > Integrations first.");
+    }
+    const runtime = await deriveServerLeadPlatformRuntime(agent);
+    const result = await runLeadPlatformRequest(platform.id, platform.name, platform.config, runtime);
+    const importedCount = await mergeServerPublicLeads(result.leads);
+    return {
+      steps: [
+        { toolName: "lead_generation_platforms.load", outputJson: sanitizeLeadPlatform(platform), status: "Success" },
+        {
+          toolName: "lead_generation_platforms.request",
+          inputJson: { platform: platform.name, baseUrl: platform.baseUrl, runtime: result.runtime },
+          outputJson: { requestedUrl: result.requestedUrl, rawCount: result.rawCount, sample: result.rawSample },
+          status: "Success",
+        },
+        {
+          toolName: "public_leads.import",
+          inputJson: { platform: platform.name },
+          outputJson: { returnedLeads: result.leads.length, importedCount },
+          status: "Success",
+        },
+      ],
+      outputJson: {
+        platform: platform.name,
+        baseUrl: platform.baseUrl,
+        returnedLeads: result.leads.length,
+        importedCount,
+        mockDataCreated: false,
+      },
     };
   }
 
@@ -1718,7 +1761,7 @@ async function runServerAgentIfDue(agent: ServerAgent, now: Date) {
   }
 
   for (const workflow of workflows) {
-    const targets = await serverWorkflowTargets(workflow);
+    const targets = await serverWorkflowTargets(workflow, agent);
     for (const target of targets) {
       const key = workflow.repeatable ? undefined : operationKey(workflow, target);
       if (await serverDuplicateRunExists(key)) continue;
@@ -1789,11 +1832,21 @@ async function runServerAgentIfDue(agent: ServerAgent, now: Date) {
 }
 
 let serverAgentSchedulerRunning = false;
+const serverAgentSchedulerState = {
+  lastStartedAt: "",
+  lastFinishedAt: "",
+  lastReason: "",
+  lastRan: 0,
+  lastError: "",
+};
 
 async function tickServerAgentScheduler(reason = "timer") {
   if (!hasDatabase || serverAgentSchedulerRunning) return { ran: 0 };
   serverAgentSchedulerRunning = true;
   let ran = 0;
+  serverAgentSchedulerState.lastStartedAt = new Date().toISOString();
+  serverAgentSchedulerState.lastReason = reason;
+  serverAgentSchedulerState.lastError = "";
   try {
     const now = new Date();
     const agents = await getRecordList("agents") as ServerAgent[];
@@ -1801,8 +1854,13 @@ async function tickServerAgentScheduler(reason = "timer") {
       if (await runServerAgentIfDue(agent, now)) ran += 1;
     }
     if (ran > 0) console.log(`[server-agent-scheduler] ${reason}: processed ${ran} agent(s).`);
+    serverAgentSchedulerState.lastRan = ran;
     return { ran };
+  } catch (err: any) {
+    serverAgentSchedulerState.lastError = err.message || "Server agent scheduler failed.";
+    throw err;
   } finally {
+    serverAgentSchedulerState.lastFinishedAt = new Date().toISOString();
     serverAgentSchedulerRunning = false;
   }
 }
@@ -3189,6 +3247,197 @@ function platformDefaults(platformId: string, config: LeadPlatformRunConfig, run
   };
 }
 
+type ServerLeadPlatform = {
+  id: string;
+  name: string;
+  baseUrl?: string;
+  config: LeadPlatformRunConfig;
+};
+
+const leadPlatformNames: Record<string, string> = {
+  outscraper: "Outscraper",
+  apify: "Apify",
+  phantombuster: "PhantomBuster",
+  scrap_io: "Scrap.io",
+  hasdata: "HasData",
+  decodo: "Decodo",
+  clay_com: "Clay.com",
+};
+
+function parseAppSettingValue(record: any) {
+  const value = record?.value;
+  if (typeof value !== "string") return value || {};
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+async function loadServerLeadPlatformConfigs() {
+  const record = await getRecord("app_settings", "lead_platform_configs");
+  const value = parseAppSettingValue(record);
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, LeadPlatformRunConfig>
+    : {};
+}
+
+function sanitizeLeadPlatform(platform: ServerLeadPlatform) {
+  return {
+    ...platform,
+    config: {
+      ...platform.config,
+      apiKey: platform.config.apiKey ? "********" : "",
+    },
+  };
+}
+
+async function getServerEnabledLeadPlatforms(agent?: ServerAgent): Promise<ServerLeadPlatform[]> {
+  const configs = await loadServerLeadPlatformConfigs();
+  const allowed = new Set(agent?.integrations || []);
+  return Object.entries(configs)
+    .filter(([, config]) => config?.enabled)
+    .map(([id, config]) => ({
+      id,
+      name: leadPlatformNames[id] || id,
+      baseUrl: config.baseUrl,
+      config,
+    }))
+    .filter((platform) =>
+      allowed.size === 0 ||
+      allowed.has(platform.name) ||
+      allowed.has(platform.id) ||
+      allowed.has(platform.id.replace(/_/g, "-")),
+    );
+}
+
+async function deriveServerLeadPlatformRuntime(agent: ServerAgent): Promise<LeadPlatformRuntime> {
+  const [products, customers, publicLeads] = await Promise.all([
+    getRecordList("products"),
+    getRecordList("customers"),
+    getRecordList("public_leads"),
+  ]);
+  const activeProducts = products.filter((product: any) => product.status === "Active");
+  const productTerms = activeProducts
+    .slice(0, 3)
+    .flatMap((product: any) => [product.name, product.description])
+    .filter(Boolean)
+    .join(" ");
+  const industryTerms = [
+    ...customers.map((customer: any) => customer.industry),
+    ...publicLeads.map((lead: any) => lead.industry),
+  ].filter(Boolean);
+  const locationTerms = [
+    ...customers.map((customer: any) => customer.country || customer.city),
+    ...publicLeads.map((lead: any) => lead.location),
+  ].filter(Boolean);
+  const industry = String(industryTerms[0] || "businesses");
+  const location = String(locationTerms[0] || "");
+  const query = [productTerms || agent.role || "business leads", industry]
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 220);
+  return {
+    query,
+    location,
+    limit: 10,
+    source: {
+      products: activeProducts.slice(0, 3).map((product: any) => product.name),
+      industry,
+      location,
+    },
+  };
+}
+
+async function runLeadPlatformRequest(
+  platformId: string,
+  platformName: string,
+  config: LeadPlatformRunConfig = {},
+  runtime: LeadPlatformRuntime = {},
+) {
+  const configError = (message: string) => {
+    const err = new Error(message) as Error & { status?: number };
+    err.status = 400;
+    return err;
+  };
+  if (!platformId || !platformName) throw configError("Platform ID and name are required.");
+  if (!config.enabled) throw configError(`${platformName} is disabled.`);
+  if (!config.apiKey?.trim()) throw configError(`${platformName} API key is required.`);
+
+  const defaults = platformDefaults(platformId, config, runtime);
+  if (!defaults.baseUrl) throw configError(`${platformName} Base URL is required.`);
+  const url = new URL(joinUrl(defaults.baseUrl, defaults.endpointPath));
+  Object.entries(defaults.queryParams).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      url.searchParams.set(key, String(value));
+    }
+  });
+
+  const response = await fetch(url, {
+    method: defaults.method,
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...defaults.headers,
+    },
+    body: defaults.method === "GET" ? undefined : JSON.stringify(defaults.body || {}),
+  });
+  const rawText = await response.text();
+  const rawData = rawText
+    ? (() => {
+        try {
+          return JSON.parse(rawText);
+        } catch {
+          return { text: rawText };
+        }
+      })()
+    : {};
+  if (!response.ok) {
+    const message = rawData?.error?.message || rawData?.message || rawText || `${platformName} returned HTTP ${response.status}.`;
+    const err = new Error(message) as Error & { status?: number; raw?: unknown };
+    err.status = response.status;
+    err.raw = rawData;
+    throw err;
+  }
+
+  const items = flattenResults(rawData);
+  const leads = items
+    .map((item) => normalizeLeadItem(item, platformName, platformId))
+    .filter(Boolean);
+  return {
+    success: true,
+    platformId,
+    platformName,
+    runtime: {
+      query: runtime.query || "business leads",
+      location: runtime.location || "",
+      limit: Math.max(1, Math.min(Number(runtime.limit || 10), 100)),
+      source: runtime.source || {},
+    },
+    requestedUrl: `${url.origin}${url.pathname}`,
+    rawCount: items.length,
+    leads,
+    rawSample: items.slice(0, 3),
+  };
+}
+
+async function mergeServerPublicLeads(newLeads: any[]) {
+  const existing = await getRecordList("public_leads");
+  const existingKeys = new Set(existing.map((lead: any) =>
+    [lead.source, lead.name, lead.contact].join("|").toLowerCase(),
+  ));
+  let importedCount = 0;
+  for (const lead of newLeads) {
+    const key = [lead.source, lead.name, lead.contact].join("|").toLowerCase();
+    if (existingKeys.has(key)) continue;
+    existingKeys.add(key);
+    const id = lead.id || randomId("lead");
+    await upsertRecord("public_leads", id, { ...lead, id });
+    importedCount += 1;
+  }
+  return importedCount;
+}
+
 app.post("/api/lead-platforms/run", async (req, res) => {
   const { platformId, platformName, config = {}, runtime = {} } = req.body as {
     platformId?: string;
@@ -3196,65 +3445,10 @@ app.post("/api/lead-platforms/run", async (req, res) => {
     config?: LeadPlatformRunConfig;
     runtime?: LeadPlatformRuntime;
   };
-  if (!platformId || !platformName) return res.status(400).json({ error: "Platform ID and name are required." });
-  if (!config.enabled) return res.status(400).json({ error: `${platformName} is disabled.` });
-  if (!config.apiKey?.trim()) return res.status(400).json({ error: `${platformName} API key is required.` });
-
   try {
-    const defaults = platformDefaults(platformId, config, runtime);
-    if (!defaults.baseUrl) return res.status(400).json({ error: `${platformName} Base URL is required.` });
-    const url = new URL(joinUrl(defaults.baseUrl, defaults.endpointPath));
-    Object.entries(defaults.queryParams).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && String(value).trim()) {
-        url.searchParams.set(key, String(value));
-      }
-    });
-
-    const response = await fetch(url, {
-      method: defaults.method,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...defaults.headers,
-      },
-      body: defaults.method === "GET" ? undefined : JSON.stringify(defaults.body || {}),
-    });
-    const rawText = await response.text();
-    const rawData = rawText
-      ? (() => {
-          try {
-            return JSON.parse(rawText);
-          } catch {
-            return { text: rawText };
-          }
-        })()
-      : {};
-    if (!response.ok) {
-      const message = rawData?.error?.message || rawData?.message || rawText || `${platformName} returned HTTP ${response.status}.`;
-      return res.status(response.status).json({ error: message, status: response.status, raw: rawData });
-    }
-
-    const items = flattenResults(rawData);
-    const leads = items
-      .map((item) => normalizeLeadItem(item, platformName, platformId))
-      .filter(Boolean);
-    res.json({
-      success: true,
-      platformId,
-      platformName,
-      runtime: {
-        query: runtime.query || "business leads",
-        location: runtime.location || "",
-        limit: Math.max(1, Math.min(Number(runtime.limit || 10), 100)),
-        source: runtime.source || {},
-      },
-      requestedUrl: `${url.origin}${url.pathname}`,
-      rawCount: items.length,
-      leads,
-      rawSample: items.slice(0, 3),
-    });
+    res.json(await runLeadPlatformRequest(platformId || "", platformName || "", config, runtime));
   } catch (err: any) {
-    res.status(500).json({ error: err.message || "Lead platform request failed." });
+    res.status(err.status || 500).json({ error: err.message || "Lead platform request failed.", status: err.status, raw: err.raw });
   }
 });
 
@@ -3904,10 +4098,21 @@ async function syncWhatsAppHubToInbox() {
 }
 
 let backgroundInboxSyncRunning = false;
+const backgroundInboxSyncState = {
+  lastStartedAt: "",
+  lastFinishedAt: "",
+  lastReason: "",
+  lastEmailImported: 0,
+  lastWhatsAppImported: 0,
+  lastErrors: [] as string[],
+};
 
 async function runBackgroundInboxSync(reason = "timer") {
   if (!hasDatabase || backgroundInboxSyncRunning) return;
   backgroundInboxSyncRunning = true;
+  backgroundInboxSyncState.lastStartedAt = new Date().toISOString();
+  backgroundInboxSyncState.lastReason = reason;
+  backgroundInboxSyncState.lastErrors = [];
   try {
     const [emailResult, whatsAppResult] = await Promise.allSettled([
       syncEmailsToInbox(),
@@ -3919,6 +4124,9 @@ async function runBackgroundInboxSync(reason = "timer") {
       ...(emailResult.status === "fulfilled" ? emailResult.value.errors : [emailResult.reason?.message || "Email sync failed"]),
       ...(whatsAppResult.status === "fulfilled" ? whatsAppResult.value.errors : [whatsAppResult.reason?.message || "WhatsApp sync failed"]),
     ].filter(Boolean);
+    backgroundInboxSyncState.lastEmailImported = emailImported;
+    backgroundInboxSyncState.lastWhatsAppImported = whatsAppImported;
+    backgroundInboxSyncState.lastErrors = errors;
     if (emailImported > 0 || whatsAppImported > 0) {
       broadcastInboxEvent({
         source: "background-inbox-sync",
@@ -3931,9 +4139,11 @@ async function runBackgroundInboxSync(reason = "timer") {
     if (errors.length > 0) {
       console.warn(`[background-inbox-sync] ${errors.join(" | ")}`);
     }
-  } catch (err) {
+  } catch (err: any) {
+    backgroundInboxSyncState.lastErrors = [err.message || "Background inbox sync failed."];
     console.error("[background-inbox-sync] failed:", err);
   } finally {
+    backgroundInboxSyncState.lastFinishedAt = new Date().toISOString();
     backgroundInboxSyncRunning = false;
   }
 }
@@ -3949,6 +4159,113 @@ app.post("/api/communication/inbox/background-sync", async (_req, res) => {
   if (!requireDatabase(res)) return;
   await runBackgroundInboxSync("manual-api");
   res.json({ success: true });
+});
+
+function latestRecord(records: any[], dateField = "createdAt") {
+  return [...records].sort((a, b) =>
+    (Date.parse(b?.[dateField] || b?.completedAt || b?.updatedAt || "") || 0) -
+    (Date.parse(a?.[dateField] || a?.completedAt || a?.updatedAt || "") || 0),
+  )[0];
+}
+
+function countByStatus(records: any[]) {
+  return records.reduce((acc: Record<string, number>, record) => {
+    const status = String(record?.status || "unknown");
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+async function buildOperationsHealth() {
+  const [
+    inboxMessages,
+    receiveProfiles,
+    sendProfiles,
+    emailMappings,
+    appSettings,
+    agentRuns,
+    importJobs,
+    leadPlatformConfigs,
+  ] = await Promise.all([
+    getRecordList("inbox_messages"),
+    getRecordList("email_receive_profiles"),
+    getRecordList("email_send_profiles"),
+    getRecordList("email_mappings"),
+    getRecordList("app_settings"),
+    getRecordList("agent_runs"),
+    getRecordList("import_jobs"),
+    loadServerLeadPlatformConfigs(),
+  ]);
+
+  const emailMessages = inboxMessages.filter((message: any) => message.channel !== "WhatsApp");
+  const whatsAppMessages = inboxMessages.filter((message: any) => message.channel === "WhatsApp");
+  const waActors = appSettingRowsToWaHubActors(appSettings, "global");
+  const platformConfigEntries = Object.entries(leadPlatformConfigs) as Array<[string, LeadPlatformRunConfig]>;
+  const enabledPlatforms = platformConfigEntries.filter(([, config]) => config?.enabled);
+  const leadPlatformRuns = agentRuns.filter((run: any) => run.operationType === "lead_platform_collection");
+  const failedLeadPlatformRuns = leadPlatformRuns.filter((run: any) => run.status === "Failed");
+  const failedAgentRuns = agentRuns.filter((run: any) => run.status === "Failed");
+  const failedImports = importJobs.filter((job: any) => job.status === "failed" || job.status === "completed_with_errors");
+  const runningImports = importJobs.filter((job: any) => job.status === "queued" || job.status === "running");
+
+  return {
+    generatedAt: new Date().toISOString(),
+    database: { connected: hasDatabase },
+    inboxSync: {
+      running: backgroundInboxSyncRunning,
+      intervalMs: BACKGROUND_INBOX_SYNC_INTERVAL_MS,
+      ...backgroundInboxSyncState,
+    },
+    email: {
+      receiveProfiles: receiveProfiles.length,
+      sendProfiles: sendProfiles.length,
+      mappings: emailMappings.length,
+      inboxMessages: emailMessages.length,
+      latestMessageAt: latestRecord(emailMessages, "date")?.date || "",
+      lastImported: backgroundInboxSyncState.lastEmailImported,
+      errors: backgroundInboxSyncState.lastErrors.filter((error) => String(error).toLowerCase().includes("email") || String(error).toLowerCase().includes("imap")),
+    },
+    whatsApp: {
+      actors: waActors.length,
+      uniqueClients: new Set(waActors.map((actor) => actor.clientId)).size,
+      inboxMessages: whatsAppMessages.length,
+      latestMessageAt: latestRecord(whatsAppMessages, "date")?.date || "",
+      lastImported: backgroundInboxSyncState.lastWhatsAppImported,
+      errors: backgroundInboxSyncState.lastErrors.filter((error) => String(error).toLowerCase().includes("whatsapp") || String(error).toLowerCase().includes("hub")),
+    },
+    agents: {
+      schedulerRunning: serverAgentSchedulerRunning,
+      schedulerIntervalMs: SERVER_AGENT_SCHEDULER_INTERVAL_MS,
+      scheduler: serverAgentSchedulerState,
+      totalRuns: agentRuns.length,
+      statusCounts: countByStatus(agentRuns),
+      failedRuns: failedAgentRuns.slice(0, 10),
+      latestRun: latestRecord(agentRuns),
+    },
+    imports: {
+      totalJobs: importJobs.length,
+      statusCounts: countByStatus(importJobs),
+      runningJobs: runningImports.slice(0, 10),
+      failedJobs: failedImports.slice(0, 10),
+      latestJob: latestRecord(importJobs),
+    },
+    leadPlatforms: {
+      configured: Object.keys(leadPlatformConfigs).length,
+      enabled: enabledPlatforms.length,
+      totalRuns: leadPlatformRuns.length,
+      failedRuns: failedLeadPlatformRuns.slice(0, 10),
+      latestRun: latestRecord(leadPlatformRuns),
+    },
+  };
+}
+
+app.get("/api/operations/health", async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    res.json(await buildOperationsHealth());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to load operations health." });
+  }
 });
 
 async function startServer() {

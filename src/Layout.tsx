@@ -56,6 +56,7 @@ export default function Layout() {
       icon: Bot,
     },
     { name: language === "zh" ? "导入历史" : t("nav.imports"), href: "/imports", icon: UploadCloud },
+    { name: language === "zh" ? "运维健康" : "Operations", href: "/operations", icon: Activity },
     { name: t("nav.knowledge"), href: "/knowledge", icon: BookOpen },
     ...(currentUser.role === "superadmin"
       ? [

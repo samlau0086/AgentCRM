@@ -116,7 +116,8 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] SSE event stream added for no-refresh inbox updates.
 - [~] Background WhatsApp/Email sync support exists and should be monitored in production.
 - [ ] Add UI for webhook registration status and last received webhook event.
-- [ ] Add per-actor sync health and error history.
+- [x] Add first-pass operations health view for WhatsApp sync status and recent errors.
+- [ ] Add per-actor detailed sync history and webhook registration status.
 
 ## 6. AI Agents / 智能体中心
 
@@ -134,7 +135,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Workflow tools include AI Lead Analysis and Lead Generation Platforms.
 - [x] Scheduled agent execution works while browser/app runtime is active.
 - [x] First-pass always-on server-side agent scheduler/worker added for database-backed agents.
-- [~] Expand server-side scheduler workflow coverage for external lead platform integrations.
+- [x] Server-side scheduler can run configured Lead Generation Platform integrations, import returned leads, and avoid duplicate Public Pool inserts.
 - [ ] Add agent execution retry policy and failure classification.
 - [ ] Add workflow run detail page with inputs, outputs, and linked records.
 
@@ -177,7 +178,8 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] `/api/deploy-info` endpoint exists for backend version verification.
 - [ ] Add automated smoke test after deployment.
 - [ ] Add database migration/version endpoint.
-- [ ] Add production logs/health dashboard.
+- [x] Add first-pass production health dashboard for Email, WhatsApp, agent runs, imports, and lead-platform collection jobs.
+- [ ] Add deeper production logs dashboard with searchable event history.
 
 ## 11. Documentation / 文档
 
@@ -192,6 +194,6 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Expand server-side scheduler workflow coverage for external lead platform integrations.
-2. Add production health dashboards for WhatsApp, Email, agent runs, and imports.
+1. Add agent execution retry policy and failure classification.
+2. Add deeper production logs dashboard with searchable event history.
 3. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
