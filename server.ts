@@ -26,6 +26,10 @@ const BACKGROUND_INBOX_SYNC_INTERVAL_MS = Math.max(
   15000,
   Number(process.env.INBOX_SYNC_INTERVAL_MS || 60000),
 );
+const SERVER_AGENT_SCHEDULER_INTERVAL_MS = Math.max(
+  15000,
+  Number(process.env.AGENT_SCHEDULER_INTERVAL_MS || 60000),
+);
 
 app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
@@ -1422,6 +1426,398 @@ app.get("/api/imports/:id/failed-csv", async (req, res) => {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${job.id}-failed-rows.csv"`);
     res.send(csv);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+type ServerAgent = {
+  id: string;
+  name: string;
+  role?: string;
+  status?: "Active" | "Idle" | "Disabled";
+  harness?: "Auto" | "Human-in-the-loop";
+  tools?: string[];
+  workflowIds?: string[];
+  schedule?: {
+    mode?: "interval" | "monthly";
+    intervalEvery?: number;
+    intervalUnit?: "seconds" | "minutes" | "hours" | "days";
+    monthlyDay?: number;
+    maxRuns?: number;
+    executedRuns?: number;
+    lastRunAt?: string;
+  };
+};
+
+type ServerWorkflow = {
+  id: string;
+  name: string;
+  operationType: string;
+  targetType: "lead" | "customer" | "platform";
+  requiredTools: string[];
+  repeatable: boolean;
+};
+
+const serverAgentWorkflows: ServerWorkflow[] = [
+  { id: "lead_scoring", name: "AI Lead Analysis", operationType: "lead_ai_analysis", targetType: "lead", requiredTools: ["customers", "knowledge"], repeatable: false },
+  { id: "lead_enrichment", name: "Lead Generation Platforms", operationType: "lead_platform_collection", targetType: "platform", requiredTools: ["lead_platforms"], repeatable: true },
+  { id: "customer_scoring", name: "Customer Scoring", operationType: "customer_scoring", targetType: "customer", requiredTools: ["customers"], repeatable: false },
+  { id: "quote_draft", name: "Quote Draft", operationType: "quote_generation", targetType: "customer", requiredTools: ["customers", "quotes"], repeatable: false },
+];
+
+function randomId(prefix: string) {
+  return `${prefix}_${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function intervalToMs(schedule: ServerAgent["schedule"]) {
+  const every = Math.max(1, schedule?.intervalEvery || 1);
+  const unit = schedule?.intervalUnit || "days";
+  if (unit === "seconds") return every * 1000;
+  if (unit === "minutes") return every * 60 * 1000;
+  if (unit === "hours") return every * 60 * 60 * 1000;
+  return every * 24 * 60 * 60 * 1000;
+}
+
+function sameLocalDate(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate();
+}
+
+function daysInMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+}
+
+function isServerAgentDue(agent: ServerAgent, now: Date) {
+  const schedule = agent.schedule;
+  if (!schedule || agent.status !== "Active") return false;
+  if ((schedule.maxRuns || 0) > 0 && (schedule.executedRuns || 0) >= (schedule.maxRuns || 0)) return false;
+  if (schedule.mode === "monthly") {
+    const day = Math.min(Math.max(1, schedule.monthlyDay || 1), daysInMonth(now));
+    if (now.getDate() !== day) return false;
+    return !(schedule.lastRunAt && sameLocalDate(new Date(schedule.lastRunAt), now));
+  }
+  if (!schedule.lastRunAt) return true;
+  const lastRunAt = new Date(schedule.lastRunAt).getTime();
+  if (Number.isNaN(lastRunAt)) return true;
+  return now.getTime() - lastRunAt >= intervalToMs(schedule);
+}
+
+function serverAgentWorkflowsFor(agent: ServerAgent) {
+  const allowed = new Set(agent.workflowIds || []);
+  return serverAgentWorkflows.filter((workflow) =>
+    allowed.has(workflow.id) &&
+    workflow.requiredTools.every((tool) => (agent.tools || []).includes(tool)),
+  );
+}
+
+function operationKey(workflow: ServerWorkflow, target: any) {
+  return `${workflow.operationType}:${target.type}:${String(target.id).toLowerCase()}`;
+}
+
+async function serverDuplicateRunExists(key?: string) {
+  if (!key) return false;
+  const runs = await getRecordList("agent_runs");
+  return runs.some((run: any) =>
+    run.operationKey === key &&
+    run.repeatable === false &&
+    ["Running", "Pending", "Completed"].includes(run.status),
+  );
+}
+
+async function serverWorkflowTargets(workflow: ServerWorkflow) {
+  if (workflow.targetType === "lead") {
+    return (await getRecordList("public_leads")).map((lead: any) => ({
+      type: "lead",
+      id: lead.id,
+      label: lead.name,
+      record: lead,
+    }));
+  }
+  if (workflow.targetType === "customer") {
+    return (await getRecordList("customers")).map((customer: any) => ({
+      type: "customer",
+      id: customer.id,
+      label: customer.name,
+      record: customer,
+    }));
+  }
+  return [];
+}
+
+async function updateServerAgentSchedule(agent: ServerAgent, now: Date) {
+  await upsertRecord("agents", agent.id, {
+    ...agent,
+    schedule: {
+      ...agent.schedule,
+      mode: agent.schedule?.mode || "interval",
+      lastRunAt: now.toISOString(),
+      executedRuns: (agent.schedule?.executedRuns || 0) + 1,
+    },
+  });
+}
+
+async function addServerAgentRun(run: any) {
+  const record = {
+    ...run,
+    id: randomId("run"),
+    createdAt: new Date().toISOString(),
+  };
+  await upsertRecord("agent_runs", record.id, record);
+  return record;
+}
+
+async function addServerAgentStep(step: any) {
+  const record = {
+    ...step,
+    id: randomId("step"),
+    createdAt: new Date().toISOString(),
+  };
+  await upsertRecord("agent_steps", record.id, record);
+  return record;
+}
+
+async function addServerApproval(approval: any) {
+  const record = {
+    ...approval,
+    id: randomId("approval"),
+    createdAt: new Date().toISOString(),
+  };
+  await upsertRecord("agent_approvals", record.id, record);
+  return record;
+}
+
+function stableServerScore(parts: Array<string | undefined>) {
+  const text = parts.filter(Boolean).join("|").toLowerCase();
+  const total = Array.from(text).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return Math.max(35, Math.min(95, 35 + (total % 61)));
+}
+
+function scoreToIntent(score: number) {
+  if (score >= 75) return "High";
+  if (score >= 55) return "Medium";
+  return "Low";
+}
+
+function scoreToRisk(score: number) {
+  if (score >= 75) return "Low";
+  if (score >= 55) return "Medium";
+  return "High";
+}
+
+async function executeServerWorkflow(agent: ServerAgent, workflow: ServerWorkflow, target: any) {
+  if (workflow.id === "lead_scoring") {
+    const lead = target.record;
+    const score = stableServerScore([lead.name, lead.contact, lead.industry, lead.location, lead.source]);
+    const updatedLead = {
+      ...lead,
+      score,
+      intent: scoreToIntent(score),
+      risk: scoreToRisk(score),
+      aiAnalysis: `${lead.name} was analyzed by the server-side scheduler using source quality, contact completeness, industry fit, and location signals.`,
+      recommendedAction: score >= 75 ? "Prioritize human outreach." : score >= 55 ? "Enrich and schedule follow-up." : "Keep in nurture.",
+      scoredAt: new Date().toISOString(),
+    };
+    await upsertRecord("public_leads", lead.id, updatedLead);
+    return {
+      steps: [
+        { toolName: "lead.read", outputJson: lead, status: "Success" },
+        { toolName: "ai.lead_analysis", outputJson: { score, intent: updatedLead.intent, risk: updatedLead.risk }, status: "Success" },
+        { toolName: "lead.update", outputJson: updatedLead, status: "Success" },
+      ],
+      outputJson: { leadId: lead.id, score, intent: updatedLead.intent, risk: updatedLead.risk },
+    };
+  }
+
+  if (workflow.id === "customer_scoring") {
+    const customer = target.record;
+    const score = stableServerScore([customer.name, customer.contact, customer.industry, customer.stage, customer.notes]);
+    const updatedCustomer = {
+      ...customer,
+      score,
+      intent: scoreToIntent(score),
+      risk: scoreToRisk(score),
+      logs: [
+        { id: randomId("log"), time: new Date().toISOString(), event: `Server scheduler refreshed customer score to ${score}.`, type: "ai" },
+        ...(customer.logs || []),
+      ],
+    };
+    await upsertRecord("customers", customer.id, updatedCustomer);
+    return {
+      steps: [
+        { toolName: "customer.read", outputJson: customer, status: "Success" },
+        { toolName: "customer.score", outputJson: { score, intent: updatedCustomer.intent, risk: updatedCustomer.risk }, status: "Success" },
+        { toolName: "customer.update", outputJson: updatedCustomer, status: "Success" },
+      ],
+      outputJson: { customerId: customer.id, score, intent: updatedCustomer.intent, risk: updatedCustomer.risk },
+    };
+  }
+
+  if (workflow.id === "quote_draft") {
+    const customer = target.record;
+    const product = (await getRecordList("products")).find((item: any) => item.status === "Active");
+    if (!product) throw new Error("No active product is available for quote drafting.");
+    const unitPrice = product.pricingTiers?.[0]?.unitPrice ?? product.price ?? 0;
+    const total = unitPrice;
+    const quote = {
+      id: randomId("quote"),
+      customerId: customer.id,
+      date: new Date().toISOString().slice(0, 10),
+      validUntil: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+      items: [{ productId: product.id, name: product.name, quantity: 1, unitPrice, discount: 0, total }],
+      subtotal: total,
+      totalDiscount: 0,
+      total,
+      status: "Draft",
+      notes: `Drafted by server-side scheduler for ${agent.name}.`,
+    };
+    await upsertRecord("quotes", quote.id, quote);
+    return {
+      steps: [
+        { toolName: "customer.read", outputJson: customer, status: "Success" },
+        { toolName: "product.select", outputJson: product, status: "Success" },
+        { toolName: "quote.create", outputJson: quote, status: "Success" },
+      ],
+      outputJson: { customerId: customer.id, productId: product.id, quoteId: quote.id, total },
+    };
+  }
+
+  throw new Error(`Server-side workflow ${workflow.id} is not available yet.`);
+}
+
+async function writeServerSchedulerFailure(agent: ServerAgent, message: string, now: Date) {
+  const run = await addServerAgentRun({
+    agentId: agent.id,
+    taskType: `Scheduled: ${agent.name}`,
+    status: "Failed",
+    currentStep: "Skipped",
+    targetType: "global",
+    repeatable: true,
+    inputJson: { scheduled: true, schedule: agent.schedule, serverSide: true },
+    outputJson: { reason: message },
+    errorMessage: message,
+  });
+  await addServerAgentStep({
+    runId: run.id,
+    stepType: "Thought",
+    toolName: "server.scheduler.skip",
+    inputJson: { agentId: agent.id, schedule: agent.schedule },
+    outputJson: { message },
+    status: "Failed",
+  });
+  await updateServerAgentSchedule(agent, now);
+}
+
+async function runServerAgentIfDue(agent: ServerAgent, now: Date) {
+  if (!isServerAgentDue(agent, now)) return false;
+  const workflows = serverAgentWorkflowsFor(agent);
+  if (workflows.length === 0) {
+    await writeServerSchedulerFailure(agent, "No enabled server-side workflow is available for this agent.", now);
+    return true;
+  }
+
+  for (const workflow of workflows) {
+    const targets = await serverWorkflowTargets(workflow);
+    for (const target of targets) {
+      const key = workflow.repeatable ? undefined : operationKey(workflow, target);
+      if (await serverDuplicateRunExists(key)) continue;
+      const run = await addServerAgentRun({
+        agentId: agent.id,
+        workflowId: workflow.id,
+        taskType: `Scheduled: ${workflow.name}: ${target.label}`,
+        status: agent.harness === "Human-in-the-loop" ? "Pending" : "Running",
+        currentStep: agent.harness === "Human-in-the-loop" ? "Awaiting Approval" : "Executing",
+        operationKey: key,
+        operationType: workflow.operationType,
+        targetType: target.type,
+        targetId: target.id,
+        repeatable: workflow.repeatable,
+        inputJson: { scheduled: true, serverSide: true, workflowId: workflow.id, target, schedule: agent.schedule },
+      });
+      await addServerAgentStep({
+        runId: run.id,
+        stepType: "Thought",
+        toolName: "server.scheduler.trigger",
+        inputJson: { agentId: agent.id, workflowId: workflow.id, target },
+        outputJson: { role: agent.role, harness: agent.harness },
+        status: "Success",
+      });
+      if (agent.harness === "Human-in-the-loop") {
+        await addServerApproval({
+          runId: run.id,
+          actionType: "execute_workflow",
+          proposedPayload: { agentId: agent.id, workflowId: workflow.id, target, scheduled: true, serverSide: true },
+          status: "Pending",
+        });
+        await updateServerAgentSchedule(agent, now);
+        return true;
+      }
+      try {
+        const result = await executeServerWorkflow(agent, workflow, target);
+        for (const step of result.steps) {
+          await addServerAgentStep({ runId: run.id, stepType: "Tool", ...step });
+        }
+        await upsertRecord("agent_runs", run.id, {
+          ...run,
+          status: "Completed",
+          currentStep: "Completed",
+          outputJson: result.outputJson,
+          toolResults: result.steps,
+        });
+      } catch (err: any) {
+        await addServerAgentStep({
+          runId: run.id,
+          stepType: "Tool",
+          toolName: workflow.id,
+          outputJson: { error: err.message },
+          status: "Failed",
+        });
+        await upsertRecord("agent_runs", run.id, {
+          ...run,
+          status: "Failed",
+          currentStep: "Failed",
+          errorMessage: err.message,
+        });
+      }
+      await updateServerAgentSchedule(agent, now);
+      return true;
+    }
+  }
+  await writeServerSchedulerFailure(agent, "No eligible target is available for server-side scheduled execution.", now);
+  return true;
+}
+
+let serverAgentSchedulerRunning = false;
+
+async function tickServerAgentScheduler(reason = "timer") {
+  if (!hasDatabase || serverAgentSchedulerRunning) return { ran: 0 };
+  serverAgentSchedulerRunning = true;
+  let ran = 0;
+  try {
+    const now = new Date();
+    const agents = await getRecordList("agents") as ServerAgent[];
+    for (const agent of agents) {
+      if (await runServerAgentIfDue(agent, now)) ran += 1;
+    }
+    if (ran > 0) console.log(`[server-agent-scheduler] ${reason}: processed ${ran} agent(s).`);
+    return { ran };
+  } finally {
+    serverAgentSchedulerRunning = false;
+  }
+}
+
+function startServerAgentScheduler() {
+  if (!hasDatabase) return;
+  setTimeout(() => tickServerAgentScheduler("startup").catch(console.error), 8000);
+  setInterval(() => tickServerAgentScheduler("timer").catch(console.error), SERVER_AGENT_SCHEDULER_INTERVAL_MS);
+  console.log(`Server-side agent scheduler enabled every ${SERVER_AGENT_SCHEDULER_INTERVAL_MS}ms.`);
+}
+
+app.post("/api/agent/scheduler/tick", async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    res.json({ success: true, ...(await tickServerAgentScheduler("manual-api")) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -3582,6 +3978,7 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
     startBackgroundInboxSync();
+    startServerAgentScheduler();
   });
 }
 

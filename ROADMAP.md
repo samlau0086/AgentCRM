@@ -132,8 +132,9 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Guardrails and approvals are database-backed.
 - [x] Duplicate-operation guards prevent repeated processing for the same lead/customer where inappropriate.
 - [x] Workflow tools include AI Lead Analysis and Lead Generation Platforms.
-- [~] Scheduled agent execution works while browser/app runtime is active.
-- [ ] Add always-on server-side agent scheduler/worker.
+- [x] Scheduled agent execution works while browser/app runtime is active.
+- [x] First-pass always-on server-side agent scheduler/worker added for database-backed agents.
+- [~] Expand server-side scheduler workflow coverage for external lead platform integrations.
 - [ ] Add agent execution retry policy and failure classification.
 - [ ] Add workflow run detail page with inputs, outputs, and linked records.
 
@@ -191,6 +192,6 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Add always-on server-side agent scheduler.
+1. Expand server-side scheduler workflow coverage for external lead platform integrations.
 2. Add production health dashboards for WhatsApp, Email, agent runs, and imports.
 3. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
