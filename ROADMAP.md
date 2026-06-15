@@ -17,7 +17,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Move core CRM data from browser-only storage to database-backed records.
 - [x] Improve high-volume Customer/Public Pool/Product list performance with pagination.
 - [x] Add batch operations for Customers, Public Pool, Inbox, Products, and Agent logs.
-- [~] Optimize high-volume CSV imports and bulk mutations so large datasets remain responsive.
+- [~] Optimize high-volume CSV imports and bulk mutations so large datasets remain responsive. Public Pool import now uses a server-side job first pass.
 - [~] Continue replacing mock/demo flows with real integrations and database-backed behavior.
 
 ---
@@ -55,8 +55,11 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Customer/Public Pool Map view uses server-side country counts instead of current-page-only records.
 - [x] Server-side country normalization added for ISO2 codes, aliases, accented names, and common city/state hints.
 - [~] Continue performance tuning for 8k+ lead imports and bulk operations.
-- [ ] Move CSV import to a server-side import job/queue for very large files.
-- [ ] Add import history with failed batch download/retry.
+- [x] Public Pool CSV import uses a server-side job with progress polling.
+- [x] Public Pool CSV import has server-side batch retry and skip-after-retries behavior.
+- [x] Public Pool CSV import supports failed-row CSV download.
+- [ ] Move My Customers CSV import to the same server-side import job pattern.
+- [ ] Add import history view and retry-failed-rows action.
 
 ## 3. Sales, Products & Quotes / 产品与报价
 
@@ -186,7 +189,8 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Move large CSV import to a backend import job with progress polling and failed-row export.
-2. Add always-on server-side agent scheduler.
-3. Add production health dashboards for WhatsApp, Email, agent runs, and imports.
-4. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
+1. Add import history view and retry-failed-rows action.
+2. Move My Customers CSV import to the same backend import job pattern.
+3. Add always-on server-side agent scheduler.
+4. Add production health dashboards for WhatsApp, Email, agent runs, and imports.
+5. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.

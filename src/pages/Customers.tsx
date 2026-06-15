@@ -37,10 +37,11 @@ import {
   loadPublicLeadCountryCountsFromServer,
   PublicLead,
   savePublicLeads,
-  upsertPublicLeadsBatch,
   deletePublicLeads,
   claimLead,
   getCurrentUser,
+  createPublicLeadCsvImportJob,
+  loadImportJob,
 } from "../services/db";
 
 const CONTACT_TYPES = [
@@ -57,12 +58,11 @@ type CsvImportTarget = "my-customers" | "public-pool";
 type CustomerViewMode = "list" | "map";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
-const PUBLIC_POOL_IMPORT_BATCH_SIZE = 100;
-const PUBLIC_POOL_IMPORT_MAX_RETRIES = 3;
-const PUBLIC_POOL_IMPORT_RETRY_DELAY_MS = 1000;
+const IMPORT_JOB_POLL_MS = 1000;
 
 type CsvImportPreview = {
   fileName: string;
+  text: string;
   headers: string[];
   rows: Record<string, string>[];
 };
@@ -84,6 +84,8 @@ type CsvImportProgress = {
   skipped: number;
   failed: number;
   retry: number;
+  jobId?: string;
+  status?: string;
   label: string;
 };
 
@@ -1765,6 +1767,7 @@ export default function Customers() {
     setImportTarget(target);
     setImportPreview(null);
     setImportError("");
+    setImportProgress(null);
     setIsImportOpen(true);
   };
 
@@ -1783,7 +1786,7 @@ export default function Customers() {
         setImportError("No importable rows found. Make sure the first row contains column headers.");
         return;
       }
-      setImportPreview({ fileName: file.name, headers: parsed.headers, rows: parsed.rows });
+      setImportPreview({ fileName: file.name, text, headers: parsed.headers, rows: parsed.rows });
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Failed to parse CSV file.");
     }
@@ -1791,6 +1794,7 @@ export default function Customers() {
 
   const confirmCsvImport = async () => {
     if (!importPreview) return;
+    let keepImportOpen = false;
 
     if (importTarget === "my-customers") {
       const imported = importPreview.rows.map(rowToCustomer).filter(Boolean) as Customer[];
@@ -1807,127 +1811,68 @@ export default function Customers() {
       await refreshCountryStats();
       notify(`Imported ${unique.length} customer(s). ${imported.length - unique.length} duplicate row(s) skipped.`, "success", "CSV import complete");
     } else {
-      const imported = importPreview.rows.map(rowToPublicLead).filter(Boolean) as PublicLead[];
-      const existing = getPublicLeads();
-      const existingKeys = new Set(existing.map((item) => `${item.source}|${item.name}|${item.contact}`.toLowerCase()));
-      const unique = imported.filter((item) => {
-        const key = `${item.source}|${item.name}|${item.contact}`.toLowerCase();
-        if (existingKeys.has(key)) return false;
-        existingKeys.add(key);
-        return true;
-      });
-      const skipped = imported.length - unique.length;
-      const totalBatches = Math.max(1, Math.ceil(unique.length / PUBLIC_POOL_IMPORT_BATCH_SIZE));
+      const job = await createPublicLeadCsvImportJob(importPreview.fileName, importPreview.text);
       setImportProgress({
         active: true,
         processed: 0,
-        total: unique.length,
+        total: job.totalRows,
         batch: 0,
-        totalBatches,
+        totalBatches: job.totalBatches,
         imported: 0,
-        skipped,
+        skipped: 0,
         failed: 0,
         retry: 0,
-        label: "Preparing Public Pool import...",
+        jobId: job.id,
+        status: job.status,
+        label: job.message || "Public Pool import queued...",
       });
       await waitForPaint();
 
-      let importedCount = 0;
-      let failedCount = 0;
-      let retryCount = 0;
-
-      for (let start = 0; start < unique.length; start += PUBLIC_POOL_IMPORT_BATCH_SIZE) {
-        const batch = unique.slice(start, start + PUBLIC_POOL_IMPORT_BATCH_SIZE);
-        const batchNumber = Math.floor(start / PUBLIC_POOL_IMPORT_BATCH_SIZE) + 1;
-        let saved = false;
-
-        for (let attempt = 1; attempt <= PUBLIC_POOL_IMPORT_MAX_RETRIES && !saved; attempt += 1) {
-          setImportProgress({
-            active: true,
-            processed: importedCount + failedCount,
-            total: unique.length,
-            batch: batchNumber,
-            totalBatches,
-            imported: importedCount,
-            skipped,
-            failed: failedCount,
-            retry: retryCount,
-            label:
-              attempt === 1
-                ? `Importing batch ${batchNumber} of ${totalBatches}...`
-                : `Retrying batch ${batchNumber} of ${totalBatches}, attempt ${attempt} of ${PUBLIC_POOL_IMPORT_MAX_RETRIES}...`,
-          });
-          await waitForPaint();
-
-          try {
-            await upsertPublicLeadsBatch(batch);
-            importedCount += batch.length;
-            saved = true;
-            setImportProgress({
-              active: true,
-              processed: importedCount + failedCount,
-              total: unique.length,
-              batch: batchNumber,
-              totalBatches,
-              imported: importedCount,
-              skipped,
-              failed: failedCount,
-              retry: retryCount,
-              label: `Imported batch ${batchNumber} of ${totalBatches}.`,
-            });
-            await waitForPaint();
-          } catch (err) {
-            retryCount += 1;
-            if (attempt < PUBLIC_POOL_IMPORT_MAX_RETRIES) {
-              setImportProgress({
-                active: true,
-                processed: importedCount + failedCount,
-                total: unique.length,
-                batch: batchNumber,
-                totalBatches,
-                imported: importedCount,
-                skipped,
-                failed: failedCount,
-                retry: retryCount,
-                label: `Batch ${batchNumber} failed. Retrying in ${PUBLIC_POOL_IMPORT_RETRY_DELAY_MS / 1000}s...`,
-              });
-              await waitForPaint();
-              await waitMs(PUBLIC_POOL_IMPORT_RETRY_DELAY_MS);
-            } else {
-              failedCount += batch.length;
-              setImportProgress({
-                active: true,
-                processed: importedCount + failedCount,
-                total: unique.length,
-                batch: batchNumber,
-                totalBatches,
-                imported: importedCount,
-                skipped,
-                failed: failedCount,
-                retry: retryCount,
-                label: `Skipped batch ${batchNumber} after ${PUBLIC_POOL_IMPORT_MAX_RETRIES} failed attempts.`,
-              });
-              await waitForPaint();
-            }
-          }
-        }
+      let latestJob = job;
+      while (!["completed", "completed_with_errors", "failed"].includes(latestJob.status)) {
+        await waitMs(IMPORT_JOB_POLL_MS);
+        latestJob = await loadImportJob(job.id);
+        setImportProgress({
+          active: true,
+          processed: latestJob.processedRows,
+          total: latestJob.totalRows,
+          batch: latestJob.currentBatch,
+          totalBatches: latestJob.totalBatches,
+          imported: latestJob.importedRows,
+          skipped: latestJob.skippedRows,
+          failed: latestJob.failedRows,
+          retry: latestJob.retryAttempts || 0,
+          jobId: latestJob.id,
+          status: latestJob.status,
+          label: latestJob.message,
+        });
+        await waitForPaint();
       }
+
       await refreshPublicLeadPage();
       await refreshCountryStats();
-      if (failedCount > 0) {
+      if (latestJob.status === "failed") {
+        keepImportOpen = true;
+        setImportProgress((current) => current ? { ...current, active: false, label: latestJob.message || "Public Pool import failed." } : current);
+        notify(latestJob.message || "Public Pool import failed.", "error", "CSV import failed");
+      } else if (latestJob.failedRows > 0) {
+        keepImportOpen = true;
+        setImportProgress((current) => current ? { ...current, active: false, label: latestJob.message } : current);
         notify(
-          `Imported ${importedCount} public lead(s). Skipped ${failedCount} row(s) after retries and ${skipped} duplicate row(s).`,
+          `Imported ${latestJob.importedRows} public lead(s). ${latestJob.failedRows} row(s) failed and ${latestJob.skippedRows} duplicate/empty row(s) skipped.`,
           "warning",
           "CSV import completed with skips",
         );
       } else {
-        notify(`Imported ${importedCount} public lead(s). ${skipped} duplicate row(s) skipped.`, "success", "CSV import complete");
+        notify(`Imported ${latestJob.importedRows} public lead(s). ${latestJob.skippedRows} duplicate/empty row(s) skipped.`, "success", "CSV import complete");
+        setImportProgress(null);
       }
-      setImportProgress(null);
     }
 
-    setIsImportOpen(false);
-    setImportPreview(null);
+    if (!keepImportOpen) {
+      setIsImportOpen(false);
+      setImportPreview(null);
+    }
   };
 
   const downloadSampleCsv = () => {
@@ -2774,6 +2719,15 @@ export default function Customers() {
                         <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">
                           Batch {importProgress.batch} / {importProgress.totalBatches} · {importProgress.processed} / {importProgress.total} imported · {importProgress.skipped} duplicate row(s) skipped
                         </p>
+                        {importProgress.jobId && importProgress.failed > 0 && (
+                          <a
+                            href={`/api/imports/${encodeURIComponent(importProgress.jobId)}/failed-csv`}
+                            className="mt-3 inline-flex items-center gap-2 rounded-md border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 dark:border-blue-500/30 dark:bg-black/20 dark:text-blue-200 dark:hover:bg-blue-500/10"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download failed rows
+                          </a>
+                        )}
                       </div>
                       <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">
                         {importProgress.total === 0 ? 100 : Math.round((importProgress.processed / importProgress.total) * 100)}%
@@ -2799,11 +2753,11 @@ export default function Customers() {
                   disabled={Boolean(importProgress?.active)}
                   className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-white/10"
                 >
-                  Cancel
+                  {importProgress?.jobId && !importProgress.active ? "Close" : "Cancel"}
                 </button>
                 <button
                   onClick={confirmCsvImport}
-                  disabled={!importPreview || Boolean(importProgress?.active)}
+                  disabled={!importPreview || Boolean(importProgress?.active) || Boolean(importProgress?.jobId)}
                   className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Upload className="h-4 w-4" />

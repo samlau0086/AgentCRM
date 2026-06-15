@@ -27,7 +27,7 @@ const BACKGROUND_INBOX_SYNC_INTERVAL_MS = Math.max(
   Number(process.env.INBOX_SYNC_INTERVAL_MS || 60000),
 );
 
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
 
 app.get("/api/deploy-info", (_req, res) => {
@@ -319,6 +319,314 @@ function recordCountry(data: any) {
     .filter(Boolean)
     .join(", ");
   return inferCountryFromLocation(locationText) || "Unknown";
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      value += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      row.push(value.trim());
+      value = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(value.trim());
+      if (row.some((cell) => cell !== "")) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+
+  row.push(value.trim());
+  if (row.some((cell) => cell !== "")) rows.push(row);
+  return rows;
+}
+
+function normalizeCsvHeader(header: string) {
+  return header.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function csvToObjects(text: string) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return { headers: rows[0] || [], rows: [] as Record<string, string>[] };
+  const headers = rows[0].map(normalizeCsvHeader);
+  return {
+    headers,
+    rows: rows.slice(1).map((row) =>
+      Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])),
+    ) as Record<string, string>[],
+  };
+}
+
+function pickCsv(row: Record<string, string>, aliases: string[]) {
+  for (const alias of aliases) {
+    const value = row[normalizeCsvHeader(alias)];
+    if (value?.trim()) return value.trim();
+  }
+  return "";
+}
+
+function csvTags(value: string) {
+  return value
+    .split(/[;,|]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function clampScore(value: string, fallback = 50) {
+  const parsed = parseInt(value || "", 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.max(0, Math.min(100, parsed));
+}
+
+function normalizeRisk(value: string) {
+  const text = value.trim().toLowerCase();
+  if (text === "high") return "High";
+  if (text === "medium") return "Medium";
+  return text === "low" ? "Low" : undefined;
+}
+
+function normalizeIntent(value: string) {
+  const text = value.trim().toLowerCase();
+  if (text === "high") return "High";
+  if (text === "medium") return "Medium";
+  return text === "low" ? "Low" : undefined;
+}
+
+function buildLeadContactMethods(row: Record<string, string>) {
+  return [
+    { type: "Email", value: pickCsv(row, ["email", "email_address", "mail"]) },
+    { type: "Phone", value: pickCsv(row, ["phone", "phone_number", "tel"]) },
+    { type: "Mobile", value: pickCsv(row, ["mobile", "mobile_phone"]) },
+    { type: "WhatsApp", value: pickCsv(row, ["whatsapp", "whatsapp_number"]) },
+    { type: "Other", value: pickCsv(row, ["website", "site", "url", "linkedin"]) },
+  ]
+    .filter((contact) => contact.value)
+    .map((contact, index) => ({
+      id: `contact_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
+      type: contact.type,
+      value: contact.value,
+    }));
+}
+
+function rowToPublicLead(row: Record<string, string>, rowNumber: number) {
+  const name = pickCsv(row, ["company", "company_name", "name", "lead", "business_name", "organization"]);
+  const contact = pickCsv(row, ["contact", "email", "phone", "mobile", "website", "site", "url"]);
+  if (!name && !contact) return null;
+  const country = normalizeCountryName(pickCsv(row, ["country"])) ||
+    inferCountryFromLocation(pickCsv(row, ["location", "address", "city", "province", "state", "region"]));
+  const scoreValue = pickCsv(row, ["score", "priority_score", "ai_score"]);
+  return {
+    id: `lead_csv_${Date.now()}_${rowNumber}_${Math.random().toString(36).slice(2, 9)}`,
+    name: name || contact,
+    contact: contact || "No contact provided",
+    source: pickCsv(row, ["source", "platform"]) || "CSV Import",
+    scrapedAt: new Date().toISOString(),
+    contacts: buildLeadContactMethods(row),
+    industry: pickCsv(row, ["industry", "category"]),
+    location: pickCsv(row, ["location", "address", "city", "country"]),
+    country,
+    description: pickCsv(row, ["description", "notes", "note", "summary"]),
+    score: scoreValue ? clampScore(scoreValue) : undefined,
+    intent: normalizeIntent(pickCsv(row, ["intent"])),
+    risk: normalizeRisk(pickCsv(row, ["risk"])),
+    tags: csvTags(pickCsv(row, ["tags", "tag"])),
+  };
+}
+
+type ImportJobStatus = "queued" | "running" | "completed" | "completed_with_errors" | "failed";
+
+type ImportJobRecord = {
+  id: string;
+  type: "public_leads_csv";
+  fileName: string;
+  status: ImportJobStatus;
+  totalRows: number;
+  processedRows: number;
+  importedRows: number;
+  skippedRows: number;
+  failedRows: number;
+  retryAttempts: number;
+  batchSize: number;
+  currentBatch: number;
+  totalBatches: number;
+  message: string;
+  errors: Array<{ rowNumber: number; reason: string; row: Record<string, string> }>;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
+const activeImportJobs = new Set<string>();
+
+async function saveImportJob(job: ImportJobRecord) {
+  await upsertRecord("import_jobs", job.id, job);
+}
+
+async function getImportJob(id: string) {
+  return getRecord("import_jobs", id) as Promise<ImportJobRecord | undefined>;
+}
+
+async function updateImportJob(id: string, updates: Partial<ImportJobRecord>) {
+  const current = await getImportJob(id);
+  if (!current) return;
+  await saveImportJob({ ...current, ...updates, updatedAt: new Date().toISOString() });
+}
+
+async function processPublicLeadCsvImport(jobId: string, csvText: string) {
+  if (activeImportJobs.has(jobId)) return;
+  activeImportJobs.add(jobId);
+  try {
+    const parsed = csvToObjects(csvText);
+    const totalRows = parsed.rows.length;
+    const batchSize = 100;
+    const totalBatches = Math.max(1, Math.ceil(totalRows / batchSize));
+    await updateImportJob(jobId, {
+      status: "running",
+      totalRows,
+      batchSize,
+      totalBatches,
+      message: `Importing ${totalRows} row(s)...`,
+    });
+
+    const existing = await getRecordList("public_leads");
+    const seenKeys = new Set(
+      existing.map((item: any) =>
+        `${item.source || ""}|${item.name || ""}|${item.contact || ""}`.toLowerCase(),
+      ),
+    );
+    let importedRows = 0;
+    let skippedRows = 0;
+    let failedRows = 0;
+    let retryAttempts = 0;
+    const errors: ImportJobRecord["errors"] = [];
+
+    for (let start = 0; start < totalRows; start += batchSize) {
+      const batchRows = parsed.rows.slice(start, start + batchSize);
+      const currentBatch = Math.floor(start / batchSize) + 1;
+      await updateImportJob(jobId, {
+        currentBatch,
+        processedRows: start,
+        importedRows,
+        skippedRows,
+        failedRows,
+        retryAttempts,
+        message: `Processing batch ${currentBatch} of ${totalBatches}...`,
+      });
+
+      let batchSaved = false;
+      let lastBatchError = "";
+      for (let attempt = 1; attempt <= 3 && !batchSaved; attempt += 1) {
+        try {
+          await withDb(async (client) => {
+            for (let index = 0; index < batchRows.length; index += 1) {
+              const row = batchRows[index];
+              const rowNumber = start + index + 2;
+              try {
+                const lead = rowToPublicLead(row, rowNumber);
+                if (!lead) {
+                  skippedRows += 1;
+                  continue;
+                }
+                const key = `${lead.source}|${lead.name}|${lead.contact}`.toLowerCase();
+                if (seenKeys.has(key)) {
+                  skippedRows += 1;
+                  continue;
+                }
+                await client.query(
+                  `
+                  INSERT INTO crm_records (entity, id, data, updated_at)
+                  VALUES ($1, $2, $3::jsonb, NOW())
+                  ON CONFLICT (entity, id)
+                  DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+                  `,
+                  ["public_leads", lead.id, JSON.stringify(lead)],
+                );
+                seenKeys.add(key);
+                importedRows += 1;
+              } catch (err: any) {
+                failedRows += 1;
+                errors.push({ rowNumber, reason: err.message || "Failed to import row.", row });
+              }
+            }
+          });
+          batchSaved = true;
+        } catch (err: any) {
+          lastBatchError = err.message || "Batch failed.";
+          retryAttempts += 1;
+          if (attempt < 3) {
+            await updateImportJob(jobId, {
+              currentBatch,
+              processedRows: start,
+              importedRows,
+              skippedRows,
+              failedRows,
+              retryAttempts,
+              errors,
+              message: `Batch ${currentBatch} failed. Retrying attempt ${attempt + 1} of 3...`,
+            });
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+        }
+      }
+
+      if (!batchSaved) {
+        batchRows.forEach((row, index) => {
+          failedRows += 1;
+          errors.push({
+            rowNumber: start + index + 2,
+            reason: lastBatchError || "Batch failed after retries.",
+            row,
+          });
+        });
+      }
+
+      await updateImportJob(jobId, {
+        currentBatch,
+        processedRows: Math.min(start + batchRows.length, totalRows),
+        importedRows,
+        skippedRows,
+        failedRows,
+        retryAttempts,
+        errors,
+        message: batchSaved
+          ? `Imported batch ${currentBatch} of ${totalBatches}.`
+          : `Skipped batch ${currentBatch} after 3 failed attempts.`,
+      });
+    }
+
+    await updateImportJob(jobId, {
+      status: failedRows > 0 ? "completed_with_errors" : "completed",
+      processedRows: totalRows,
+      importedRows,
+      skippedRows,
+      failedRows,
+      retryAttempts,
+      errors,
+      message: `Imported ${importedRows} lead(s). ${skippedRows} duplicate/empty row(s) skipped. ${failedRows} row(s) failed.`,
+      completedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    await updateImportJob(jobId, {
+      status: "failed",
+      message: err.message || "Import failed.",
+      completedAt: new Date().toISOString(),
+    });
+  } finally {
+    activeImportJobs.delete(jobId);
+  }
 }
 
 async function getRecordPage(
@@ -802,6 +1110,96 @@ app.post("/api/vector/init", async (_req, res) => {
       `);
     });
     res.json({ success: true, message: "Vector database initialized." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/imports/public-leads/csv", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  const csvText = String(req.body?.csvText || "");
+  const fileName = String(req.body?.fileName || "public-pool.csv");
+  if (!csvText.trim()) {
+    res.status(400).json({ error: "csvText is required." });
+    return;
+  }
+
+  try {
+    const parsed = csvToObjects(csvText);
+    if (parsed.rows.length === 0) {
+      res.status(400).json({ error: "No importable rows found." });
+      return;
+    }
+    const job: ImportJobRecord = {
+      id: `import_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      type: "public_leads_csv",
+      fileName,
+      status: "queued",
+      totalRows: parsed.rows.length,
+      processedRows: 0,
+      importedRows: 0,
+      skippedRows: 0,
+      failedRows: 0,
+      retryAttempts: 0,
+      batchSize: 100,
+      currentBatch: 0,
+      totalBatches: Math.max(1, Math.ceil(parsed.rows.length / 100)),
+      message: "Import queued.",
+      errors: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await saveImportJob(job);
+    setTimeout(() => {
+      processPublicLeadCsvImport(job.id, csvText).catch((err) => {
+        console.error("Public Pool CSV import failed:", err);
+      });
+    }, 0);
+    res.status(202).json(job);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/imports/:id", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const job = await getImportJob(req.params.id);
+    job ? res.json(job) : res.status(404).json({ error: "Import job not found." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/imports/:id/failed-csv", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const job = await getImportJob(req.params.id);
+    if (!job) {
+      res.status(404).json({ error: "Import job not found." });
+      return;
+    }
+    const headers = Array.from(
+      new Set(job.errors.flatMap((error) => Object.keys(error.row || {}))),
+    );
+    const rows = [
+      ["row_number", "reason", ...headers],
+      ...job.errors.map((error) => [
+        String(error.rowNumber),
+        error.reason,
+        ...headers.map((header) => String(error.row?.[header] || "")),
+      ]),
+    ];
+    const csv = rows
+      .map((row) =>
+        row
+          .map((value) => /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
+          .join(","),
+      )
+      .join("\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${job.id}-failed-rows.csv"`);
+    res.send(csv);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -137,6 +137,51 @@ export type CountryCount = {
   count: number;
 };
 
+export type ImportJobStatus = "queued" | "running" | "completed" | "completed_with_errors" | "failed";
+
+export type ImportJob = {
+  id: string;
+  type: "public_leads_csv";
+  fileName: string;
+  status: ImportJobStatus;
+  totalRows: number;
+  processedRows: number;
+  importedRows: number;
+  skippedRows: number;
+  failedRows: number;
+  retryAttempts: number;
+  batchSize: number;
+  currentBatch: number;
+  totalBatches: number;
+  message: string;
+  errors?: Array<{ rowNumber: number; reason: string; row: Record<string, string> }>;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
+export async function createPublicLeadCsvImportJob(fileName: string, csvText: string) {
+  const response = await fetch("/api/imports/public-leads/csv", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName, csvText }),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error || `Failed to create import job: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<ImportJob>;
+}
+
+export async function loadImportJob(jobId: string) {
+  const response = await fetch(`/api/imports/${encodeURIComponent(jobId)}`);
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error || `Failed to load import job: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<ImportJob>;
+}
+
 async function loadRecordPageFromServer<T>(
   key: string,
   options: { page: number; pageSize: number; search?: string; country?: string; channel?: string; mailbox?: string },
