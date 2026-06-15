@@ -4421,6 +4421,189 @@ app.get("/api/operations/health", async (_req, res) => {
   }
 });
 
+type OperationsLog = {
+  id: string;
+  timestamp: string;
+  module: "agent" | "import" | "email" | "whatsapp" | "lead_platform" | "system";
+  severity: "info" | "warning" | "error" | "success";
+  title: string;
+  detail: string;
+  status?: string;
+  recordId?: string;
+  metadata?: Record<string, unknown>;
+};
+
+function severityFromStatus(status = ""): OperationsLog["severity"] {
+  const value = String(status || "").toLowerCase();
+  if (value.includes("failed") || value === "rejected") return "error";
+  if (value.includes("error") || value.includes("warning") || value.includes("queued") || value.includes("running") || value.includes("pending")) return "warning";
+  if (value.includes("completed") || value.includes("success") || value.includes("approved")) return "success";
+  return "info";
+}
+
+function logSearchText(log: OperationsLog) {
+  return [
+    log.module,
+    log.severity,
+    log.title,
+    log.detail,
+    log.status,
+    log.recordId,
+    JSON.stringify(log.metadata || {}),
+  ].join(" ").toLowerCase();
+}
+
+async function buildOperationsLogs(options: {
+  module?: string;
+  severity?: string;
+  search?: string;
+  limit?: number;
+}) {
+  const [agentRuns, importJobs, inboxMessages] = await Promise.all([
+    getRecordList("agent_runs"),
+    getRecordList("import_jobs"),
+    getRecordList("inbox_messages"),
+  ]);
+
+  const logs: OperationsLog[] = [];
+  const pushLog = (log: OperationsLog) => logs.push(log);
+
+  if (backgroundInboxSyncState.lastStartedAt || backgroundInboxSyncState.lastFinishedAt) {
+    pushLog({
+      id: "background-inbox-sync:last-run",
+      timestamp: backgroundInboxSyncState.lastFinishedAt || backgroundInboxSyncState.lastStartedAt,
+      module: "system",
+      severity: backgroundInboxSyncState.lastErrors.length > 0 ? "warning" : "success",
+      title: "Background inbox sync",
+      detail: `Reason: ${backgroundInboxSyncState.lastReason || "unknown"}. Email imported: ${backgroundInboxSyncState.lastEmailImported}. WhatsApp imported: ${backgroundInboxSyncState.lastWhatsAppImported}.`,
+      status: backgroundInboxSyncRunning ? "Running" : "Idle",
+      metadata: { ...backgroundInboxSyncState },
+    });
+    backgroundInboxSyncState.lastErrors.forEach((error, index) => {
+      pushLog({
+        id: `background-inbox-sync:error:${index}`,
+        timestamp: backgroundInboxSyncState.lastFinishedAt || new Date().toISOString(),
+        module: String(error).toLowerCase().includes("whatsapp") || String(error).toLowerCase().includes("hub") ? "whatsapp" : "email",
+        severity: "error",
+        title: "Background inbox sync error",
+        detail: String(error),
+        status: "Failed",
+      });
+    });
+  }
+
+  if (serverAgentSchedulerState.lastStartedAt || serverAgentSchedulerState.lastFinishedAt) {
+    pushLog({
+      id: "server-agent-scheduler:last-run",
+      timestamp: serverAgentSchedulerState.lastFinishedAt || serverAgentSchedulerState.lastStartedAt,
+      module: "agent",
+      severity: serverAgentSchedulerState.lastError ? "error" : "success",
+      title: "Server agent scheduler",
+      detail: `Reason: ${serverAgentSchedulerState.lastReason || "unknown"}. Processed runs: ${serverAgentSchedulerState.lastRan || 0}.`,
+      status: serverAgentSchedulerRunning ? "Running" : "Idle",
+      metadata: { ...serverAgentSchedulerState },
+    });
+  }
+
+  agentRuns.forEach((run: any) => {
+    const module = run.operationType === "lead_platform_collection" ? "lead_platform" : "agent";
+    pushLog({
+      id: `agent-run:${run.id}`,
+      timestamp: run.createdAt || run.lastRetryAt || new Date().toISOString(),
+      module,
+      severity: severityFromStatus(run.status),
+      title: run.taskType || run.workflowId || "Agent run",
+      detail: run.errorMessage || run.currentStep || run.operationType || "",
+      status: run.status,
+      recordId: run.id,
+      metadata: {
+        agentId: run.agentId,
+        workflowId: run.workflowId,
+        operationType: run.operationType,
+        targetType: run.targetType,
+        targetId: run.targetId,
+        failureCategory: run.failureCategory,
+        retryAttempt: run.retryAttempt,
+        nextRetryAt: run.nextRetryAt,
+      },
+    });
+  });
+
+  importJobs.forEach((job: any) => {
+    pushLog({
+      id: `import-job:${job.id}`,
+      timestamp: job.updatedAt || job.completedAt || job.startedAt || job.createdAt || new Date().toISOString(),
+      module: "import",
+      severity: severityFromStatus(job.status),
+      title: job.fileName || job.type || "Import job",
+      detail: job.message || `${job.importedRows || 0} imported, ${job.skippedRows || 0} skipped, ${job.failedRows || 0} failed.`,
+      status: job.status,
+      recordId: job.id,
+      metadata: {
+        type: job.type,
+        totalRows: job.totalRows,
+        processedRows: job.processedRows,
+        importedRows: job.importedRows,
+        skippedRows: job.skippedRows,
+        failedRows: job.failedRows,
+        retryAttempts: job.retryAttempts,
+        firstError: job.errors?.[0],
+      },
+    });
+  });
+
+  inboxMessages.slice(0, 500).forEach((message: any) => {
+    const isWhatsApp = message.channel === "WhatsApp";
+    pushLog({
+      id: `inbox-message:${message.id}`,
+      timestamp: message.createdAt || message.date || new Date().toISOString(),
+      module: isWhatsApp ? "whatsapp" : "email",
+      severity: "info",
+      title: isWhatsApp ? `WhatsApp: ${message.sender || message.chatId || message.mob || "Conversation"}` : `Email: ${message.subject || "(No subject)"}`,
+      detail: message.summary || message.intent || "",
+      status: message.read ? "Read" : "Unread",
+      recordId: message.id,
+      metadata: {
+        channel: message.channel,
+        direction: message.direction,
+        important: message.important,
+        mailbox: message.mailbox,
+        userId: message.userId,
+        waClientId: message.waClientId,
+      },
+    });
+  });
+
+  const search = String(options.search || "").trim().toLowerCase();
+  const moduleFilter = String(options.module || "").trim();
+  const severityFilter = String(options.severity || "").trim();
+  const filtered = logs
+    .filter((log) => !moduleFilter || log.module === moduleFilter)
+    .filter((log) => !severityFilter || log.severity === severityFilter)
+    .filter((log) => !search || logSearchText(log).includes(search))
+    .sort((a, b) => (Date.parse(b.timestamp) || 0) - (Date.parse(a.timestamp) || 0));
+  const limit = Math.max(1, Math.min(Number(options.limit || 100), 500));
+  return {
+    total: filtered.length,
+    logs: filtered.slice(0, limit),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+app.get("/api/operations/logs", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    res.json(await buildOperationsLogs({
+      module: String(req.query.module || ""),
+      severity: String(req.query.severity || ""),
+      search: String(req.query.search || ""),
+      limit: Number(req.query.limit || 100),
+    }));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to load operations logs." });
+  }
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

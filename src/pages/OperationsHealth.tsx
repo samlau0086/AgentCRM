@@ -9,6 +9,7 @@ import {
   Mail,
   RefreshCw,
   RotateCw,
+  Search,
   UploadCloud,
   Wifi,
 } from "lucide-react";
@@ -75,6 +76,18 @@ type HealthPayload = {
     failedRuns: any[];
     latestRun?: any;
   };
+};
+
+type OperationsLog = {
+  id: string;
+  timestamp: string;
+  module: "agent" | "import" | "email" | "whatsapp" | "lead_platform" | "system";
+  severity: "info" | "warning" | "error" | "success";
+  title: string;
+  detail: string;
+  status?: string;
+  recordId?: string;
+  metadata?: Record<string, unknown>;
 };
 
 function formatTime(value?: string) {
@@ -164,6 +177,12 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
 export default function OperationsHealth() {
   const { language } = useLanguage();
   const [health, setHealth] = useState<HealthPayload | null>(null);
+  const [logs, setLogs] = useState<OperationsLog[]>([]);
+  const [logTotal, setLogTotal] = useState(0);
+  const [logSearch, setLogSearch] = useState("");
+  const [logModule, setLogModule] = useState("");
+  const [logSeverity, setLogSeverity] = useState("");
+  const [logsLoading, setLogsLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busyAction, setBusyAction] = useState("");
 
@@ -175,6 +194,25 @@ export default function OperationsHealth() {
     refresh: language === "zh" ? "刷新" : "Refresh",
     triggerSync: language === "zh" ? "同步收件箱" : "Run inbox sync",
     triggerAgents: language === "zh" ? "运行智能体调度" : "Run agent scheduler",
+  };
+
+  const loadLogs = async () => {
+    setLogsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "100" });
+      if (logSearch.trim()) params.set("search", logSearch.trim());
+      if (logModule) params.set("module", logModule);
+      if (logSeverity) params.set("severity", logSeverity);
+      const response = await fetch(`/api/operations/logs?${params.toString()}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Logs request failed with HTTP ${response.status}.`);
+      setLogs(Array.isArray(data.logs) ? data.logs : []);
+      setLogTotal(Number(data.total || 0));
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to load operations logs.", "error", copy.title);
+    } finally {
+      setLogsLoading(false);
+    }
   };
 
   const loadHealth = async () => {
@@ -197,6 +235,11 @@ export default function OperationsHealth() {
     return () => window.clearInterval(timer);
   }, [language]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(loadLogs, 250);
+    return () => window.clearTimeout(timer);
+  }, [logSearch, logModule, logSeverity, language]);
+
   const runAction = async (action: "sync" | "agents") => {
     setBusyAction(action);
     try {
@@ -207,6 +250,7 @@ export default function OperationsHealth() {
       if (!response.ok) throw new Error(data.error || `Action failed with HTTP ${response.status}.`);
       notify(language === "zh" ? "任务已执行。" : "Task executed.", "success", copy.title);
       await loadHealth();
+      await loadLogs();
     } catch (err) {
       notify(err instanceof Error ? err.message : "Failed to run action.", "error", copy.title);
     } finally {
@@ -236,6 +280,13 @@ export default function OperationsHealth() {
     ...(health?.imports.failedJobs || []).map((item) => ({ module: "Import", title: item.fileName || item.id, detail: item.message || item.status, time: item.completedAt || item.createdAt })),
     ...(health?.leadPlatforms.failedRuns || []).map((item) => ({ module: "Lead Platform", title: item.taskType || item.targetId || item.id, detail: item.errorMessage || item.status, time: item.createdAt })),
   ].slice(0, 12);
+
+  const severityClass = (severity: OperationsLog["severity"]) => {
+    if (severity === "error") return "border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300";
+    if (severity === "warning") return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300";
+    if (severity === "success") return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300";
+    return "border-slate-200 bg-slate-50 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300";
+  };
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-auto p-4 md:p-8">
@@ -307,6 +358,100 @@ export default function OperationsHealth() {
           </ModuleCard>
         </div>
       )}
+
+      <div className="rounded-lg border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5">
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 dark:border-white/10 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">{language === "zh" ? "生产日志" : "Production Logs"}</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {language === "zh" ? `统一事件流，当前匹配 ${logTotal} 条。` : `Unified event stream. ${logTotal} matching event(s).`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={loadLogs}
+            disabled={logsLoading}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
+          >
+            <RefreshCw className={cn("h-4 w-4", logsLoading && "animate-spin")} />
+            {language === "zh" ? "刷新日志" : "Refresh logs"}
+          </button>
+        </div>
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-white/10 lg:flex-row">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={logSearch}
+              onChange={(event) => setLogSearch(event.target.value)}
+              placeholder={language === "zh" ? "搜索模块、任务、错误、ID..." : "Search module, job, error, ID..."}
+              className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-slate-200"
+            />
+          </div>
+          <select
+            value={logModule}
+            onChange={(event) => setLogModule(event.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-slate-200"
+          >
+            <option value="">{language === "zh" ? "全部模块" : "All modules"}</option>
+            <option value="agent">Agent</option>
+            <option value="lead_platform">Lead Platform</option>
+            <option value="import">Import</option>
+            <option value="email">Email</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="system">System</option>
+          </select>
+          <select
+            value={logSeverity}
+            onChange={(event) => setLogSeverity(event.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/30 dark:text-slate-200"
+          >
+            <option value="">{language === "zh" ? "全部级别" : "All severities"}</option>
+            <option value="error">Error</option>
+            <option value="warning">Warning</option>
+            <option value="success">Success</option>
+            <option value="info">Info</option>
+          </select>
+        </div>
+        <div className="overflow-auto">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400 dark:bg-black/20">
+              <tr>
+                <th className="px-4 py-3">{language === "zh" ? "时间" : "Time"}</th>
+                <th className="px-4 py-3">{language === "zh" ? "模块" : "Module"}</th>
+                <th className="px-4 py-3">{language === "zh" ? "级别" : "Severity"}</th>
+                <th className="px-4 py-3">{language === "zh" ? "事件" : "Event"}</th>
+                <th className="px-4 py-3">{language === "zh" ? "状态" : "Status"}</th>
+                <th className="px-4 py-3">{language === "zh" ? "记录 ID" : "Record ID"}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+              {logs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
+                    {logsLoading ? (language === "zh" ? "正在加载日志..." : "Loading logs...") : (language === "zh" ? "没有匹配的日志。" : "No matching logs.")}
+                  </td>
+                </tr>
+              ) : logs.map((log) => (
+                <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-white/[0.03]">
+                  <td className="px-4 py-3 text-xs text-slate-500">{formatTime(log.timestamp)}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200">{log.module}</td>
+                  <td className="px-4 py-3">
+                    <span className={cn("rounded-full border px-2 py-1 text-xs font-semibold", severityClass(log.severity))}>
+                      {log.severity}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-slate-800 dark:text-slate-200">{log.title}</div>
+                    <div className="mt-1 max-w-xl truncate text-xs text-slate-500">{log.detail || "-"}</div>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{log.status || "-"}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{log.recordId || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div className="rounded-lg border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-white/10">

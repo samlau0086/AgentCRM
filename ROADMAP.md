@@ -179,7 +179,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [ ] Add automated smoke test after deployment.
 - [ ] Add database migration/version endpoint.
 - [x] Add first-pass production health dashboard for Email, WhatsApp, agent runs, imports, and lead-platform collection jobs.
-- [ ] Add deeper production logs dashboard with searchable event history.
+- [x] Add first-pass searchable production logs/event history dashboard.
 
 ## 11. Documentation / 文档
 
@@ -194,6 +194,6 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Add deeper production logs dashboard with searchable event history.
-2. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
-3. Add automated deployment smoke tests for health, inbox sync, and agent scheduler endpoints.
+1. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
+2. Add automated deployment smoke tests for health, inbox sync, operations logs, and agent scheduler endpoints.
+3. Add persistent operation event storage for long-term audit history.
