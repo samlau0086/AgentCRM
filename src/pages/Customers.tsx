@@ -31,8 +31,10 @@ import {
   updateCustomer,
   Customer,
   loadCustomersPageFromServer,
+  loadCustomerCountryCountsFromServer,
   getPublicLeads,
   loadPublicLeadsPageFromServer,
+  loadPublicLeadCountryCountsFromServer,
   PublicLead,
   savePublicLeads,
   upsertPublicLeadsBatch,
@@ -1070,6 +1072,24 @@ function getCountryStats<T>(items: T[], getCountry: (item: T) => string) {
     .sort((a, b) => b.count - a.count || a.country.localeCompare(b.country));
 }
 
+function countryCountsToStats(items: { country: string; count: number }[]) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const country =
+      normalizeCountryField(item.country) ||
+      inferCountryFromLocation(item.country) ||
+      "Unknown";
+    counts.set(country, (counts.get(country) || 0) + item.count);
+  });
+  return Array.from(counts.entries())
+    .map(([country, count]) => ({
+      country,
+      count,
+      ...projectCountryPoint(country),
+    }))
+    .sort((a, b) => b.count - a.count || a.country.localeCompare(b.country));
+}
+
 function matchesCountryFilter(country: string, filter: string) {
   if (!filter) return true;
   return countryKey(country) === countryKey(filter);
@@ -1584,6 +1604,8 @@ export default function Customers() {
   const [customerTotal, setCustomerTotal] = useState(0);
   const [publicLeads, setPublicLeads] = useState<PublicLead[]>([]);
   const [publicLeadTotal, setPublicLeadTotal] = useState(0);
+  const [customerCountryCounts, setCustomerCountryCounts] = useState<{ country: string; count: number }[]>([]);
+  const [publicLeadCountryCounts, setPublicLeadCountryCounts] = useState<{ country: string; count: number }[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<CustomerViewMode>("list");
   const [countryFilter, setCountryFilter] = useState("");
@@ -1656,6 +1678,27 @@ export default function Customers() {
   }, [publicLeadPage, publicLeadPageSize, searchQuery, countryFilter]);
 
   useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      loadCustomerCountryCountsFromServer(),
+      loadPublicLeadCountryCountsFromServer(),
+    ])
+      .then(([customerStats, leadStats]) => {
+        if (cancelled) return;
+        setCustomerCountryCounts(customerStats);
+        setPublicLeadCountryCounts(leadStats);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCustomerCountryCounts([]);
+        setPublicLeadCountryCounts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const editId = searchParams.get("edit");
     if (editId) {
       const c = getCustomers().find((c) => c.id === editId);
@@ -1702,6 +1745,15 @@ export default function Customers() {
     });
     setPublicLeads(page.records);
     setPublicLeadTotal(page.total);
+  };
+
+  const refreshCountryStats = async () => {
+    const [customerStats, leadStats] = await Promise.all([
+      loadCustomerCountryCountsFromServer(),
+      loadPublicLeadCountryCountsFromServer(),
+    ]);
+    setCustomerCountryCounts(customerStats);
+    setPublicLeadCountryCounts(leadStats);
   };
 
   const handleAdd = () => {
@@ -1752,6 +1804,7 @@ export default function Customers() {
       });
       await saveCustomers([...unique, ...existing]);
       await refreshCustomerPage();
+      await refreshCountryStats();
       notify(`Imported ${unique.length} customer(s). ${imported.length - unique.length} duplicate row(s) skipped.`, "success", "CSV import complete");
     } else {
       const imported = importPreview.rows.map(rowToPublicLead).filter(Boolean) as PublicLead[];
@@ -1860,6 +1913,7 @@ export default function Customers() {
         }
       }
       await refreshPublicLeadPage();
+      await refreshCountryStats();
       if (failedCount > 0) {
         notify(
           `Imported ${importedCount} public lead(s). Skipped ${failedCount} row(s) after retries and ${skipped} duplicate row(s).`,
@@ -1955,6 +2009,7 @@ export default function Customers() {
     if (deletingCustomerId) {
       deleteCustomer(deletingCustomerId);
       await refreshCustomerPage();
+      await refreshCountryStats();
       setSelectedCustomerIds((current) => current.filter((id) => id !== deletingCustomerId));
       setDeletingCustomerId(null);
     }
@@ -1964,6 +2019,7 @@ export default function Customers() {
     if (selectedCustomerIds.length === 0) return;
     await deleteCustomers(selectedCustomerIds);
     await refreshCustomerPage();
+    await refreshCountryStats();
     notify(`Deleted ${selectedCustomerIds.length} customer(s).`, "success", "Customers updated");
     setSelectedCustomerIds([]);
     setIsBulkDeleteCustomersOpen(false);
@@ -1984,8 +2040,8 @@ export default function Customers() {
 
   const countryStats =
     activeTab === "my-customers"
-      ? getCountryStats(customers, getCustomerCountry)
-      : getCountryStats(publicLeads, getPublicLeadCountry);
+      ? countryCountsToStats(customerCountryCounts)
+      : countryCountsToStats(publicLeadCountryCounts);
 
   const customerPagination = {
     page: customerPage,
@@ -2050,6 +2106,7 @@ export default function Customers() {
     if (!canBulkDeletePublicPool || selectedPublicLeadIds.length === 0) return;
     await deletePublicLeads(selectedPublicLeadIds);
     await refreshPublicLeadPage();
+    await refreshCountryStats();
     setSelectedPublicLeadIds([]);
     setIsBulkDeletePublicLeadsOpen(false);
     notify("Selected public leads have been deleted.", "success", "Public Pool updated");
@@ -2561,10 +2618,9 @@ export default function Customers() {
                         </td>
                         <td className="px-6 py-4 text-right">
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               claimLead(lead.id, "user");
-                              setPublicLeads(getPublicLeads());
-                              setCustomers(getCustomers());
+                              await Promise.all([refreshPublicLeadPage(), refreshCustomerPage(), refreshCountryStats()]);
                             }}
                             className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors shadow-sm"
                           >

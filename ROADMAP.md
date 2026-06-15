@@ -32,7 +32,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Product records no longer store large WooCommerce payloads in browser `localStorage`.
 - [x] Product local cache uses memory cache to avoid browser quota errors.
 - [x] Bulk delete API added for CRM records to avoid slow per-record delete loops.
-- [~] Add server-side pagination/query APIs for very large datasets, beyond current frontend pagination. First pass added for Customers, Public Pool, and Products.
+- [~] Add server-side pagination/query APIs for very large datasets, beyond current frontend pagination. First pass added for Customers, Public Pool, Products, and Unified Inbox; normalized global country stats API added for Customer Map.
 - [ ] Add database indexes for frequently queried CRM record entities and JSON fields where needed.
 
 ## 2. Customer Management / 客户管理
@@ -52,6 +52,8 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Customer contact methods are visible in list/detail pages.
 - [x] Customer WhatsApp and Email actions deep-link to Unified Inbox compose flows.
 - [x] Customer Map view added with SVG world map and country filtering.
+- [x] Customer/Public Pool Map view uses server-side country counts instead of current-page-only records.
+- [x] Server-side country normalization added for ISO2 codes, aliases, accented names, and common city/state hints.
 - [~] Continue performance tuning for 8k+ lead imports and bulk operations.
 - [ ] Move CSV import to a server-side import job/queue for very large files.
 - [ ] Add import history with failed batch download/retry.
@@ -95,7 +97,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Per-number auto translation for received WhatsApp messages.
 - [x] Per-number outbound translate-before-sending.
 - [~] WhatsApp Actor Hub sync and webhook/SSE refresh support.
-- [ ] Add inbox server-side pagination and search for large mailboxes.
+- [x] Add first-pass inbox server-side pagination and search for large mailboxes.
 - [ ] Add failed sync/retry dashboard for Email and WhatsApp.
 
 ## 5. WhatsApp Actor Hub / WhatsApp 多开中枢
@@ -184,8 +186,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Finish server-side pagination/search by adding Inbox support and dedicated country stats APIs.
-2. Move large CSV import to a backend import job with progress polling and failed-row export.
-3. Add always-on server-side agent scheduler.
-4. Add production health dashboards for WhatsApp, Email, agent runs, and imports.
-5. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.
+1. Move large CSV import to a backend import job with progress polling and failed-row export.
+2. Add always-on server-side agent scheduler.
+3. Add production health dashboards for WhatsApp, Email, agent runs, and imports.
+4. Clean up README Chinese encoding and keep `ROADMAP.md` as the source of progress tracking.

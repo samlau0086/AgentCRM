@@ -132,9 +132,14 @@ export type RecordPage<T> = {
   totalPages: number;
 };
 
+export type CountryCount = {
+  country: string;
+  count: number;
+};
+
 async function loadRecordPageFromServer<T>(
   key: string,
-  options: { page: number; pageSize: number; search?: string; country?: string },
+  options: { page: number; pageSize: number; search?: string; country?: string; channel?: string; mailbox?: string },
 ): Promise<RecordPage<T> | null> {
   const route = SERVER_COLLECTIONS[key];
   if (!route || typeof fetch === "undefined") return null;
@@ -144,6 +149,8 @@ async function loadRecordPageFromServer<T>(
   });
   if (options.search?.trim()) params.set("search", options.search.trim());
   if (options.country?.trim()) params.set("country", options.country.trim());
+  if (options.channel?.trim()) params.set("channel", options.channel.trim());
+  if (options.mailbox?.trim()) params.set("mailbox", options.mailbox.trim());
   const response = await fetch(`${route}?${params.toString()}`);
   if (!response.ok) return null;
   const data = await response.json().catch(() => null);
@@ -155,6 +162,22 @@ async function loadRecordPageFromServer<T>(
     pageSize: Number(data.pageSize || options.pageSize),
     totalPages: Number(data.totalPages || 1),
   };
+}
+
+async function loadCountryCountsFromServer(key: string): Promise<CountryCount[] | null> {
+  const route = SERVER_COLLECTIONS[key];
+  if (!route || typeof fetch === "undefined") return null;
+  const response = await fetch(`${route}/stats/countries`);
+  if (!response.ok) return null;
+  const data = await response.json().catch(() => []);
+  return Array.isArray(data)
+    ? data
+        .map((item) => ({
+          country: String(item?.country || "Unknown"),
+          count: Number(item?.count || 0),
+        }))
+        .filter((item) => item.count > 0)
+    : [];
 }
 
 function cacheRecordList<T>(key: string, records: T[]) {
@@ -262,6 +285,12 @@ export async function loadCustomersPageFromServer(options: { page: number; pageS
   return page;
 }
 
+export async function loadCustomerCountryCountsFromServer() {
+  const stats = await loadCountryCountsFromServer("crm_customers");
+  if (stats) return stats;
+  return [];
+}
+
 export async function loadPublicLeadsFromServer() {
   const leads = await loadRecordListFromServer<PublicLead>("crm_public_leads");
   if (!leads) return getPublicLeads();
@@ -290,6 +319,12 @@ export async function loadPublicLeadsPageFromServer(options: { page: number; pag
     };
   }
   return page;
+}
+
+export async function loadPublicLeadCountryCountsFromServer() {
+  const stats = await loadCountryCountsFromServer("crm_public_leads");
+  if (stats) return stats;
+  return [];
 }
 
 export async function loadAgentsFromServer() {
@@ -1278,6 +1313,30 @@ export async function loadInboxMessagesFromServer() {
   localStorage.setItem("crm_inbox", JSON.stringify(messages));
   notifyDataChanged("crm_inbox");
   return messages;
+}
+
+export async function loadInboxMessagesPageFromServer(options: {
+  page: number;
+  pageSize: number;
+  search?: string;
+  channel?: "all" | "WhatsApp" | "Email";
+  mailbox?: "inbox" | "sent";
+}) {
+  const page = await loadRecordPageFromServer<MessagePreview>("crm_inbox", options);
+  if (!page) {
+    const records = getInboxMessages();
+    return {
+      records,
+      total: records.length,
+      page: options.page,
+      pageSize: options.pageSize,
+      totalPages: Math.max(1, Math.ceil(records.length / options.pageSize)),
+    };
+  }
+  return {
+    ...page,
+    records: page.records.sort((a, b) => Date.parse(b.date || "") - Date.parse(a.date || "")),
+  };
 }
 
 export function addDraftToThread(messageId: string, reply: string) {

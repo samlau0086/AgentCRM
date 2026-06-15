@@ -124,18 +124,216 @@ async function getRecordList(entity: string) {
   });
 }
 
+const ISO2_COUNTRY_CODES = `
+AF AX AL DZ AS AD AO AI AQ AG AR AM AW AU AT AZ BS BH BD BB BY BE BZ BJ BM BT BO BQ BA BW BV BR IO BN BG BF BI KH CM CA CV KY CF TD CL CN CX CC CO KM CG CD CK CR CI HR CU CW CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FK FO FJ FI FR GF PF TF GA GM GE DE GH GI GR GL GD GP GU GT GG GN GW GY HT HM VA HN HK HU IS IN ID IR IQ IE IM IL IT JM JP JE JO KZ KE KI KP KR KW KG LA LV LB LS LR LY LI LT LU MO MG MW MY MV ML MT MH MQ MR MU YT MX FM MD MC MN ME MS MA MZ MM NA NR NP NL NC NZ NI NE NG NU NF MK MP NO OM PK PW PS PA PG PY PE PH PN PL PT PR QA RE RO RU RW BL SH KN LC MF PM VC WS SM ST SA SN RS SC SL SG SX SK SI SB SO ZA GS SS ES LK SD SR SJ SE CH SY TW TJ TZ TH TL TG TK TO TT TN TR TM TC TV UG UA AE GB US UM UY UZ VU VE VN VG VI WF EH YE ZM ZW
+`
+  .trim()
+  .split(/\s+/);
+
+const countryDisplayNames = new Intl.DisplayNames(["en"], { type: "region" });
+
+function countryKey(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+const CANONICAL_COUNTRIES: Record<string, string> = {};
+for (const code of ISO2_COUNTRY_CODES) {
+  const name = countryDisplayNames.of(code);
+  if (name) {
+    CANONICAL_COUNTRIES[countryKey(name)] = name;
+    CANONICAL_COUNTRIES[countryKey(code)] = name;
+  }
+}
+
+const COUNTRY_ALIASES: Record<string, string> = {
+  america: "United States",
+  usa: "United States",
+  u_s_a: "United States",
+  united_states: "United States",
+  united_states_of_america: "United States",
+  uk: "United Kingdom",
+  u_k: "United Kingdom",
+  britain: "United Kingdom",
+  great_britain: "United Kingdom",
+  england: "United Kingdom",
+  scotland: "United Kingdom",
+  wales: "United Kingdom",
+  prc: "China",
+  mainland_china: "China",
+  cn: "China",
+  hk: "Hong Kong",
+  hong_kong_sar: "Hong Kong",
+  mo: "Macau",
+  macao: "Macau",
+  macau: "Macau",
+  korea: "South Korea",
+  south_korea: "South Korea",
+  republic_of_korea: "South Korea",
+  uae: "United Arab Emirates",
+  u_a_e: "United Arab Emirates",
+  ksa: "Saudi Arabia",
+  saudi: "Saudi Arabia",
+  vietnam: "Vietnam",
+  viet_nam: "Vietnam",
+  russia: "Russia",
+  russian_federation: "Russia",
+  iran: "Iran",
+  mexico: "Mexico",
+  brasil: "Brazil",
+  ci: "Cote d'Ivoire",
+  ivory_coast: "Cote d'Ivoire",
+  cote_d_ivoire: "Cote d'Ivoire",
+  cote_divoire: "Cote d'Ivoire",
+  c_te_d_ivoire: "Cote d'Ivoire",
+  czechia: "Czechia",
+  czech_republic: "Czechia",
+  drc: "Congo - Kinshasa",
+  dr_congo: "Congo - Kinshasa",
+  cd: "Democratic Republic of the Congo",
+  democratic_republic_of_the_congo: "Democratic Republic of the Congo",
+  congo_kinshasa: "Democratic Republic of the Congo",
+  cg: "Republic of the Congo",
+  congo_brazzaville: "Republic of the Congo",
+  republic_of_the_congo: "Republic of the Congo",
+  laos: "Laos",
+  moldavia: "Moldova",
+  burma: "Myanmar",
+  palestine: "Palestinian Territories",
+  taiwan: "Taiwan",
+  tr: "Turkey",
+  turkiye: "Turkey",
+  turkey: "Turkey",
+};
+
+const LOCATION_COUNTRY_HINTS: Record<string, string> = {
+  california: "United States",
+  ca: "United States",
+  new_york: "United States",
+  ny: "United States",
+  texas: "United States",
+  tx: "United States",
+  florida: "United States",
+  fl: "United States",
+  washington: "United States",
+  wa: "United States",
+  illinois: "United States",
+  il: "United States",
+  san_francisco: "United States",
+  los_angeles: "United States",
+  chicago: "United States",
+  houston: "United States",
+  miami: "United States",
+  london: "United Kingdom",
+  manchester: "United Kingdom",
+  toronto: "Canada",
+  vancouver: "Canada",
+  ontario: "Canada",
+  quebec: "Canada",
+  sydney: "Australia",
+  melbourne: "Australia",
+  auckland: "New Zealand",
+  singapore: "Singapore",
+  shanghai: "China",
+  beijing: "China",
+  shenzhen: "China",
+  guangzhou: "China",
+  hong_kong: "Hong Kong",
+  tokyo: "Japan",
+  osaka: "Japan",
+  seoul: "South Korea",
+  mumbai: "India",
+  delhi: "India",
+  bangalore: "India",
+  paris: "France",
+  berlin: "Germany",
+  munich: "Germany",
+  madrid: "Spain",
+  barcelona: "Spain",
+  rome: "Italy",
+  milan: "Italy",
+  dubai: "United Arab Emirates",
+  abu_dhabi: "United Arab Emirates",
+  mexico_city: "Mexico",
+  ciudad_de_mexico: "Mexico",
+  cdmx: "Mexico",
+  guadalajara: "Mexico",
+  monterrey: "Mexico",
+  nuevo_leon: "Mexico",
+  jalisco: "Mexico",
+  puebla: "Mexico",
+  queretaro: "Mexico",
+  sao_paulo: "Brazil",
+  rio_de_janeiro: "Brazil",
+  buenos_aires: "Argentina",
+  bogota: "Colombia",
+  medellin: "Colombia",
+  santiago: "Chile",
+  lima: "Peru",
+};
+
+function normalizeCountryName(value = "") {
+  const key = countryKey(value);
+  if (!key) return "";
+  return COUNTRY_ALIASES[key] || CANONICAL_COUNTRIES[key] || "";
+}
+
+function inferCountryFromLocation(value = "") {
+  const parts = String(value || "")
+    .split(/[,|/;\n\r\t]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  for (const part of [...parts].reverse()) {
+    const normalized = normalizeCountryName(part);
+    if (normalized) return normalized;
+    const hint = LOCATION_COUNTRY_HINTS[countryKey(part)];
+    if (hint) return hint;
+  }
+
+  for (const part of parts) {
+    const hint = LOCATION_COUNTRY_HINTS[countryKey(part)];
+    if (hint) return hint;
+  }
+
+  return "";
+}
+
+function recordCountry(data: any) {
+  const explicitCountry = normalizeCountryName(data?.country || "");
+  if (explicitCountry) return explicitCountry;
+  const locationText = [
+    data?.location,
+    data?.address,
+    data?.city,
+    data?.province,
+    data?.state,
+    data?.region,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return inferCountryFromLocation(locationText) || "Unknown";
+}
+
 async function getRecordPage(
   entity: string,
   page: number,
   pageSize: number,
   search = "",
   country = "",
+  filters: Record<string, string> = {},
 ) {
   const safePage = Math.max(1, Math.floor(Number(page) || 1));
   const safePageSize = Math.max(1, Math.min(Math.floor(Number(pageSize) || 50), 200));
   const offset = (safePage - 1) * safePageSize;
   const query = String(search || "").trim().toLowerCase();
-  const countryQuery = String(country || "").trim().toLowerCase();
+  const normalizedCountryQuery = normalizeCountryName(country) || inferCountryFromLocation(country);
 
   return withDb(async (client) => {
     const params: unknown[] = [entity];
@@ -144,9 +342,32 @@ async function getRecordPage(
       params.push(`%${query}%`);
       where += ` AND LOWER(data::text) LIKE $${params.length}`;
     }
-    if (countryQuery) {
-      params.push(`%${countryQuery}%`);
-      where += ` AND LOWER(data::text) LIKE $${params.length}`;
+    if (filters.channel && filters.channel !== "all") {
+      params.push(filters.channel);
+      where += ` AND data->>'channel' = $${params.length}`;
+    }
+    if (filters.mailbox === "sent") {
+      where += ` AND ((data->>'direction') = 'outbound' OR (data->>'intent') = 'Outbound')`;
+    } else if (filters.mailbox === "inbox") {
+      where += ` AND COALESCE(data->>'direction', '') <> 'outbound' AND COALESCE(data->>'intent', '') <> 'Outbound'`;
+    }
+
+    if (normalizedCountryQuery) {
+      const dataResult = await client.query(
+        `SELECT data FROM crm_records ${where} ORDER BY updated_at DESC`,
+        params,
+      );
+      const filteredRecords = dataResult.rows
+        .map((row) => row.data)
+        .filter((record) => recordCountry(record) === normalizedCountryQuery);
+      const total = filteredRecords.length;
+      return {
+        records: filteredRecords.slice(offset, offset + safePageSize),
+        total,
+        page: safePage,
+        pageSize: safePageSize,
+        totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+      };
     }
 
     const countResult = await client.query(
@@ -175,6 +396,23 @@ async function getRecordPage(
       pageSize: safePageSize,
       totalPages: Math.max(1, Math.ceil(total / safePageSize)),
     };
+  });
+}
+
+async function getRecordCountryStats(entity: string) {
+  return withDb(async (client) => {
+    const result = await client.query(
+      "SELECT data FROM crm_records WHERE entity = $1",
+      [entity],
+    );
+    const counts = new Map<string, number>();
+    result.rows.forEach((row) => {
+      const country = recordCountry(row.data || {});
+      counts.set(country, (counts.get(country) || 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .map(([country, count]) => ({ country, count }))
+      .sort((a, b) => b.count - a.count || a.country.localeCompare(b.country));
   });
 }
 
@@ -581,10 +819,23 @@ function crudRoutes(entity: string, route: string) {
           Number(req.query.pageSize || 50),
           String(req.query.search || ""),
           String(req.query.country || ""),
+          {
+            channel: String(req.query.channel || ""),
+            mailbox: String(req.query.mailbox || ""),
+          },
         ));
         return;
       }
       res.json(await getRecordList(entity));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get(`${route}/stats/countries`, async (_req, res) => {
+    if (!requireDatabase(res)) return;
+    try {
+      res.json(await getRecordCountryStats(entity));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
