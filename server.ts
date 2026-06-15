@@ -900,6 +900,49 @@ async function initDB() {
       );
     `);
 
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_crm_records_entity_updated
+      ON crm_records (entity, updated_at DESC);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_crm_records_entity_created
+      ON crm_records (entity, created_at DESC);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_crm_records_entity_channel
+      ON crm_records (entity, (data->>'channel'));
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_crm_records_entity_direction
+      ON crm_records (entity, (data->>'direction'));
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_crm_records_entity_intent
+      ON crm_records (entity, (data->>'intent'));
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_crm_records_agent_runs_status
+      ON crm_records ((data->>'status'), updated_at DESC)
+      WHERE entity = 'agent_runs';
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_crm_records_import_jobs_status
+      ON crm_records ((data->>'status'), updated_at DESC)
+      WHERE entity = 'import_jobs';
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_crm_records_operation_events_time_order
+      ON crm_records ((data->>'timestamp') DESC, updated_at DESC)
+      WHERE entity = 'operation_events';
+    `);
+
     const count = await client.query("SELECT COUNT(*) FROM system_users");
     if (Number(count.rows[0].count) === 0) {
       const defaultPassword = await bcrypt.hash("password", 10);
@@ -4605,7 +4648,10 @@ type OperationsLog = {
   metadata?: Record<string, unknown>;
 };
 
-const OPERATION_EVENT_RETENTION = Math.max(1000, Number(process.env.OPERATION_EVENT_RETENTION || 5000));
+const operationEventRetentionValue = Number(process.env.OPERATION_EVENT_RETENTION || 5000);
+const OPERATION_EVENT_RETENTION = Number.isFinite(operationEventRetentionValue)
+  ? Math.max(1000, Math.floor(operationEventRetentionValue))
+  : 5000;
 
 function operationEventId(module: OperationsLog["module"]) {
   return `event_${module}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -4645,7 +4691,7 @@ async function pruneOperationEvents() {
             SELECT id
             FROM crm_records
             WHERE entity = 'operation_events'
-            ORDER BY COALESCE((data->>'timestamp')::timestamptz, updated_at) DESC
+            ORDER BY data->>'timestamp' DESC NULLS LAST, updated_at DESC
             LIMIT $1
           );
         `,
@@ -4655,6 +4701,30 @@ async function pruneOperationEvents() {
   } catch (err) {
     console.warn("[operation-events] failed to prune events:", err);
   }
+}
+
+async function getRecentOperationEvents(limit = 1000) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 1000, OPERATION_EVENT_RETENTION));
+  return withDb(async (client) => {
+    const result = await client.query(
+      `
+      SELECT data
+      FROM crm_records
+      WHERE entity = 'operation_events'
+      ORDER BY data->>'timestamp' DESC NULLS LAST, updated_at DESC
+      LIMIT $1
+      `,
+      [safeLimit],
+    );
+    return result.rows.map((row) => row.data);
+  });
+}
+
+async function countOperationEvents() {
+  return withDb(async (client) => {
+    const result = await client.query("SELECT COUNT(*) FROM crm_records WHERE entity = 'operation_events'");
+    return Number(result.rows[0]?.count || 0);
+  });
 }
 
 function severityFromStatus(status = ""): OperationsLog["severity"] {
@@ -4683,11 +4753,13 @@ async function buildOperationsLogs(options: {
   search?: string;
   limit?: number;
 }) {
+  const requestedLimit = Math.max(1, Math.min(Number(options.limit || 100), 500));
+  const storedEventLimit = Math.max(500, Math.min(OPERATION_EVENT_RETENTION, requestedLimit * 8));
   const [agentRuns, importJobs, inboxMessages, storedEvents] = await Promise.all([
     getRecordList("agent_runs"),
     getRecordList("import_jobs"),
     getRecordList("inbox_messages"),
-    getRecordList("operation_events").catch(() => []),
+    getRecentOperationEvents(storedEventLimit).catch(() => []),
   ]);
 
   const logs: OperationsLog[] = [];
@@ -4817,10 +4889,9 @@ async function buildOperationsLogs(options: {
     .filter((log) => !severityFilter || log.severity === severityFilter)
     .filter((log) => !search || logSearchText(log).includes(search))
     .sort((a, b) => (Date.parse(b.timestamp) || 0) - (Date.parse(a.timestamp) || 0));
-  const limit = Math.max(1, Math.min(Number(options.limit || 100), 500));
   return {
     total: filtered.length,
-    logs: filtered.slice(0, limit),
+    logs: filtered.slice(0, requestedLimit),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -4843,8 +4914,8 @@ app.post("/api/operations/events/prune", async (_req, res) => {
   if (!requireDatabase(res)) return;
   try {
     await pruneOperationEvents();
-    const remaining = await getRecordList("operation_events");
-    res.json({ success: true, retained: remaining.length, retention: OPERATION_EVENT_RETENTION });
+    const retained = await countOperationEvents();
+    res.json({ success: true, retained, retention: OPERATION_EVENT_RETENTION });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to prune operation events." });
   }

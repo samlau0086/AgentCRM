@@ -33,7 +33,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Product local cache uses memory cache to avoid browser quota errors.
 - [x] Bulk delete API added for CRM records to avoid slow per-record delete loops.
 - [~] Add server-side pagination/query APIs for very large datasets, beyond current frontend pagination. First pass added for Customers, Public Pool, Products, and Unified Inbox; normalized global country stats API added for Customer Map.
-- [ ] Add database indexes for frequently queried CRM record entities and JSON fields where needed.
+- [x] Add database indexes for frequently queried CRM record entities and JSON fields where needed.
 
 ## 2. Customer Management / 客户管理
 
@@ -181,6 +181,7 @@ This roadmap is used to keep implementation progress visible across iterations.
 - [x] Add first-pass production health dashboard for Email, WhatsApp, agent runs, imports, and lead-platform collection jobs.
 - [x] Add first-pass searchable production logs/event history dashboard.
 - [x] Add first-pass persistent operation event storage with retention pruning.
+- [x] Add first-pass CRM record indexes for high-volume list, inbox, import, agent-run, and operations-log queries.
 
 ## 11. Documentation / 文档
 
@@ -195,6 +196,6 @@ This roadmap is used to keep implementation progress visible across iterations.
 
 ## Recommended Next Milestones / 建议下一阶段
 
-1. Add database indexes for high-volume CRM record queries.
-2. Add provider health checks for configured AI model profiles.
-3. Add richer operation event detail views and export.
+1. Add provider health checks for configured AI model profiles.
+2. Add richer operation event detail views and export.
+3. Add WooCommerce import retry/skip progress similar to Public Pool CSV import.

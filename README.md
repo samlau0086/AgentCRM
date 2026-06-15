@@ -78,6 +78,10 @@ Database-backed data includes:
 - Email receive/send profiles, account mappings, and signatures
 - CSV import jobs and failed-row retry records
 
+The backend creates first-pass indexes for high-volume `crm_records` queries, including entity list ordering, channel/direction/intent filters, import-job status, agent-run status, and operation-event timestamps. Production Logs also read only recent persisted events instead of loading the full event table.
+
+后端会自动创建第一批高频 `crm_records` 查询索引，包括实体列表排序、channel/direction/intent 筛选、导入任务状态、智能体运行状态和运维事件时间排序。Production Logs 现在只读取最近的持久化事件，不再每次加载完整事件表。
+
 ### Main Features
 
 - **Dashboard**: CRM metrics, unread messages, estimated revenue, pending work, and a GitHub-style contribution chart.
